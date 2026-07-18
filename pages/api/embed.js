@@ -178,11 +178,100 @@ async function fetchPolymarkets(sportFilter = "all") {
 
 // ── Main handler ───────────────────────────────────────────────
 export default async function handler(req, res) {
-  const force = req.query.force === "1";
-  const sport = req.query.sport || "all"; // filter to one sport to avoid timeout
+  const force     = req.query.force     === "1";
+  const matchOnly = req.query.matchonly === "1";
+  const sport     = req.query.sport || "all";
+  const THRESHOLD = parseFloat(req.query.threshold || "0.75");
 
   try {
-    // 1. Fetch live markets — filtered by sport if specified
+    // MATCH-ONLY MODE: skip embedding, just re-run cosine similarity
+    // on markets already stored in Supabase. Use this after changing
+    // the threshold or to re-pair markets without re-embedding.
+    // Usage: /api/embed?matchonly=1&sport=mlb&threshold=0.75
+    if (matchOnly) {
+      const sportFilter = sport === "all" ? null : sport;
+
+      let kalshiQuery = supabase
+        .from("markets")
+        .select("id, title, sport_tag, embedding")
+        .eq("platform", "kalshi")
+        .not("embedding", "is", null);
+      if (sportFilter) kalshiQuery = kalshiQuery.eq("sport_tag", sportFilter);
+      const { data: kalshiDb } = await kalshiQuery;
+
+      const { data: polyDb } = await supabase
+        .from("markets")
+        .select("id, title, sport_tag, embedding")
+        .eq("platform", "polymarket")
+        .not("embedding", "is", null);
+
+      // Clear existing pairs for this sport so we can re-match cleanly
+      if (sportFilter) {
+        const kalshiIds = (kalshiDb || []).map(m => m.id);
+        if (kalshiIds.length > 0) {
+          await supabase.from("pairs").delete().in("kalshi_id", kalshiIds);
+        }
+      } else if (force) {
+        await supabase.from("pairs").delete().neq("id", 0);
+      }
+
+      const usedPolyIds = new Set();
+      const newPairs = [];
+
+      const polyEmbedded = (polyDb || []).map(m => ({
+        ...m,
+        _vec: JSON.parse(m.embedding),
+      }));
+
+      for (const km of (kalshiDb || [])) {
+        const kVec = JSON.parse(km.embedding);
+        let bestMatch = null;
+        let bestScore = 0;
+
+        for (const pm of polyEmbedded) {
+          if (usedPolyIds.has(pm.id)) continue;
+          const score = cosineSimilarity(kVec, pm._vec);
+          if (score > bestScore && score >= THRESHOLD) {
+            bestScore = score;
+            bestMatch = pm;
+          }
+        }
+
+        if (bestMatch) {
+          newPairs.push({
+            kalshi_id:     km.id,
+            polymarket_id: bestMatch.id,
+            similarity:    bestScore,
+            created_at:    Math.floor(Date.now() / 1000),
+          });
+          usedPolyIds.add(bestMatch.id);
+        }
+      }
+
+      if (newPairs.length > 0) {
+        for (let i = 0; i < newPairs.length; i += 50) {
+          await supabase.from("pairs").upsert(newPairs.slice(i, i + 50), {
+            onConflict: "kalshi_id,polymarket_id",
+          });
+        }
+      }
+
+      const { count } = await supabase
+        .from("pairs")
+        .select("*", { count: "exact", head: true });
+
+      return res.status(200).json({
+        mode:       "match-only",
+        sport,
+        threshold:  THRESHOLD,
+        kalshiCount: (kalshiDb || []).length,
+        polyCount:   (polyDb || []).length,
+        newPairs:    newPairs.length,
+        totalPairs:  count || 0,
+      });
+    }
+
+    // NORMAL MODE: fetch markets, embed new ones, then match
     const [kalshiRaw, polyRaw] = await Promise.all([
       fetchKalshiMarkets(sport),
       fetchPolymarkets(sport),
@@ -262,7 +351,7 @@ export default async function handler(req, res) {
     }));
 
     // 8. Match via cosine similarity
-    const THRESHOLD = 0.75;
+    const THRESHOLD = 0.85;
     const newPairs = [];
 
     for (const km of kalshiToMatch) {
