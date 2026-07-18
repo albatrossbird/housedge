@@ -351,7 +351,6 @@ export default async function handler(req, res) {
     }));
 
     // 8. Match via cosine similarity
-    const THRESHOLD = 0.85;
     const newPairs = [];
 
     for (const km of kalshiToMatch) {
