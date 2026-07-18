@@ -1,5 +1,15 @@
 // pages/api/embed.js
 // Embedding + matching engine using Voyage AI + Supabase
+// 
+// USAGE:
+//   /api/embed?sport=mlb     — embed + match MLB only
+//   /api/embed?sport=soccer  — embed + match soccer only
+//   /api/embed?sport=nba     — embed + match NBA only
+//   /api/embed?sport=nhl     — embed + match NHL only
+//   /api/embed?sport=all     — embed everything (may timeout on Vercel)
+//   /api/embed?force=1       — re-embed even already-stored markets
+//
+// Run one sport at a time to stay within Vercel's 60s timeout.
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -64,7 +74,11 @@ const KALSHI_SERIES = [
   { ticker: "KXPRES",      sport: "politics" },
 ];
 
-async function fetchKalshiMarkets() {
+async function fetchKalshiMarkets(sportFilter = "all") {
+  const series = sportFilter === "all"
+    ? KALSHI_SERIES
+    : KALSHI_SERIES.filter(s => s.sport === sportFilter);
+
   const results = await Promise.all(
     KALSHI_SERIES.map(async ({ ticker, sport }) => {
       const r = await fetch(
@@ -103,7 +117,11 @@ const POLY_TAGS = [
   { tag: "100381", sport: "mlb"    },
 ];
 
-async function fetchPolymarkets() {
+async function fetchPolymarkets(sportFilter = "all") {
+  const tags = sportFilter === "all"
+    ? POLY_TAGS
+    : POLY_TAGS.filter(t => t.sport === sportFilter);
+
   const results = await Promise.all(
     POLY_TAGS.map(async ({ tag, sport }) => {
       const events = [];
@@ -161,12 +179,13 @@ async function fetchPolymarkets() {
 // ── Main handler ───────────────────────────────────────────────
 export default async function handler(req, res) {
   const force = req.query.force === "1";
+  const sport = req.query.sport || "all"; // filter to one sport to avoid timeout
 
   try {
-    // 1. Fetch live markets from both platforms
+    // 1. Fetch live markets — filtered by sport if specified
     const [kalshiRaw, polyRaw] = await Promise.all([
-      fetchKalshiMarkets(),
-      fetchPolymarkets(),
+      fetchKalshiMarkets(sport),
+      fetchPolymarkets(sport),
     ]);
     const allMarkets = [...kalshiRaw, ...polyRaw];
 
