@@ -59,6 +59,60 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
+// ── Team name expansion map ────────────────────────────────────
+// Kalshi abbreviates same-city teams with a single letter suffix
+// (e.g. "Los Angeles A" for Angels, "Chicago C" for Cubs). The
+// embedding model can't distinguish these from other LA/Chicago teams
+// since the disambiguating letter gets lost in a short title.
+// Expanding to full names BEFORE embedding fixes this at the root —
+// "St. Louis vs Los Angeles A" → "St. Louis Cardinals vs Los Angeles Angels"
+// now correctly produces a different vector from
+// "St. Louis Cardinals vs Arizona Diamondbacks".
+const TEAM_EXPANSIONS = {
+  // MLB — same-city teams with letter suffix
+  "los angeles a":  "Los Angeles Angels",
+  "los angeles d":  "Los Angeles Dodgers",
+  "new york y":     "New York Yankees",
+  "new york m":     "New York Mets",
+  "chicago c":      "Chicago Cubs",
+  "chicago w":      "Chicago White Sox",
+  // Common Kalshi city-only abbreviations → full team names
+  "st. louis":      "St. Louis Cardinals",
+  "san francisco":  "San Francisco Giants",
+  "san diego":      "San Diego Padres",
+  "kansas city":    "Kansas City Royals",
+  "tampa bay":      "Tampa Bay Rays",
+  "arizona":        "Arizona Diamondbacks",
+  "colorado":       "Colorado Rockies",
+  "miami":          "Miami Marlins",
+  "milwaukee":      "Milwaukee Brewers",
+  "minnesota":      "Minnesota Twins",
+  "pittsburgh":     "Pittsburgh Pirates",
+  "cincinnati":     "Cincinnati Reds",
+  "cleveland":      "Cleveland Guardians",
+  "detroit":        "Detroit Tigers",
+  "toronto":        "Toronto Blue Jays",
+  "seattle":        "Seattle Mariners",
+  "oakland":        "Oakland Athletics",
+  "texas":          "Texas Rangers",
+  "houston":        "Houston Astros",
+  "baltimore":      "Baltimore Orioles",
+  "boston":         "Boston Red Sox",
+  "washington":     "Washington Nationals",
+  "philadelphia":   "Philadelphia Phillies",
+  "atlanta":        "Atlanta Braves",
+};
+
+function expandTeamNames(title) {
+  let expanded = title;
+  for (const [abbr, full] of Object.entries(TEAM_EXPANSIONS)) {
+    // Case-insensitive whole-word replacement
+    const regex = new RegExp(`\\b${abbr}\\b`, "gi");
+    expanded = expanded.replace(regex, full);
+  }
+  return expanded;
+}
+
 // ── Fetch Kalshi markets ───────────────────────────────────────
 const KALSHI_SERIES = [
   { ticker: "KXWCGAME",    sport: "soccer"   },
@@ -91,7 +145,7 @@ async function fetchKalshiMarkets(sportFilter = "all") {
         .map(m => ({
           id:           m.ticker,
           platform:     "kalshi",
-          title:        m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title,
+          title:        expandTeamNames(m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
           yes_price:    m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:     m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
           volume:       parseFloat(m.volume_24h_fp || m.volume_fp || 0),
