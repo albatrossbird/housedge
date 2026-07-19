@@ -230,6 +230,14 @@ export default async function handler(req, res) {
 
         for (const pm of polyEmbedded) {
           if (usedPolyIds.has(pm.id)) continue;
+
+          // HARD GATE: sport tags must match exactly — embeddings alone
+          // can't reliably distinguish "A's vs Arizona" (MLB) from
+          // "New York City FC vs LA FC" (soccer) when titles are short
+          // and share city names. Sport tag is always reliable since it
+          // comes from the specific API series/tag we fetched from.
+          if (km.sport_tag !== pm.sport_tag) continue;
+
           const score = cosineSimilarity(kVec, pm._vec);
           if (score > bestScore && score >= THRESHOLD) {
             bestScore = score;
@@ -360,6 +368,10 @@ export default async function handler(req, res) {
 
       for (const pm of polyEmbedded) {
         if (usedPolyIds.has(pm.id)) continue;
+
+        // HARD GATE: sport tags must match exactly
+        if (km.sport_tag !== pm.sport_tag) continue;
+
         const score = cosineSimilarity(kVec, pm._vec);
         if (score > bestScore && score >= THRESHOLD) {
           bestScore = score;
