@@ -190,20 +190,44 @@ function teamsMatch(kTeams, pTeams) {
   return matches >= Math.min(kSet.size, pSet.size);
 }
 
-// Extract YYYY-MM-DD from a string (slug, close_time, etc.)
+// Extract YYYY-MM-DD from a string (slug, close_time, ticker, etc.)
+// Handles multiple formats:
+//   - ISO: "2026-07-19T22:40:00Z" → "2026-07-19"
+//   - Slug: "mlb-stl-laa-2026-07-19-..." → "2026-07-19"
+//   - Kalshi ticker: "KXMLBGAME-26JUL191915CWSTOR" → "2026-07-19"
+const MONTH_MAP = {
+  JAN:"01",FEB:"02",MAR:"03",APR:"04",MAY:"05",JUN:"06",
+  JUL:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12"
+};
+
 function extractDate(str) {
   if (!str) return null;
-  const match = String(str).match(/\d{4}-\d{2}-\d{2}/);
-  return match ? match[0] : null;
+  const s = String(str).toUpperCase();
+
+  // Try ISO format first: 2026-07-19
+  const isoMatch = s.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1].toLowerCase();
+
+  // Try Kalshi ticker format: 26JUL19 → 2026-07-19
+  const tickerMatch = s.match(/(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})/);
+  if (tickerMatch) {
+    const year = `20${tickerMatch[1]}`;
+    const month = MONTH_MAP[tickerMatch[2]];
+    const day = tickerMatch[3].padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return null;
 }
 
 // Check if two dates are within 1 day of each other
-// (handles UTC vs local timezone edge cases for late-night games)
+// 1-day buffer handles UTC vs ET timezone edge cases for late-night games
+// but blocks 3+ day gaps like "Cardinals vs Angels today" vs "tomorrow"
 function datesCompatible(d1, d2) {
-  if (!d1 || !d2) return true; // if either date is missing, don't block
+  if (!d1 || !d2) return true; // if either date missing, don't block
   const t1 = new Date(d1).getTime();
   const t2 = new Date(d2).getTime();
-  return Math.abs(t1 - t2) <= 86400000; // 1 day in ms
+  return Math.abs(t1 - t2) <= 86400000; // max 1 day apart
 }
 
 // ── Sports-specific structured matching ────────────────────────
@@ -217,8 +241,9 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
     const kTeams = extractKalshiTeams(km.title || "");
     if (!kTeams) continue;
 
-    // Extract Kalshi game date from close_time
-    const kDate = extractDate(km.close_time);
+    // Extract Kalshi game date from ticker (most reliable — always present)
+    // e.g. "KXMLBGAME-26JUL191915CWSTOR" → "2026-07-19"
+    const kDate = extractDate(km.id) || extractDate(km.close_time);
 
     let bestMatch = null;
     let bestScore = 0;
