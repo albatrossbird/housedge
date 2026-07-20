@@ -190,11 +190,25 @@ function teamsMatch(kTeams, pTeams) {
   return matches >= Math.min(kSet.size, pSet.size);
 }
 
+// Extract YYYY-MM-DD from a string (slug, close_time, etc.)
+function extractDate(str) {
+  if (!str) return null;
+  const match = String(str).match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : null;
+}
+
+// Check if two dates are within 1 day of each other
+// (handles UTC vs local timezone edge cases for late-night games)
+function datesCompatible(d1, d2) {
+  if (!d1 || !d2) return true; // if either date is missing, don't block
+  const t1 = new Date(d1).getTime();
+  const t2 = new Date(d2).getTime();
+  return Math.abs(t1 - t2) <= 86400000; // 1 day in ms
+}
+
 // ── Sports-specific structured matching ────────────────────────
 // Extracts team names from both sides and requires BOTH to match.
-// This replaces embedding-based matching for sports since short
-// matchup titles don't give embeddings enough semantic signal to
-// reliably distinguish "Cardinals vs Angels" from "Cardinals vs Diamondbacks".
+// Also checks game date to prevent matching same teams on different days.
 function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   const matched = [];
   const usedPolyIds = new Set();
@@ -202,6 +216,9 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   for (const km of kalshiMarkets) {
     const kTeams = extractKalshiTeams(km.title || "");
     if (!kTeams) continue;
+
+    // Extract Kalshi game date from close_time
+    const kDate = extractDate(km.close_time);
 
     let bestMatch = null;
     let bestScore = 0;
@@ -213,8 +230,14 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
       const pTeams = extractPolyTeams(pm.title || "");
       if (!teamsMatch(kTeams, pTeams)) continue;
 
-      // Teams match — score by how many markets share both teams
-      // (prefer moneyline over prop bets for same matchup)
+      // Extract Polymarket game date from slug
+      const pDate = extractDate(pm.slug);
+
+      // HARD GATE: dates must be within 1 day of each other
+      // Prevents "Cardinals vs Angels tomorrow" matching
+      // "Cardinals vs Angels today" — same teams, wrong game
+      if (!datesCompatible(kDate, pDate)) continue;
+
       const isMoneyline = !pm.title.toLowerCase().includes("inning") &&
                           !pm.title.toLowerCase().includes("o/u") &&
                           !pm.title.toLowerCase().includes("tied") &&
@@ -374,7 +397,7 @@ export default async function handler(req, res) {
 
       let kalshiQuery = supabase
         .from("markets")
-        .select("id, title, sport_tag, embedding, side_label")
+        .select("id, title, sport_tag, embedding, side_label, close_time")
         .eq("platform", "kalshi")
       if (sportFilter) kalshiQuery = kalshiQuery.eq("sport_tag", sportFilter);
       const { data: kalshiDb } = await kalshiQuery;
@@ -506,7 +529,7 @@ export default async function handler(req, res) {
     if (isSport) {
       // Structured team matching for sports
       const { data: kalshiDb } = await supabase
-        .from("markets").select("id, title, sport_tag, side_label")
+        .from("markets").select("id, title, sport_tag, side_label, close_time")
         .eq("platform", "kalshi").eq("sport_tag", sport);
       const { data: polyDb } = await supabase
         .from("markets").select("id, title, sport_tag, side_label, outcomes, outcome_prices, slug")
