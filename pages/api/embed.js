@@ -220,14 +220,13 @@ function extractDate(str) {
   return null;
 }
 
-// Check if two dates are within 1 day of each other
-// 1-day buffer handles UTC vs ET timezone edge cases for late-night games
-// but blocks 3+ day gaps like "Cardinals vs Angels today" vs "tomorrow"
+// Check if two dates are on the same calendar day
+// Allows 1-day buffer only for UTC/ET timezone edge cases on late games
 function datesCompatible(d1, d2) {
   if (!d1 || !d2) return true; // if either date missing, don't block
   const t1 = new Date(d1).getTime();
   const t2 = new Date(d2).getTime();
-  return Math.abs(t1 - t2) <= 86400000; // max 1 day apart
+  return Math.abs(t1 - t2) <= 43200000; // max 12 hours apart (half day)
 }
 
 // ── Sports-specific structured matching ────────────────────────

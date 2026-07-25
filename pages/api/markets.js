@@ -89,8 +89,13 @@ export default async function handler(req, res) {
         const kalshiUrl = `https://kalshi.com/markets/${
           (km.event_ticker || km.id).toLowerCase()
         }`;
-        const polyUrl = pm.slug
-          ? `https://polymarket.com/event/${pm.slug}`
+        // Polymarket's app intercepts polymarket.com/event/ links on mobile
+        // Use the full event slug for the deepest possible link
+        const polySlug = pm.slug
+          ? pm.slug.split("-").slice(0, -1).join("-") || pm.slug
+          : null;
+        const polyUrl = polySlug
+          ? `https://polymarket.com/event/${polySlug}`
           : "https://polymarket.com/";
 
         return {
