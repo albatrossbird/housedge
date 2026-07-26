@@ -71,15 +71,33 @@ export default async function handler(req, res) {
 
         // Find correct Polymarket outcome index for our side
         let pYes = pm.yes_price;
-        if (km.side_label && pm.outcomes && pm.outcome_prices) {
+        if (pm.outcomes && pm.outcome_prices) {
           try {
             const outcomes = JSON.parse(pm.outcomes);
             const prices   = JSON.parse(pm.outcome_prices);
-            const sideKw   = km.side_label.toLowerCase()
+
+            // Try matching side_label first (most specific)
+            // Then fall back to matching against Kalshi title's side
+            const sideToMatch = km.side_label || "";
+            const titleSide = (km.title || "").split("—").pop().trim();
+            const searchText = sideToMatch || titleSide;
+
+            const sideKw = searchText.toLowerCase()
               .split(/\W+/).filter(w => w.length > 2);
-            const idx = outcomes.findIndex(o =>
+
+            let idx = outcomes.findIndex(o =>
               sideKw.some(w => o.toLowerCase().includes(w))
             );
+
+            // If no match found, try matching full team name from title
+            if (idx === -1 && titleSide) {
+              const titleKw = titleSide.toLowerCase()
+                .split(/\W+/).filter(w => w.length > 2);
+              idx = outcomes.findIndex(o =>
+                titleKw.some(w => o.toLowerCase().includes(w))
+              );
+            }
+
             if (idx >= 0 && prices[idx] != null) {
               pYes = parseFloat(prices[idx]);
             }
