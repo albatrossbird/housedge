@@ -118,9 +118,12 @@ export default async function handler(req, res) {
       })
       .filter(m => {
         // 1. Filter out markets with no valid prices
+        // Use wider buffer (0.05/0.95) to catch near-resolved Polymarket
+        // markets where price hasn't fully snapped to 0/1 yet but is
+        // clearly resolved (e.g. 0.04 or 0.96 after game ends)
         if (!m.kalshi.yes || !m.poly.yes) return false;
-        if (m.kalshi.yes <= 0.01 || m.kalshi.yes >= 0.99) return false;
-        if (m.poly.yes   <= 0.01 || m.poly.yes   >= 0.99) return false;
+        if (m.kalshi.yes <= 0.05 || m.kalshi.yes >= 0.95) return false;
+        if (m.poly.yes   <= 0.05 || m.poly.yes   >= 0.95) return false;
 
         // 2. Filter out completed/past games using ticker date
         // Games from yesterday or earlier shouldn't show — Kalshi sometimes

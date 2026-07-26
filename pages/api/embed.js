@@ -220,13 +220,14 @@ function extractDate(str) {
   return null;
 }
 
-// Check if two dates are on the same calendar day
-// Allows 1-day buffer only for UTC/ET timezone edge cases on late games
+// Check if two dates are close enough to be the same game
+// 6-hour window handles UTC/ET differences for games listed near midnight
+// but blocks yesterday's completed game from matching tomorrow's game
 function datesCompatible(d1, d2) {
   if (!d1 || !d2) return true; // if either date missing, don't block
   const t1 = new Date(d1).getTime();
   const t2 = new Date(d2).getTime();
-  return Math.abs(t1 - t2) <= 43200000; // max 12 hours apart (half day)
+  return Math.abs(t1 - t2) <= 21600000; // max 6 hours apart
 }
 
 // ── Sports-specific structured matching ────────────────────────
@@ -266,7 +267,15 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
                           !pm.title.toLowerCase().includes("o/u") &&
                           !pm.title.toLowerCase().includes("tied") &&
                           !pm.title.toLowerCase().includes("score");
-      const score = isMoneyline ? 1.0 : 0.9;
+
+      // Score = moneyline bonus + date proximity bonus
+      // Prefer the candidate whose date is closest to Kalshi's game date
+      const pDate = extractDate(pm.slug);
+      const dateDiff = (kDate && pDate)
+        ? Math.abs(new Date(kDate).getTime() - new Date(pDate).getTime())
+        : Infinity;
+      const dateScore = dateDiff === Infinity ? 0 : 1 - (dateDiff / 86400000);
+      const score = (isMoneyline ? 1.0 : 0.9) + (dateScore * 0.1);
 
       if (score > bestScore) {
         bestScore = score;
