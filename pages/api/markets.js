@@ -1,6 +1,6 @@
 // pages/api/markets.js (v2 — Supabase-based)
 // Fast path: reads confirmed pairs from Supabase, returns shaped data.
-// No embedding, no matching. Runs on every 60s frontend refresh.
+// Uses two separate queries instead of nested join to avoid RLS issues.
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -16,7 +16,6 @@ const SPORT_TAGS = {
   politics:  ["politics"],
 };
 
-// Parse Kalshi ticker date format: "26JUL19" → Date object
 const MONTH_MAP = {
   JAN:"01",FEB:"02",MAR:"03",APR:"04",MAY:"05",JUN:"06",
   JUL:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12"
@@ -37,37 +36,51 @@ export default async function handler(req, res) {
   if (!tags) return res.status(400).json({ error: `Unknown category: ${category}` });
 
   try {
-    // Get today's date at midnight UTC for filtering past games
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-
-    // Pull confirmed pairs where Kalshi market is in this category
-    const { data: pairs, error } = await supabase
+    // Step 1: Get all pairs
+    const { data: pairs, error: pairsError } = await supabase
       .from("pairs")
-      .select(`
-        similarity,
-        kalshi:kalshi_id (
-          id, title, yes_price, no_price, volume,
-          sport_tag, event_ticker, side_label, close_time
-        ),
-        poly:polymarket_id (
-          id, title, yes_price, no_price, volume,
-          slug, side_label, outcomes, outcome_prices
-        )
-      `)
+      .select("id, kalshi_id, polymarket_id, similarity")
       .order("similarity", { ascending: false });
 
-    if (error) throw error;
+    if (pairsError) throw pairsError;
+    if (!pairs || pairs.length === 0) {
+      return res.status(200).json({ pairs: [], needsEmbed: true });
+    }
 
-    // Get today at midnight for date filtering
+    // Step 2: Get all Kalshi markets for these pairs
+    const kalshiIds = pairs.map(p => p.kalshi_id);
+    const { data: kalshiMarkets, error: kalshiError } = await supabase
+      .from("markets")
+      .select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time")
+      .in("id", kalshiIds)
+      .in("sport_tag", tags);
+
+    if (kalshiError) throw kalshiError;
+
+    // Step 3: Get all Polymarket markets for these pairs
+    const kalshiById = Object.fromEntries((kalshiMarkets || []).map(m => [m.id, m]));
+    const filteredPairs = pairs.filter(p => kalshiById[p.kalshi_id]);
+    const polyIds = filteredPairs.map(p => p.polymarket_id);
+
+    const { data: polyMarkets, error: polyError } = await supabase
+      .from("markets")
+      .select("id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices")
+      .in("id", polyIds);
+
+    if (polyError) throw polyError;
+
+    const polyById = Object.fromEntries((polyMarkets || []).map(m => [m.id, m]));
+
+    // Step 4: Join and shape
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
     const todayMs = today.getTime();
 
-    const shaped = (pairs || [])
-      .filter(p => p.kalshi && p.poly)
-      .filter(p => tags.includes(p.kalshi.sport_tag))
+    const shaped = filteredPairs
+      .filter(p => kalshiById[p.kalshi_id] && polyById[p.polymarket_id])
       .map(p => {
-        const km = p.kalshi;
-        const pm = p.poly;
+        const km = kalshiById[p.kalshi_id];
+        const pm = polyById[p.polymarket_id];
 
         // Find correct Polymarket outcome index for our side
         let pYes = pm.yes_price;
@@ -75,13 +88,9 @@ export default async function handler(req, res) {
           try {
             const outcomes = JSON.parse(pm.outcomes);
             const prices   = JSON.parse(pm.outcome_prices);
-
-            // Try matching side_label first (most specific)
-            // Then fall back to matching against Kalshi title's side
             const sideToMatch = km.side_label || "";
             const titleSide = (km.title || "").split("—").pop().trim();
             const searchText = sideToMatch || titleSide;
-
             const sideKw = searchText.toLowerCase()
               .split(/\W+/).filter(w => w.length > 2);
 
@@ -89,7 +98,6 @@ export default async function handler(req, res) {
               sideKw.some(w => o.toLowerCase().includes(w))
             );
 
-            // If no match found, try matching full team name from title
             if (idx === -1 && titleSide) {
               const titleKw = titleSide.toLowerCase()
                 .split(/\W+/).filter(w => w.length > 2);
@@ -101,13 +109,12 @@ export default async function handler(req, res) {
             if (idx >= 0 && prices[idx] != null) {
               pYes = parseFloat(prices[idx]);
             }
-          } catch { /* fall back to stored yes_price */ }
+          } catch { /* fall back */ }
         }
 
         const kalshiUrl = `https://kalshi.com/markets/${
           (km.event_ticker || km.id).toLowerCase()
         }`;
-        // Use full slug directly - Polymarket app intercepts these links on mobile
         const polyUrl = pm.slug
           ? `https://polymarket.com/event/${pm.slug}`
           : "https://polymarket.com/";
@@ -118,40 +125,30 @@ export default async function handler(req, res) {
           polyTitle:  pm.title,
           similarity: p.similarity,
           category:   km.sport_tag,
-          _gameDate:  extractTickerDate(km.id), // for filtering, not displayed
+          _gameDate:  extractTickerDate(km.id),
           kalshi: {
             yes:    km.yes_price,
             no:     km.no_price,
-            volume: km.volume,
+            volume: km.volume || 0,
             url:    kalshiUrl,
           },
           poly: {
             yes:    pYes,
             no:     1 - pYes,
-            volume: pm.volume,
+            volume: pm.volume || 0,
             url:    polyUrl,
           },
-          trending: (km.volume + pm.volume) > 5000,
+          trending: ((km.volume || 0) + (pm.volume || 0)) > 5000,
         };
       })
       .filter(m => {
-        // 1. Filter out markets with no valid prices
-        // Use wider buffer (0.05/0.95) to catch near-resolved Polymarket
-        // markets where price hasn't fully snapped to 0/1 yet but is
-        // clearly resolved (e.g. 0.04 or 0.96 after game ends)
         if (!m.kalshi.yes || !m.poly.yes) return false;
         if (m.kalshi.yes <= 0.05 || m.kalshi.yes >= 0.95) return false;
         if (m.poly.yes   <= 0.05 || m.poly.yes   >= 0.95) return false;
-
-        // 2. Filter out completed/past games using ticker date
-        // Games from yesterday or earlier shouldn't show — Kalshi sometimes
-        // lags in closing markets for completed games, and Polymarket
-        // prices go to 100/0 after resolution. Both cases are caught here.
         if (m._gameDate && m._gameDate.getTime() < todayMs) return false;
-
         return true;
       })
-      .map(({ _gameDate, ...m }) => m); // remove internal _gameDate field
+      .map(({ _gameDate, ...m }) => m);
 
     res.setHeader("Cache-Control", "s-maxage=30");
     res.status(200).json({ pairs: shaped, needsEmbed: shaped.length === 0 });
