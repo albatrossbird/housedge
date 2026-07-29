@@ -270,7 +270,6 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
 
       // Score = moneyline bonus + date proximity bonus
       // Prefer the candidate whose date is closest to Kalshi's game date
-      const pDate = extractDate(pm.slug);
       const dateDiff = (kDate && pDate)
         ? Math.abs(new Date(kDate).getTime() - new Date(pDate).getTime())
         : Infinity;
