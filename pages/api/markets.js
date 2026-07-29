@@ -52,13 +52,15 @@ export default async function handler(req, res) {
     const { data: kalshiMarkets, error: kalshiError } = await supabase
       .from("markets")
       .select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time")
-      .in("id", kalshiIds)
-      .in("sport_tag", tags);
+      .in("id", kalshiIds);
 
     if (kalshiError) throw kalshiError;
 
+    // Filter by sport_tag in JavaScript to avoid query complexity issues
+    const kalshiFiltered = (kalshiMarkets || []).filter(m => tags.includes(m.sport_tag));
+
     // Step 3: Get all Polymarket markets for these pairs
-    const kalshiById = Object.fromEntries((kalshiMarkets || []).map(m => [m.id, m]));
+    const kalshiById = Object.fromEntries((kalshiFiltered || []).map(m => [m.id, m]));
     const filteredPairs = pairs.filter(p => kalshiById[p.kalshi_id]);
     const polyIds = filteredPairs.map(p => p.polymarket_id);
 
