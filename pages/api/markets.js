@@ -59,8 +59,19 @@ export default async function handler(req, res) {
     const filteredPairs = pairs.filter(p => kalshiById[p.kalshi_id]);
 
     if (filteredPairs.length === 0) {
-      return res.status(200).json({ pairs: [], needsEmbed: false });
+  return res.status(200).json({ 
+    pairs: [], 
+    needsEmbed: false,
+    debug: {
+      totalPairs: pairs.length,
+      kalshiMarketsFound: (kalshiMarkets || []).length,
+      kalshiFiltered: kalshiFiltered.length,
+      sampleSportTags: (kalshiMarkets || []).slice(0,5).map(m => m.sport_tag),
+      tagsLookingFor: tags,
     }
+  });
+}
+
 
     const polyIds = filteredPairs.map(p => p.polymarket_id);
     const { data: polyMarkets, error: polyError } = await supabase
