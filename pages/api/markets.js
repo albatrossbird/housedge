@@ -36,43 +36,25 @@ export default async function handler(req, res) {
     today.setUTCHours(0, 0, 0, 0);
     const todayMs = today.getTime();
 
-    const { data: pairs, error: pairsError } = await supabase
-      .from("pairs")
-      .select("id, kalshi_id, polymarket_id, similarity")
-      .order("similarity", { ascending: false });
+    const [pairsRes, kalshiRes, polyRes] = await Promise.all([
+      supabase.from("pairs").select("id, kalshi_id, polymarket_id, similarity").order("similarity", { ascending: false }),
+      supabase.from("markets").select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time").eq("platform", "kalshi").in("sport_tag", tags),
+      supabase.from("markets").select("id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices").eq("platform", "polymarket"),
+    ]);
 
-    if (pairsError) throw pairsError;
-    if (!pairs || pairs.length === 0) {
+    if (pairsRes.error) throw pairsRes.error;
+    if (kalshiRes.error) throw kalshiRes.error;
+    if (polyRes.error) throw polyRes.error;
+
+    const pairs = pairsRes.data || [];
+    const kalshiById = Object.fromEntries((kalshiRes.data || []).map(m => [m.id, m]));
+    const polyById = Object.fromEntries((polyRes.data || []).map(m => [m.id, m]));
+
+    if (pairs.length === 0) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
 
-    const kalshiIds = pairs.map(p => p.kalshi_id);
-    const { data: kalshiMarkets, error: kalshiError } = await supabase
-      .from("markets")
-      .select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time")
-      .in("id", kalshiIds);
-
-    if (kalshiError) throw kalshiError;
-
-    const kalshiFiltered = (kalshiMarkets || []).filter(m => tags.includes(m.sport_tag));
-    const kalshiById = Object.fromEntries(kalshiFiltered.map(m => [m.id, m]));
-    const filteredPairs = pairs.filter(p => kalshiById[p.kalshi_id]);
-
-    if (filteredPairs.length === 0) {
-      return res.status(200).json({ pairs: [], needsEmbed: false, debug: "no pairs match sport tags", tags, kalshiCount: (kalshiMarkets||[]).length, sportTagsSeen: [...new Set((kalshiMarkets||[]).map(m=>m.sport_tag))] });
-    }
-
-    const polyIds = filteredPairs.map(p => p.polymarket_id);
-    const { data: polyMarkets, error: polyError } = await supabase
-      .from("markets")
-      .select("id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices")
-      .in("id", polyIds);
-
-    if (polyError) throw polyError;
-
-    const polyById = Object.fromEntries((polyMarkets || []).map(m => [m.id, m]));
-
-    const shaped = filteredPairs
+    const shaped = pairs
       .filter(p => kalshiById[p.kalshi_id] && polyById[p.polymarket_id])
       .map(p => {
         const km = kalshiById[p.kalshi_id];
