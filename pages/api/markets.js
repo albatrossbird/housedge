@@ -36,19 +36,20 @@ export default async function handler(req, res) {
     today.setUTCHours(0, 0, 0, 0);
     const todayMs = today.getTime();
 
-    const [pairsRes, kalshiRes, polyRes] = await Promise.all([
+    // Fetch all three tables in parallel — no chained filters to avoid RLS issues
+    const [pairsRes, allKalshiRes, allPolyRes] = await Promise.all([
       supabase.from("pairs").select("id, kalshi_id, polymarket_id, similarity").order("similarity", { ascending: false }),
-      supabase.from("markets").select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time").eq("platform", "kalshi").in("sport_tag", tags),
-      supabase.from("markets").select("id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices").eq("platform", "polymarket"),
+      supabase.from("markets").select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time").in("sport_tag", tags),
+      supabase.from("markets").select("id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices").not("slug", "is", null),
     ]);
 
     if (pairsRes.error) throw pairsRes.error;
-    if (kalshiRes.error) throw kalshiRes.error;
-    if (polyRes.error) throw polyRes.error;
+    if (allKalshiRes.error) throw allKalshiRes.error;
+    if (allPolyRes.error) throw allPolyRes.error;
 
     const pairs = pairsRes.data || [];
-    const kalshiById = Object.fromEntries((kalshiRes.data || []).map(m => [m.id, m]));
-    const polyById = Object.fromEntries((polyRes.data || []).map(m => [m.id, m]));
+    const kalshiById = Object.fromEntries((allKalshiRes.data || []).map(m => [m.id, m]));
+    const polyById = Object.fromEntries((allPolyRes.data || []).map(m => [m.id, m]));
 
     if (pairs.length === 0) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
