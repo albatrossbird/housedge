@@ -36,32 +36,48 @@ export default async function handler(req, res) {
     today.setUTCHours(0, 0, 0, 0);
     const todayMs = today.getTime();
 
-    // Fetch ALL markets and pairs, filter in JS to avoid Supabase query issues
-    const [pairsRes, marketsRes] = await Promise.all([
-      supabase.from("pairs").select("id, kalshi_id, polymarket_id, similarity").order("similarity", { ascending: false }),
-      supabase.from("markets").select("id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time, slug, outcomes, outcome_prices"),
-    ]);
+    // Step 1: Get pairs
+    const { data: pairs, error: pairsError } = await supabase
+      .from("pairs")
+      .select("id, kalshi_id, polymarket_id, similarity")
+      .order("similarity", { ascending: false })
+      .limit(500);
 
-    if (pairsRes.error) throw pairsRes.error;
-    if (marketsRes.error) throw marketsRes.error;
-
-    const pairs = pairsRes.data || [];
-    const allMarkets = marketsRes.data || [];
-
-    // Split into Kalshi and Polymarket by ID pattern in JS
-    const kalshiById = {};
-    const polyById = {};
-    for (const m of allMarkets) {
-      if (String(m.id).startsWith("KX")) {
-        if (tags.includes(m.sport_tag)) kalshiById[m.id] = m;
-      } else {
-        polyById[m.id] = m;
-      }
-    }
-
-    if (pairs.length === 0) {
+    if (pairsError) throw pairsError;
+    if (!pairs || pairs.length === 0) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
+
+    // Step 2: Get only the specific markets we need
+    const kalshiIds = [...new Set(pairs.map(p => p.kalshi_id))];
+    const polyIds = [...new Set(pairs.map(p => p.polymarket_id))];
+
+    // Fetch in batches of 100 to avoid URL length limits
+    async function fetchByIds(ids, fields) {
+      const results = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const batch = ids.slice(i, i + 100);
+        const { data, error } = await supabase
+          .from("markets")
+          .select(fields)
+          .in("id", batch);
+        if (error) throw error;
+        if (data) results.push(...data);
+      }
+      return results;
+    }
+
+    const [kalshiMarkets, polyMarkets] = await Promise.all([
+      fetchByIds(kalshiIds, "id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time"),
+      fetchByIds(polyIds, "id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices"),
+    ]);
+
+    // Filter Kalshi by sport tag in JS
+    const kalshiById = {};
+    for (const m of kalshiMarkets) {
+      if (tags.includes(m.sport_tag)) kalshiById[m.id] = m;
+    }
+    const polyById = Object.fromEntries(polyMarkets.map(m => [m.id, m]));
 
     const shaped = pairs
       .filter(p => kalshiById[p.kalshi_id] && polyById[p.polymarket_id])
