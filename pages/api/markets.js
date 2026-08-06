@@ -36,78 +36,45 @@ export default async function handler(req, res) {
     today.setUTCHours(0, 0, 0, 0);
     const todayMs = today.getTime();
 
-    // Step 1: Get pairs
-    const { data: pairs, error: pairsError } = await supabase
-      .from("pairs")
-      .select("id, kalshi_id, polymarket_id, similarity")
-      .order("similarity", { ascending: false })
-      .limit(500);
+    // Use RPC function which runs a direct SQL join — bypasses all
+    // the JS client query issues we've been hitting
+    const { data, error } = await supabase.rpc("get_pairs", {
+      sport_tags: tags,
+    });
 
-    if (pairsError) throw pairsError;
-    if (!pairs || pairs.length === 0) {
+    if (error) throw error;
+    if (!data || data.length === 0) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
 
-    // Step 2: Get only the specific markets we need
-    const kalshiIds = [...new Set(pairs.map(p => p.kalshi_id))];
-    const polyIds = [...new Set(pairs.map(p => p.polymarket_id))];
-
-    // Fetch in batches of 100 to avoid URL length limits
-    async function fetchByIds(ids, fields) {
-      const results = [];
-      for (let i = 0; i < ids.length; i += 100) {
-        const batch = ids.slice(i, i + 100);
-        const { data, error } = await supabase
-          .from("markets")
-          .select(fields)
-          .in("id", batch);
-        if (error) throw error;
-        if (data) results.push(...data);
-      }
-      return results;
-    }
-
-    const [kalshiMarkets, polyMarkets] = await Promise.all([
-      fetchByIds(kalshiIds, "id, title, yes_price, no_price, volume, sport_tag, event_ticker, side_label, close_time"),
-      fetchByIds(polyIds, "id, title, yes_price, no_price, volume, slug, side_label, outcomes, outcome_prices"),
-    ]);
-
-    // Filter Kalshi by sport tag in JS
-    const kalshiById = {};
-    for (const m of kalshiMarkets) {
-      if (tags.includes(m.sport_tag)) kalshiById[m.id] = m;
-    }
-    const polyById = Object.fromEntries(polyMarkets.map(m => [m.id, m]));
-
-    const shaped = pairs
-      .filter(p => kalshiById[p.kalshi_id] && polyById[p.polymarket_id])
-      .map(p => {
-        const km = kalshiById[p.kalshi_id];
-        const pm = polyById[p.polymarket_id];
-
-        let pYes = pm.yes_price;
-        if (pm.outcomes && pm.outcome_prices) {
+    const shaped = data
+      .map(row => {
+        let pYes = row.p_yes_price;
+        if (row.p_outcomes && row.p_outcome_prices) {
           try {
-            const outcomes = JSON.parse(pm.outcomes);
-            const prices   = JSON.parse(pm.outcome_prices);
-            const titleSide = (km.title || "").split("—").pop().trim();
-            const sideKw = (km.side_label || titleSide).toLowerCase()
+            const outcomes = JSON.parse(row.p_outcomes);
+            const prices   = JSON.parse(row.p_outcome_prices);
+            const titleSide = (row.k_title || "").split("—").pop().trim();
+            const sideKw = (row.k_side_label || titleSide).toLowerCase()
               .split(/\W+/).filter(w => w.length > 2);
             let idx = outcomes.findIndex(o => sideKw.some(w => o.toLowerCase().includes(w)));
             if (idx >= 0 && prices[idx] != null) pYes = parseFloat(prices[idx]);
           } catch {}
         }
 
-        const kalshiUrl = `https://kalshi.com/markets/${(km.event_ticker || km.id).toLowerCase()}`;
-        const polyUrl = pm.slug ? `https://polymarket.com/event/${pm.slug}` : "https://polymarket.com/";
+        const kalshiUrl = `https://kalshi.com/markets/${(row.k_event_ticker || row.kalshi_id).toLowerCase()}`;
+        const polyUrl = row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/";
 
         return {
-          id: km.id, title: km.title, polyTitle: pm.title,
-          similarity: p.similarity, category: km.sport_tag,
-          _gameDate: extractTickerDate(km.id),
-          kalshi: { yes: km.yes_price, no: km.no_price, volume: km.volume || 0, url: kalshiUrl },
-          poly: { yes: pYes, no: 1 - pYes, volume: pm.volume || 0, url: polyUrl },
-          trending: ((km.volume || 0) + (pm.volume || 0)) > 5000,
+          id: row.kalshi_id,
+          title: row.k_title,
+          polyTitle: row.p_title,
+          similarity: row.similarity,
+          category: row.k_sport_tag,
+          _gameDate: extractTickerDate(row.kalshi_id),
+          kalshi: { yes: row.k_yes_price, no: row.k_no_price, volume: row.k_volume || 0, url: kalshiUrl },
+          poly: { yes: pYes, no: 1 - pYes, volume: row.p_volume || 0, url: polyUrl },
+          trending: ((row.k_volume || 0) + (row.p_volume || 0)) > 5000,
         };
       })
       .filter(m => {
