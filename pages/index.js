@@ -22,7 +22,10 @@ function spread(m) { return Math.abs(m.kalshi.yes - m.poly.yes); }
 function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
 function arbAlert(m) {
   const cost = Math.min(m.kalshi.yes, m.poly.yes) + Math.min(m.kalshi.no, m.poly.no);
-  return cost < 0.97;
+  const spreadPct = Math.abs(m.kalshi.yes - m.poly.yes) * 100;
+  // Only flag as arb if mathematically valid AND spread is plausible
+  // Spreads over 15pt are almost always data errors (wrong date, flipped team)
+  return cost < 0.97 && spreadPct <= 15;
 }
 
 // ── Categories (UI display only) ──────────────────────────────
