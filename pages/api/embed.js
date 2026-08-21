@@ -464,6 +464,7 @@ export default async function handler(req, res) {
       }
 
       let newPairs = [];
+      let matchDiagnostics = null;
 
       if (sportFilter && SPORTS_TAGS.has(sportFilter)) {
         // Use structured team-name matching for sports
@@ -479,20 +480,34 @@ export default async function handler(req, res) {
           .filter(m => m.embedding)
           .map(m => ({ ...m, _vec: JSON.parse(m.embedding) }));
 
+        // See the equivalent block in normal mode below for why this
+        // tracks the best score regardless of threshold.
+        const topScores = [];
+
         for (const km of (kalshiDb || [])) {
           if (!km.embedding) continue;
           const kVec = JSON.parse(km.embedding);
           let bestMatch = null;
           let bestScore = 0;
+          let rowBestScore = 0;
+          let rowBestPm = null;
 
           for (const pm of polyEmbedded) {
-            if (usedPolyIds.has(pm.id)) continue;
             if (km.sport_tag !== pm.sport_tag) continue;
             const score = cosineSimilarity(kVec, pm._vec);
+            if (score > rowBestScore) {
+              rowBestScore = score;
+              rowBestPm = pm;
+            }
+            if (usedPolyIds.has(pm.id)) continue;
             if (score > bestScore && score >= THRESHOLD) {
               bestScore = score;
               bestMatch = pm;
             }
+          }
+
+          if (rowBestPm) {
+            topScores.push({ score: rowBestScore, kalshi: km.title, poly: rowBestPm.title });
           }
 
           if (bestMatch) {
@@ -505,6 +520,14 @@ export default async function handler(req, res) {
             usedPolyIds.add(bestMatch.id);
           }
         }
+
+        topScores.sort((a, b) => b.score - a.score);
+        matchDiagnostics = {
+          threshold: THRESHOLD,
+          kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
+          polyEmbeddedCount: polyEmbedded.length,
+          topScores: topScores.slice(0, 10),
+        };
       }
 
       if (newPairs.length > 0) {
@@ -526,6 +549,7 @@ export default async function handler(req, res) {
         totalPairs:  count || 0,
         kalshiCount: (kalshiDb || []).length,
         polyCount:   (polyDb || []).length,
+        ...(matchDiagnostics ? { matchDiagnostics } : {}),
       });
     }
 
