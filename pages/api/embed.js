@@ -685,6 +685,7 @@ export default async function handler(req, res) {
       // candidates were scoring just under THRESHOLD (recalibrate it) or
       // nowhere close (something else is wrong).
       const topScores = [];
+      const acceptedPairs = [];
 
       for (const km of (kalshiDb || [])) {
         const kVec = JSON.parse(km.embedding);
@@ -713,15 +714,18 @@ export default async function handler(req, res) {
 
         if (bestMatch) {
           newPairs.push({ kalshi_id: km.id, polymarket_id: bestMatch.id, similarity: bestScore, created_at: Math.floor(Date.now() / 1000) });
+          acceptedPairs.push({ score: bestScore, kalshi: km.title, poly: bestMatch.title });
           usedPolyIds.add(bestMatch.id);
         }
       }
 
       topScores.sort((a, b) => b.score - a.score);
+      acceptedPairs.sort((a, b) => b.score - a.score);
       matchDiagnostics = {
         threshold: THRESHOLD,
         kalshiEmbeddedCount: (kalshiDb || []).length,
         polyEmbeddedCount: (polyDb || []).length,
+        acceptedPairs: acceptedPairs.slice(0, 100),
         topScores: topScores.slice(0, 10),
       };
     }
