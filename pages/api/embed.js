@@ -32,7 +32,7 @@ async function embedTitles(titles) {
         "Authorization": `Bearer ${process.env.VOYAGE_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "voyage-3.5-lite",
+        model: "voyage-4-large",
         input: batch,
         input_type: "document",
       }),

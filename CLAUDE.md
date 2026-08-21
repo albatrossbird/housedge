@@ -30,7 +30,7 @@ The frontend never calls Kalshi/Polymarket directly. Data flows through three se
 
 1. **`pages/api/embed.js`** — the expensive, infrequent job. Fetches raw markets from both platforms, upserts them into the Supabase `markets` table, and computes cross-platform matches into a `pairs` table. Two different matching strategies depending on category:
    - **Sports (mlb/nba/nhl/soccer)**: structured matching — extracts both team names from each title (via `MLB_TEAMS`-style alias maps and regex on Kalshi's "Team A vs Team B" / Polymarket's "Will Team A win" formats), requires both teams to match, and gates on game date being within 6 hours. No embeddings involved.
-   - **Economics/crypto/politics**: semantic matching — titles are embedded with Voyage AI (`voyage-3.5-lite`) and matched by cosine similarity against a threshold (`?threshold=`, default 0.78).
+   - **Economics/crypto/politics**: semantic matching — titles are embedded with Voyage AI (`voyage-4-large`) and matched by cosine similarity against a threshold (`?threshold=`, default 0.78).
    - Query params: `?sport=mlb|nba|nhl|soccer|econ|...` (scope to one category), `?matchonly=1` (re-run matching on already-stored markets without re-fetching), `?force=1` (re-embed/re-match everything).
    - Not called by the page — triggered manually (or should be, by a scheduled job — see Known bugs). The UI surfaces a "needs embed" state with a manual trigger link when a category has no pairs yet.
 
