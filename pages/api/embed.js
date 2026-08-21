@@ -498,10 +498,17 @@ export default async function handler(req, res) {
       if (sportFilter) kalshiQuery = kalshiQuery.eq("sport_tag", sportFilter);
       const { data: kalshiDb, error: kalshiReadError } = await kalshiQuery;
 
-      const { data: polyDb, error: polyReadError } = await supabase
+      // Scope by sport_tag like the Kalshi query above - an unscoped
+      // select silently caps at Supabase's default 1000-row limit, which
+      // can truncate before reaching the requested category's rows at
+      // all as the table grows across more sports/categories.
+      let polyQuery = supabase
         .from("markets")
         .select("id, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
-        .eq("platform", "polymarket");
+        .eq("platform", "polymarket")
+        .limit(5000);
+      if (sportFilter) polyQuery = polyQuery.eq("sport_tag", sportFilter);
+      const { data: polyDb, error: polyReadError } = await polyQuery;
 
       const readErrors = [kalshiReadError, polyReadError].filter(Boolean).map(e => e.message);
 
@@ -535,6 +542,7 @@ export default async function handler(req, res) {
         // See the equivalent block in normal mode below for why this
         // tracks the best score regardless of threshold.
         const topScores = [];
+        const acceptedPairs = [];
 
         for (const km of (kalshiDb || [])) {
           if (!km.embedding) continue;
@@ -569,15 +577,18 @@ export default async function handler(req, res) {
               similarity:    bestScore,
               created_at:    Math.floor(Date.now() / 1000),
             });
+            acceptedPairs.push({ score: bestScore, kalshi: km.title, poly: bestMatch.title });
             usedPolyIds.add(bestMatch.id);
           }
         }
 
         topScores.sort((a, b) => b.score - a.score);
+        acceptedPairs.sort((a, b) => b.score - a.score);
         matchDiagnostics = {
           threshold: THRESHOLD,
           kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
           polyEmbeddedCount: polyEmbedded.length,
+          acceptedPairs: acceptedPairs.slice(0, 100),
           topScores: topScores.slice(0, 10),
         };
       }
