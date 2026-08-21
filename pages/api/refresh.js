@@ -12,21 +12,40 @@ const KALSHI_SERIES = [
 
 const CHUNK = 100;
 
-// The first Supabase call in a request consistently succeeds; every call
-// after it, in the same invocation, fails with a bare "TypeError: fetch
-// failed" - a network-layer failure raised before any HTTP response comes
-// back, not an error from Postgres. That's the signature of a transient
-// connection problem (a stale keep-alive socket, pool pressure, etc.),
-// not a bad query - so retry on exactly that error class instead of
-// guessing further about query shape.
-async function withRetry(fn, attempts = 3, delayMs = 400) {
-  let result;
-  for (let i = 0; i < attempts; i++) {
-    result = await fn();
-    if (!result.error || !/fetch failed/i.test(result.error.message || "")) return result;
-    if (i < attempts - 1) await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+// Retries didn't change the outcome, which rules out plain transient
+// flakiness. Bypassing supabase-js with raw REST calls here so failures
+// carry the real underlying cause (err.cause / err.name) instead of the
+// generic "TypeError: fetch failed" string the JS client's error object
+// reduces everything to - that's the only way left to tell a DNS/TLS/
+// connection-reset failure apart from something else without dashboard
+// access to Vercel/Supabase logs.
+function describeError(err) {
+  const cause = err.cause;
+  return {
+    name: err.name,
+    message: err.message,
+    cause: cause ? { code: cause.code, message: cause.message, name: cause.name } : undefined,
+  };
+}
+
+async function restFetch(path, options = {}) {
+  const url = `${process.env.SUPABASE_URL}/rest/v1/${path}`;
+  try {
+    const r = await fetch(url, {
+      ...options,
+      headers: {
+        apikey: process.env.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    });
+    const text = await r.text();
+    if (!r.ok) return { error: { httpStatus: r.status, body: text.slice(0, 300) } };
+    return { data: text ? JSON.parse(text) : null };
+  } catch (err) {
+    return { error: describeError(err) };
   }
-  return result;
 }
 
 // Select-merge-upsert instead of hundreds of individual update() calls:
@@ -41,13 +60,14 @@ async function applyUpdates(updates) {
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = updates.slice(i, i + CHUNK);
     const ids = chunk.map(u => u.id);
+    const idList = ids.map(id => encodeURIComponent(id)).join(",");
 
-    const { data: existing, error: selectError } = await withRetry(() =>
-      supabase.from("markets").select("*").in("id", ids)
+    const { data: existing, error: selectError } = await restFetch(
+      `markets?select=*&id=in.(${idList})`
     );
 
     if (selectError) {
-      errors.push(`select: ${selectError.message}`);
+      errors.push(`select: ${JSON.stringify(selectError)}`);
       continue;
     }
 
@@ -58,10 +78,12 @@ async function applyUpdates(updates) {
 
     if (merged.length === 0) continue;
 
-    const { error } = await withRetry(() =>
-      supabase.from("markets").upsert(merged, { onConflict: "id" })
-    );
-    if (error) errors.push(`upsert: ${error.message}`);
+    const { error } = await restFetch("markets?on_conflict=id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(merged),
+    });
+    if (error) errors.push(`upsert: ${JSON.stringify(error)}`);
     else updated += merged.length;
   }
 
