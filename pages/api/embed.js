@@ -17,6 +17,56 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
+// ── Raw Supabase REST writes ─────────────────────────────────────
+// supabase-js's returned error object reduces every network-layer
+// failure down to a generic "TypeError: fetch failed" string, and none
+// of the upserts below were even checking that much - they were fired
+// and forgotten. Writes go through raw REST calls instead so failures
+// are actually diagnosable (see the /api/refresh fix history for why -
+// this is the same class of bug, just never instrumented here).
+async function restFetch(path, options = {}) {
+  const url = `${process.env.SUPABASE_URL}/rest/v1/${path}`;
+  try {
+    const r = await fetch(url, {
+      ...options,
+      headers: {
+        apikey: process.env.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    });
+    const text = await r.text();
+    if (!r.ok) return { error: { httpStatus: r.status, body: text.slice(0, 300) } };
+    return { data: text ? JSON.parse(text) : null };
+  } catch (err) {
+    const cause = err.cause;
+    return {
+      error: {
+        name: err.name,
+        message: err.message,
+        cause: cause ? { code: cause.code, message: cause.message } : undefined,
+      },
+    };
+  }
+}
+
+async function upsertRows(table, rows, onConflict, batchSize = 50) {
+  const errors = [];
+  let count = 0;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const { error } = await restFetch(`${table}?on_conflict=${onConflict}`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(batch),
+    });
+    if (error) errors.push(JSON.stringify(error));
+    else count += batch.length;
+  }
+  return { count, errors };
+}
+
 // ── Voyage AI embedding (used for non-sports markets) ──────────
 async function embedTitles(titles) {
   if (!titles.length) return [];
@@ -446,12 +496,14 @@ export default async function handler(req, res) {
         .select("id, title, sport_tag, embedding, side_label, close_time")
         .eq("platform", "kalshi")
       if (sportFilter) kalshiQuery = kalshiQuery.eq("sport_tag", sportFilter);
-      const { data: kalshiDb } = await kalshiQuery;
+      const { data: kalshiDb, error: kalshiReadError } = await kalshiQuery;
 
-      const { data: polyDb } = await supabase
+      const { data: polyDb, error: polyReadError } = await supabase
         .from("markets")
         .select("id, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
         .eq("platform", "polymarket");
+
+      const readErrors = [kalshiReadError, polyReadError].filter(Boolean).map(e => e.message);
 
       // Clear existing pairs for this sport
       if (sportFilter) {
@@ -530,13 +582,9 @@ export default async function handler(req, res) {
         };
       }
 
-      if (newPairs.length > 0) {
-        for (let i = 0; i < newPairs.length; i += 50) {
-          await supabase.from("pairs").upsert(newPairs.slice(i, i + 50), {
-            onConflict: "kalshi_id,polymarket_id",
-          });
-        }
-      }
+      const pairsUpsert = newPairs.length > 0
+        ? await upsertRows("pairs", newPairs, "kalshi_id,polymarket_id")
+        : { count: 0, errors: [] };
 
       const { count } = await supabase
         .from("pairs")
@@ -549,6 +597,9 @@ export default async function handler(req, res) {
         totalPairs:  count || 0,
         kalshiCount: (kalshiDb || []).length,
         polyCount:   (polyDb || []).length,
+        pairsUpserted: pairsUpsert.count,
+        pairsErrors: pairsUpsert.errors.slice(0, 5),
+        readErrors,
         ...(matchDiagnostics ? { matchDiagnostics } : {}),
       });
     }
@@ -567,17 +618,17 @@ export default async function handler(req, res) {
       ? allMarkets.filter(m => !SPORTS_TAGS.has(m.sport_tag))
       : allMarkets.filter(m => !existingIds.has(m.id) && !SPORTS_TAGS.has(m.sport_tag));
 
-    // Upsert all markets (with or without embedding)
-    const toUpsert = allMarkets.map(m => ({
-      ...m,
-      embedding: null, // will be updated below for non-sports
-    }));
-    for (let i = 0; i < toUpsert.length; i += 50) {
-      await supabase.from("markets").upsert(toUpsert.slice(i, i + 50), { onConflict: "id" });
-    }
+    // Upsert all markets. Deliberately not touching `embedding` here -
+    // omitting the key from the payload leaves it untouched for rows
+    // that already have one, instead of wiping every existing embedding
+    // on every non-force run. The follow-up embedding upsert below sets
+    // it for whichever rows are actually being (re-)embedded this run.
+    const toUpsert = allMarkets;
+    const marketsUpsert = await upsertRows("markets", toUpsert, "id");
 
     // Embed only non-sports markets (sports use structured matching)
     let embedded = 0;
+    let embeddingUpsert = { count: 0, errors: [] };
     if (toEmbed.length > 0) {
       const titles = toEmbed.map(m => m.title);
       const embeddings = await embedTitles(titles);
@@ -586,9 +637,7 @@ export default async function handler(req, res) {
         embedding: JSON.stringify(embeddings[i]),
         updated_at: Math.floor(Date.now() / 1000),
       }));
-      for (let i = 0; i < records.length; i += 50) {
-        await supabase.from("markets").upsert(records.slice(i, i + 50), { onConflict: "id" });
-      }
+      embeddingUpsert = await upsertRows("markets", records, "id");
       embedded = toEmbed.length;
     }
 
@@ -671,11 +720,9 @@ export default async function handler(req, res) {
       };
     }
 
-    if (newPairs.length > 0) {
-      for (let i = 0; i < newPairs.length; i += 50) {
-        await supabase.from("pairs").upsert(newPairs.slice(i, i + 50), { onConflict: "kalshi_id,polymarket_id" });
-      }
-    }
+    const pairsUpsert = newPairs.length > 0
+      ? await upsertRows("pairs", newPairs, "kalshi_id,polymarket_id")
+      : { count: 0, errors: [] };
 
     const { count } = await supabase
       .from("pairs").select("*", { count: "exact", head: true });
@@ -686,6 +733,14 @@ export default async function handler(req, res) {
       totalKalshi: kalshiRaw.length,
       totalPoly:   polyRaw.length,
       totalPairs:  count || 0,
+      writes: {
+        marketsUpserted: marketsUpsert.count,
+        marketsErrors: marketsUpsert.errors.slice(0, 5),
+        embeddingUpserted: embeddingUpsert.count,
+        embeddingErrors: embeddingUpsert.errors.slice(0, 5),
+        pairsUpserted: pairsUpsert.count,
+        pairsErrors: pairsUpsert.errors.slice(0, 5),
+      },
       ...(matchDiagnostics ? { matchDiagnostics } : {}),
     });
   } catch (err) {
