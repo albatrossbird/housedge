@@ -352,7 +352,20 @@ const POLY_TAGS = [
   { tag: "745",    sport: "nba"    },
   { tag: "899",    sport: "nhl"    },
   { tag: "100381", sport: "mlb"    },
+  { tag: "129",    sport: "econ"   }, // federal reserve
+  { tag: "101249", sport: "econ"   }, // Macro Inflation (CPI)
+  { tag: "100201", sport: "econ"   }, // recession
+  { tag: "370",    sport: "econ"   }, // GDP
 ];
+
+// Sports that use structured team matching (not embeddings). Also used
+// below to scope a sports-only event filter: an event with more than a
+// few markets is almost always a tournament-winner futures listing, not
+// an individual game, which is a fair assumption for sports but not for
+// everything else - a Fed decision, for instance, can legitimately have
+// more than 4 rate-bucket outcomes. Non-sports tags skip that filter and
+// let embedding similarity do the filtering instead.
+const SPORTS_TAGS = new Set(["mlb", "nba", "nhl", "soccer"]);
 
 async function fetchPolymarkets(sportFilter = "all") {
   const tags = sportFilter === "all"
@@ -376,7 +389,11 @@ async function fetchPolymarkets(sportFilter = "all") {
       }
 
       return events
-        .filter(e => Array.isArray(e.teams) ? e.teams.length === 2 : (e.markets || []).length <= 4)
+        .filter(e => {
+          if (Array.isArray(e.teams)) return e.teams.length === 2;
+          if (SPORTS_TAGS.has(sport)) return (e.markets || []).length <= 4;
+          return true;
+        })
         .flatMap(e => {
           const mktList = e.markets || [];
           const moneyline = mktList.filter(m => m.sportsMarketType === "moneyline");
@@ -411,9 +428,6 @@ async function fetchPolymarkets(sportFilter = "all") {
   );
   return results.flat();
 }
-
-// Sports that use structured team matching (not embeddings)
-const SPORTS_TAGS = new Set(["mlb", "nba", "nhl", "soccer"]);
 
 // ── Main handler ───────────────────────────────────────────────
 export default async function handler(req, res) {
