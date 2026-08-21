@@ -126,20 +126,40 @@ function extractNumericClaim(title) {
   const t = (title || "").toLowerCase();
 
   let m = t.match(/between\s+(-?\d+(?:\.\d+)?)\s*%\s+and\s+(-?\d+(?:\.\d+)?)\s*%/);
-  if (m) return { op: "range", low: parseFloat(m[1]), high: parseFloat(m[2]) };
+  if (m) return { unit: "percent", op: "range", low: parseFloat(m[1]), high: parseFloat(m[2]) };
 
   m = t.match(/(?:more than|greater than|above|over)\s+(-?\d+(?:\.\d+)?)\s*%/);
-  if (m) return { op: "gt", value: parseFloat(m[1]) };
+  if (m) return { unit: "percent", op: "gt", value: parseFloat(m[1]) };
 
   m = t.match(/at least\s+(-?\d+(?:\.\d+)?)\s*%/) ||
       t.match(/(-?\d+(?:\.\d+)?)\s*%\s*(?:or higher|or more|\+)/);
-  if (m) return { op: "gte", value: parseFloat(m[1]) };
+  if (m) return { unit: "percent", op: "gte", value: parseFloat(m[1]) };
 
-  m = t.match(/(?:less than|below|under)\s+(-?\d+(?:\.\d+)?)\s*%/);
-  if (m) return { op: "lt", value: parseFloat(m[1]) };
+  // "less than or equal to" must be tried before "less than" so it
+  // isn't cut short by the "or equal to" text in between.
+  m = t.match(/(?:less than or equal to|less than|below|under)\s+(-?\d+(?:\.\d+)?)\s*%/);
+  if (m) return { unit: "percent", op: "lt", value: parseFloat(m[1]) };
 
   m = t.match(/\bbe\s+(-?\d+(?:\.\d+)?)\s*%/);
-  if (m) return { op: "eq", value: parseFloat(m[1]) };
+  if (m) return { unit: "percent", op: "eq", value: parseFloat(m[1]) };
+
+  // Bare integer count claims with no unit symbol, e.g. "5 or more
+  // rate hikes", "no rate hikes", "4 Fed rate hikes" - kept as a
+  // distinct unit from percent claims so a rate-level question never
+  // gets treated as compatible with a hike-count question just
+  // because neither matched the same pattern. These two measure
+  // genuinely different things even when correlated.
+  m = t.match(/\b(\d+)\s+or more\b/);
+  if (m) return { unit: "count", op: "gte", value: parseFloat(m[1]) };
+
+  m = t.match(/\b(\d+)\s+(?:or fewer|or less)\b/);
+  if (m) return { unit: "count", op: "lte", value: parseFloat(m[1]) };
+
+  m = t.match(/\bno\s+(?:\w+\s+){0,3}?(?:hikes?|cuts?|increases?|decreases?)\b/);
+  if (m) return { unit: "count", op: "eq", value: 0 };
+
+  m = t.match(/\b(\d+)\s+(?:\w+\s+){0,2}?(?:hikes?|cuts?)\b/);
+  if (m) return { unit: "count", op: "eq", value: parseFloat(m[1]) };
 
   return null;
 }
@@ -157,6 +177,7 @@ const NUMERIC_EPS = 0.05; // float safety margin, not a fuzzy-match tolerance
 
 function numericClaimsCompatible(a, b) {
   if (!a || !b) return true; // nothing extractable on one side - don't block on it
+  if (a.unit !== b.unit) return false; // e.g. a rate-level claim vs a hike-count claim
   if (a.op === "range" || b.op === "range") {
     return a.op === "range" && b.op === "range" &&
       Math.abs(a.low - b.low) < NUMERIC_EPS && Math.abs(a.high - b.high) < NUMERIC_EPS;
@@ -173,7 +194,30 @@ function periodsCompatible(a, b) {
   return true; // both annual-only, same year
 }
 
-function scalarSignaturesCompatible(titleA, titleB) {
+// Kalshi's econ series (KXFED/KXCPI/KXGDP/KXRECESSION) are all US-only
+// and never name a country in their titles, but Polymarket's broader
+// macro dashboard covers many countries with near-identical phrasing
+// and often the same numeric thresholds - "GDP growth at least 2.0%"
+// reads almost the same whether it's the US or the Eurozone asking.
+// This is a fact about this specific Kalshi series, not a general
+// assumption, so it's scoped to sportTag === "econ" rather than baked
+// into the general-purpose extractors above.
+const NON_US_REGION_PATTERNS = [
+  /\buk\b/, /\bunited kingdom\b/, /\beurozone\b/, /\beuropean union\b/,
+  /\bgermany\b/, /\bjapan\b/, /\bmexico\b/, /\bchina\b/, /\bfrance\b/,
+  /\bitaly\b/, /\bcanada\b/, /\bworld\b/, /\bglobal\b/, /\bindia\b/,
+  /\bbrazil\b/, /\bsouth korea\b/, /\baustralia\b/,
+];
+
+function mentionsNonUsRegion(title) {
+  const t = (title || "").toLowerCase();
+  return NON_US_REGION_PATTERNS.some(re => re.test(t));
+}
+
+function scalarSignaturesCompatible(titleA, titleB, sportTag) {
+  if (sportTag === "econ" && (mentionsNonUsRegion(titleA) || mentionsNonUsRegion(titleB))) {
+    return false;
+  }
   return numericClaimsCompatible(extractNumericClaim(titleA), extractNumericClaim(titleB)) &&
          periodsCompatible(extractPeriod(titleA), extractPeriod(titleB));
 }
@@ -204,7 +248,7 @@ function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
         rowBestScore = score;
         rowBestPm = pm;
       }
-      if (score >= threshold && scalarSignaturesCompatible(km.title, pm.title)) {
+      if (score >= threshold && scalarSignaturesCompatible(km.title, pm.title, km.sport_tag)) {
         candidates.push({ km, pm, score });
       }
     }
