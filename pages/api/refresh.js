@@ -10,30 +10,45 @@ const KALSHI_SERIES = [
   "KXBTC", "KXETH", "KXFED", "KXCPI", "KXRECESSION", "KXGDP", "KXPRES",
 ];
 
-const CONCURRENCY = 25;
+const CHUNK = 100;
 
-// Plain per-row updates, not upsert: this route only ever touches markets
-// that /api/embed already wrote, so it should never attempt an insert. A
-// bulk upsert with a partial column set (no platform/title/etc.) can fail
-// NOT NULL constraints on the insert branch even when every row already
-// exists, since Postgres validates the attempted row before it checks for
-// a conflict. Runs in small concurrent chunks so one bad row can't stall
-// the batch, and so failures surface per-row instead of per-bulk-call.
+// Select-merge-upsert instead of hundreds of individual update() calls:
+// firing dozens of concurrent per-row writes from one serverless
+// invocation was hitting raw "fetch failed" network errors against
+// Supabase. Pulling the existing full row first means the upsert payload
+// always has every NOT NULL column (so it's still safe even though it's
+// upsert, not a plain update), and it's a small number of bulk round
+// trips instead of one per row.
 async function applyUpdates(updates) {
   let updated = 0;
   const errors = [];
-  for (let i = 0; i < updates.length; i += CONCURRENCY) {
-    const batch = updates.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(
-      batch.map(({ id, ...fields }) =>
-        supabase.from("markets").update(fields).eq("id", id)
-      )
-    );
-    for (const { error } of results) {
-      if (error) errors.push(error.message);
-      else updated++;
+
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const chunk = updates.slice(i, i + CHUNK);
+    const ids = chunk.map(u => u.id);
+
+    const { data: existing, error: selectError } = await supabase
+      .from("markets")
+      .select("*")
+      .in("id", ids);
+
+    if (selectError) {
+      errors.push(`select: ${selectError.message}`);
+      continue;
     }
+
+    const existingById = new Map((existing || []).map(row => [row.id, row]));
+    const merged = chunk
+      .filter(u => existingById.has(u.id)) // never insert rows /api/embed hasn't created
+      .map(u => ({ ...existingById.get(u.id), ...u }));
+
+    if (merged.length === 0) continue;
+
+    const { error } = await supabase.from("markets").upsert(merged, { onConflict: "id" });
+    if (error) errors.push(`upsert: ${error.message}`);
+    else updated += merged.length;
   }
+
   return { updated, errors };
 }
 
@@ -71,6 +86,7 @@ export default async function handler(req, res) {
 
     // Fetch Polymarket prices in batches
     const polyUpdates = [];
+    const polyFetchErrors = [];
     for (let i = 0; i < polyIds.length; i += 50) {
       const batch = polyIds.slice(i, i + 50);
       // Gamma API needs `id` repeated per value — a comma-joined list is
@@ -91,10 +107,16 @@ export default async function handler(req, res) {
                 volume:    parseFloat(m.volumeNum || m.volume || 0),
                 updated_at: Math.floor(Date.now() / 1000),
               });
-            } catch {}
+            } catch (err) {
+              polyFetchErrors.push(`parse market ${m.id}: ${err.message}`);
+            }
           }
+        } else {
+          polyFetchErrors.push(`gamma-api ${r.status}: ${(await r.text()).slice(0, 200)}`);
         }
-      } catch {}
+      } catch (err) {
+        polyFetchErrors.push(`fetch threw: ${err.message}`);
+      }
     }
 
     const kalshiResult = await applyUpdates(kalshiUpdates);
@@ -105,7 +127,9 @@ export default async function handler(req, res) {
       polyUpdated: polyResult.updated,
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,
+      polyIdsInDb: polyIds.length,
       errors: [...kalshiResult.errors, ...polyResult.errors].slice(0, 5),
+      polyFetchErrors: polyFetchErrors.slice(0, 5),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
