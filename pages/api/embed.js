@@ -632,8 +632,14 @@ export default async function handler(req, res) {
     if (toEmbed.length > 0) {
       const titles = toEmbed.map(m => m.title);
       const embeddings = await embedTitles(titles);
+      // Keep the full row (already in memory from the fetch step above,
+      // and just written by the upsert above that) rather than sending
+      // only {id, embedding, updated_at} - an upsert still validates
+      // NOT NULL columns like `platform` on the attempted insert row
+      // even when the row already exists and conflict resolution will
+      // just update it, so a partial payload fails every time.
       const records = toEmbed.map((m, i) => ({
-        id: m.id,
+        ...m,
         embedding: JSON.stringify(embeddings[i]),
         updated_at: Math.floor(Date.now() / 1000),
       }));
