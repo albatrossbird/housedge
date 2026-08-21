@@ -108,6 +108,151 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
+// ── Numeric/period signature extraction for scalar markets ──────
+// Cosine similarity on threshold-style titles (GDP/CPI/Fed-rate
+// buckets, price thresholds, etc.) is dominated by shared topic text
+// - "above 3.0%" and "above 0.5%" on the same underlying event score
+// nearly as high against each other as true duplicates do, because
+// the one number that actually distinguishes them is a small fraction
+// of the text. This extracts the comparison + value (or range) and
+// the time period from a title where the phrasing is recognizable.
+// A candidate pair is rejected only when BOTH sides have an
+// extractable signature AND it disagrees - anything not recognized
+// falls through to embedding score alone, so this doesn't need to
+// understand every possible market's phrasing to be useful, and
+// generalizes to new categories/platforms without per-market-type
+// hardcoding the way a team-alias map would.
+function extractNumericClaim(title) {
+  const t = (title || "").toLowerCase();
+
+  let m = t.match(/between\s+(-?\d+(?:\.\d+)?)\s*%\s+and\s+(-?\d+(?:\.\d+)?)\s*%/);
+  if (m) return { op: "range", low: parseFloat(m[1]), high: parseFloat(m[2]) };
+
+  m = t.match(/(?:more than|greater than|above|over)\s+(-?\d+(?:\.\d+)?)\s*%/);
+  if (m) return { op: "gt", value: parseFloat(m[1]) };
+
+  m = t.match(/at least\s+(-?\d+(?:\.\d+)?)\s*%/) ||
+      t.match(/(-?\d+(?:\.\d+)?)\s*%\s*(?:or higher|or more|\+)/);
+  if (m) return { op: "gte", value: parseFloat(m[1]) };
+
+  m = t.match(/(?:less than|below|under)\s+(-?\d+(?:\.\d+)?)\s*%/);
+  if (m) return { op: "lt", value: parseFloat(m[1]) };
+
+  m = t.match(/\bbe\s+(-?\d+(?:\.\d+)?)\s*%/);
+  if (m) return { op: "eq", value: parseFloat(m[1]) };
+
+  return null;
+}
+
+function extractPeriod(title) {
+  const t = (title || "").toUpperCase();
+  let m = t.match(/\bQ([1-4])\s*(\d{4})\b/);
+  if (m) return { quarter: parseInt(m[1], 10), year: parseInt(m[2], 10) };
+  m = t.match(/\b(20\d{2})\b/);
+  if (m) return { quarter: null, year: parseInt(m[1], 10) };
+  return null;
+}
+
+const NUMERIC_EPS = 0.05; // float safety margin, not a fuzzy-match tolerance
+
+function numericClaimsCompatible(a, b) {
+  if (!a || !b) return true; // nothing extractable on one side - don't block on it
+  if (a.op === "range" || b.op === "range") {
+    return a.op === "range" && b.op === "range" &&
+      Math.abs(a.low - b.low) < NUMERIC_EPS && Math.abs(a.high - b.high) < NUMERIC_EPS;
+  }
+  const group = op => (op === "gt" || op === "gte") ? "gte" : (op === "lt" || op === "lte") ? "lte" : op;
+  if (group(a.op) !== group(b.op)) return false;
+  return Math.abs(a.value - b.value) < NUMERIC_EPS;
+}
+
+function periodsCompatible(a, b) {
+  if (!a || !b) return true;
+  if (a.year !== b.year) return false;
+  if (a.quarter != null || b.quarter != null) return a.quarter === b.quarter;
+  return true; // both annual-only, same year
+}
+
+function scalarSignaturesCompatible(titleA, titleB) {
+  return numericClaimsCompatible(extractNumericClaim(titleA), extractNumericClaim(titleB)) &&
+         periodsCompatible(extractPeriod(titleA), extractPeriod(titleB));
+}
+
+// ── Shared embedding-based matcher for non-sports markets ────────
+// Used by both matchonly and normal mode so they can't drift apart -
+// they duplicated this logic separately for a while this session and
+// it caused real bugs (a diagnostic added to one branch and forgotten
+// in the other).
+function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
+  const polyEmbedded = (polyDb || [])
+    .filter(m => m.embedding)
+    .map(m => ({ ...m, _vec: JSON.parse(m.embedding) }));
+
+  const topScores = [];
+  const candidates = [];
+
+  for (const km of (kalshiDb || [])) {
+    if (!km.embedding) continue;
+    const kVec = JSON.parse(km.embedding);
+    let rowBestScore = 0;
+    let rowBestPm = null;
+
+    for (const pm of polyEmbedded) {
+      if (km.sport_tag !== pm.sport_tag) continue;
+      const score = cosineSimilarity(kVec, pm._vec);
+      if (score > rowBestScore) {
+        rowBestScore = score;
+        rowBestPm = pm;
+      }
+      if (score >= threshold && scalarSignaturesCompatible(km.title, pm.title)) {
+        candidates.push({ km, pm, score });
+      }
+    }
+
+    if (rowBestPm) {
+      topScores.push({ score: rowBestScore, kalshi: km.title, poly: rowBestPm.title });
+    }
+  }
+
+  // Greedy by globally descending score, not by Kalshi row order - so
+  // when several Kalshi rows compete for the same Polymarket market,
+  // the actual best-scoring candidate wins it instead of whichever
+  // Kalshi row happened to be processed first.
+  candidates.sort((a, b) => b.score - a.score);
+
+  const usedKalshi = new Set();
+  const usedPoly = new Set();
+  const newPairs = [];
+  const acceptedPairs = [];
+
+  for (const c of candidates) {
+    if (usedKalshi.has(c.km.id) || usedPoly.has(c.pm.id)) continue;
+    newPairs.push({
+      kalshi_id:     c.km.id,
+      polymarket_id: c.pm.id,
+      similarity:    c.score,
+      created_at:    Math.floor(Date.now() / 1000),
+    });
+    acceptedPairs.push({ score: c.score, kalshi: c.km.title, poly: c.pm.title });
+    usedKalshi.add(c.km.id);
+    usedPoly.add(c.pm.id);
+  }
+
+  topScores.sort((a, b) => b.score - a.score);
+  acceptedPairs.sort((a, b) => b.score - a.score);
+
+  return {
+    newPairs,
+    matchDiagnostics: {
+      threshold,
+      kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
+      polyEmbeddedCount: polyEmbedded.length,
+      acceptedPairs: acceptedPairs.slice(0, 100),
+      topScores: topScores.slice(0, 10),
+    },
+  };
+}
+
 // ── MLB team name map ──────────────────────────────────────────
 // Maps every Kalshi abbreviation AND common short form to canonical
 // full team name. Both platforms' titles get normalized through this
@@ -534,63 +679,9 @@ export default async function handler(req, res) {
         );
       } else {
         // Use embedding-based matching for non-sports
-        const usedPolyIds = new Set();
-        const polyEmbedded = (polyDb || [])
-          .filter(m => m.embedding)
-          .map(m => ({ ...m, _vec: JSON.parse(m.embedding) }));
-
-        // See the equivalent block in normal mode below for why this
-        // tracks the best score regardless of threshold.
-        const topScores = [];
-        const acceptedPairs = [];
-
-        for (const km of (kalshiDb || [])) {
-          if (!km.embedding) continue;
-          const kVec = JSON.parse(km.embedding);
-          let bestMatch = null;
-          let bestScore = 0;
-          let rowBestScore = 0;
-          let rowBestPm = null;
-
-          for (const pm of polyEmbedded) {
-            if (km.sport_tag !== pm.sport_tag) continue;
-            const score = cosineSimilarity(kVec, pm._vec);
-            if (score > rowBestScore) {
-              rowBestScore = score;
-              rowBestPm = pm;
-            }
-            if (usedPolyIds.has(pm.id)) continue;
-            if (score > bestScore && score >= THRESHOLD) {
-              bestScore = score;
-              bestMatch = pm;
-            }
-          }
-
-          if (rowBestPm) {
-            topScores.push({ score: rowBestScore, kalshi: km.title, poly: rowBestPm.title });
-          }
-
-          if (bestMatch) {
-            newPairs.push({
-              kalshi_id:     km.id,
-              polymarket_id: bestMatch.id,
-              similarity:    bestScore,
-              created_at:    Math.floor(Date.now() / 1000),
-            });
-            acceptedPairs.push({ score: bestScore, kalshi: km.title, poly: bestMatch.title });
-            usedPolyIds.add(bestMatch.id);
-          }
-        }
-
-        topScores.sort((a, b) => b.score - a.score);
-        acceptedPairs.sort((a, b) => b.score - a.score);
-        matchDiagnostics = {
-          threshold: THRESHOLD,
-          kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
-          polyEmbeddedCount: polyEmbedded.length,
-          acceptedPairs: acceptedPairs.slice(0, 100),
-          topScores: topScores.slice(0, 10),
-        };
+        const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
+        newPairs = result.newPairs;
+        matchDiagnostics = result.matchDiagnostics;
       }
 
       const pairsUpsert = newPairs.length > 0
@@ -688,57 +779,23 @@ export default async function handler(req, res) {
         .from("markets").select("id, title, sport_tag, embedding")
         .eq("platform", "polymarket").not("embedding", "is", null);
 
-      const usedPolyIds = new Set();
-      const polyEmbedded = (polyDb || []).map(m => ({ ...m, _vec: JSON.parse(m.embedding) }));
-
-      // Track the best score seen per Kalshi row regardless of threshold,
-      // so a run that finds zero pairs can still show whether real
-      // candidates were scoring just under THRESHOLD (recalibrate it) or
-      // nowhere close (something else is wrong).
-      const topScores = [];
-      const acceptedPairs = [];
-
-      for (const km of (kalshiDb || [])) {
-        const kVec = JSON.parse(km.embedding);
-        let bestMatch = null;
-        let bestScore = 0;
-        let rowBestScore = 0;
-        let rowBestPm = null;
-
-        for (const pm of polyEmbedded) {
-          if (km.sport_tag !== pm.sport_tag) continue;
-          const score = cosineSimilarity(kVec, pm._vec);
-          if (score > rowBestScore) {
-            rowBestScore = score;
-            rowBestPm = pm;
-          }
-          if (usedPolyIds.has(pm.id)) continue;
-          if (score > bestScore && score >= THRESHOLD) {
-            bestScore = score;
-            bestMatch = pm;
-          }
-        }
-
-        if (rowBestPm) {
-          topScores.push({ score: rowBestScore, kalshi: km.title, poly: rowBestPm.title });
-        }
-
-        if (bestMatch) {
-          newPairs.push({ kalshi_id: km.id, polymarket_id: bestMatch.id, similarity: bestScore, created_at: Math.floor(Date.now() / 1000) });
-          acceptedPairs.push({ score: bestScore, kalshi: km.title, poly: bestMatch.title });
-          usedPolyIds.add(bestMatch.id);
-        }
+      // Clear existing pairs for this sport before re-matching. Missing
+      // this meant stale pairs (e.g. wrong-threshold matches from
+      // before the numeric-signature gate existed) never got replaced -
+      // upsert only overwrites a row when both kalshi_id AND
+      // polymarket_id match, so a kalshi row matching a *different*
+      // Polymarket market this run just adds a second row instead of
+      // replacing the old wrong one.
+      const kalshiIdsForSport = (kalshiDb || [])
+        .filter(m => sport === "all" || m.sport_tag === sport)
+        .map(m => m.id);
+      if (kalshiIdsForSport.length > 0) {
+        await supabase.from("pairs").delete().in("kalshi_id", kalshiIdsForSport);
       }
 
-      topScores.sort((a, b) => b.score - a.score);
-      acceptedPairs.sort((a, b) => b.score - a.score);
-      matchDiagnostics = {
-        threshold: THRESHOLD,
-        kalshiEmbeddedCount: (kalshiDb || []).length,
-        polyEmbeddedCount: (polyDb || []).length,
-        acceptedPairs: acceptedPairs.slice(0, 100),
-        topScores: topScores.slice(0, 10),
-      };
+      const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
+      newPairs = result.newPairs;
+      matchDiagnostics = result.matchDiagnostics;
     }
 
     const pairsUpsert = newPairs.length > 0
