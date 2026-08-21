@@ -570,6 +570,7 @@ export default async function handler(req, res) {
 
     // Run matching
     let newPairs = [];
+    let matchDiagnostics = null;
     const isSport = sport !== "all" && SPORTS_TAGS.has(sport);
 
     if (isSport) {
@@ -600,24 +601,50 @@ export default async function handler(req, res) {
       const usedPolyIds = new Set();
       const polyEmbedded = (polyDb || []).map(m => ({ ...m, _vec: JSON.parse(m.embedding) }));
 
+      // Track the best score seen per Kalshi row regardless of threshold,
+      // so a run that finds zero pairs can still show whether real
+      // candidates were scoring just under THRESHOLD (recalibrate it) or
+      // nowhere close (something else is wrong).
+      const topScores = [];
+
       for (const km of (kalshiDb || [])) {
         const kVec = JSON.parse(km.embedding);
         let bestMatch = null;
         let bestScore = 0;
+        let rowBestScore = 0;
+        let rowBestPm = null;
+
         for (const pm of polyEmbedded) {
-          if (usedPolyIds.has(pm.id)) continue;
           if (km.sport_tag !== pm.sport_tag) continue;
           const score = cosineSimilarity(kVec, pm._vec);
+          if (score > rowBestScore) {
+            rowBestScore = score;
+            rowBestPm = pm;
+          }
+          if (usedPolyIds.has(pm.id)) continue;
           if (score > bestScore && score >= THRESHOLD) {
             bestScore = score;
             bestMatch = pm;
           }
         }
+
+        if (rowBestPm) {
+          topScores.push({ score: rowBestScore, kalshi: km.title, poly: rowBestPm.title });
+        }
+
         if (bestMatch) {
           newPairs.push({ kalshi_id: km.id, polymarket_id: bestMatch.id, similarity: bestScore, created_at: Math.floor(Date.now() / 1000) });
           usedPolyIds.add(bestMatch.id);
         }
       }
+
+      topScores.sort((a, b) => b.score - a.score);
+      matchDiagnostics = {
+        threshold: THRESHOLD,
+        kalshiEmbeddedCount: (kalshiDb || []).length,
+        polyEmbeddedCount: (polyDb || []).length,
+        topScores: topScores.slice(0, 10),
+      };
     }
 
     if (newPairs.length > 0) {
@@ -635,6 +662,7 @@ export default async function handler(req, res) {
       totalKalshi: kalshiRaw.length,
       totalPoly:   polyRaw.length,
       totalPairs:  count || 0,
+      ...(matchDiagnostics ? { matchDiagnostics } : {}),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
