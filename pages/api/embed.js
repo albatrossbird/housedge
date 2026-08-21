@@ -292,7 +292,11 @@ function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
       kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
       polyEmbeddedCount: polyEmbedded.length,
       acceptedPairs: acceptedPairs.slice(0, 100),
-      topScores: topScores.slice(0, 10),
+      // Uncapped (bounded only by kalshiDb size) rather than top-10 -
+      // the top of the list is dominated by one cluster (e.g. GDP
+      // buckets), which hides whether other categories (CPI, Fed rate)
+      // have real candidates further down.
+      topScores,
     },
   };
 }
