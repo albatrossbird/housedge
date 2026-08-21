@@ -12,13 +12,28 @@ const KALSHI_SERIES = [
 
 const CHUNK = 100;
 
+// The first Supabase call in a request consistently succeeds; every call
+// after it, in the same invocation, fails with a bare "TypeError: fetch
+// failed" - a network-layer failure raised before any HTTP response comes
+// back, not an error from Postgres. That's the signature of a transient
+// connection problem (a stale keep-alive socket, pool pressure, etc.),
+// not a bad query - so retry on exactly that error class instead of
+// guessing further about query shape.
+async function withRetry(fn, attempts = 3, delayMs = 400) {
+  let result;
+  for (let i = 0; i < attempts; i++) {
+    result = await fn();
+    if (!result.error || !/fetch failed/i.test(result.error.message || "")) return result;
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+  }
+  return result;
+}
+
 // Select-merge-upsert instead of hundreds of individual update() calls:
-// firing dozens of concurrent per-row writes from one serverless
-// invocation was hitting raw "fetch failed" network errors against
-// Supabase. Pulling the existing full row first means the upsert payload
-// always has every NOT NULL column (so it's still safe even though it's
-// upsert, not a plain update), and it's a small number of bulk round
-// trips instead of one per row.
+// pulling the existing full row first means the upsert payload always has
+// every NOT NULL column (so it's safe even though it's upsert, not a
+// plain update), in a small number of bulk round trips instead of one
+// call per row.
 async function applyUpdates(updates) {
   let updated = 0;
   const errors = [];
@@ -27,10 +42,9 @@ async function applyUpdates(updates) {
     const chunk = updates.slice(i, i + CHUNK);
     const ids = chunk.map(u => u.id);
 
-    const { data: existing, error: selectError } = await supabase
-      .from("markets")
-      .select("*")
-      .in("id", ids);
+    const { data: existing, error: selectError } = await withRetry(() =>
+      supabase.from("markets").select("*").in("id", ids)
+    );
 
     if (selectError) {
       errors.push(`select: ${selectError.message}`);
@@ -44,7 +58,9 @@ async function applyUpdates(updates) {
 
     if (merged.length === 0) continue;
 
-    const { error } = await supabase.from("markets").upsert(merged, { onConflict: "id" });
+    const { error } = await withRetry(() =>
+      supabase.from("markets").upsert(merged, { onConflict: "id" })
+    );
     if (error) errors.push(`upsert: ${error.message}`);
     else updated += merged.length;
   }
