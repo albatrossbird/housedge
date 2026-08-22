@@ -596,6 +596,7 @@ const POLY_TAGS = [
   { tag: "899",    sport: "nhl"    },
   { tag: "100381", sport: "mlb"    },
   { tag: "129",    sport: "econ"   }, // federal reserve
+  { tag: "131",    sport: "econ"   }, // interest rates (rate-level questions, vs "federal reserve"'s hike-count ones)
   { tag: "101249", sport: "econ"   }, // Macro Inflation (CPI)
   { tag: "100201", sport: "econ"   }, // recession
   { tag: "370",    sport: "econ"   }, // GDP

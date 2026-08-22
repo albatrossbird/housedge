@@ -113,12 +113,16 @@ export default async function handler(req, res) {
         updated_at: Math.floor(Date.now() / 1000),
       }));
 
-    // Fetch fresh prices from Polymarket for pairs already in DB
+    // Fetch fresh prices from Polymarket for pairs already in DB.
+    // Explicit higher limit - the implicit default (1000) was silently
+    // capping this as the table grew across more categories, so
+    // refresh stopped reaching every Polymarket row (see embed.js's
+    // matchonly query, which had the same bug).
     const { data: polyMarkets } = await supabase
       .from("markets")
       .select("id")
       .not("id", "ilike", "KX%")
-      .limit(1000);
+      .limit(5000);
 
     const polyIds = (polyMarkets || []).map(m => m.id);
 
