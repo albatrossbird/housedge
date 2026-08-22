@@ -62,7 +62,16 @@ export default async function handler(req, res) {
           } catch {}
         }
 
-        const kalshiUrl = `https://kalshi.com/markets/${(row.k_event_ticker || row.kalshi_id).toLowerCase()}`;
+        // Kalshi's site only reliably resolves the series-level page
+        // (e.g. kalshi.com/markets/kxgdp) - a combined series+event+
+        // strike ticker as one path segment (what this used to build)
+        // 404s. The event-level URL needs a human-readable slug we
+        // don't have (e.g. "annual-gdp", not the raw ticker), so this
+        // links to the series page rather than guessing at that.
+        const seriesTicker = (row.kalshi_id || "").split("-")[0];
+        const kalshiUrl = seriesTicker
+          ? `https://kalshi.com/markets/${seriesTicker.toLowerCase()}`
+          : "https://kalshi.com/";
         const polyUrl = row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/";
 
         return {
