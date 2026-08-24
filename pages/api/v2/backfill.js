@@ -27,7 +27,7 @@
 // - v1 stored a single price with no bid/ask, so seeded quotes set
 //   `mid` and leave bid/ask NULL rather than inventing a spread.
 
-import { selectAll, upsert } from "../../../lib/v2/db.js";
+import { selectAll, upsert, credentialInUse } from "../../../lib/v2/db.js";
 import { extractNumericClaim, extractPeriod } from "../../../lib/v2/claims.js";
 
 const SPORTS = new Set(["mlb", "nba", "nhl", "soccer"]);
@@ -110,6 +110,7 @@ export default async function handler(req, res) {
       });
       return res.status(200).json({
         mode: "dry-run",
+        credential: credentialInUse(),
         category: category || "all",
         v1: { markets: (markets || []).length, pairs: (pairs || []).length },
         wouldWrite: {
@@ -245,6 +246,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       mode: "write",
+      credential: credentialInUse(),
       category: category || "all",
       v1: { markets: (markets || []).length, pairs: (pairs || []).length, usablePairs: usablePairs.length },
       wrote: {
