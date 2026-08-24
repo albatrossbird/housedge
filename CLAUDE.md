@@ -71,9 +71,29 @@ Both modes return `matchDiagnostics` with `threshold`, embedded counts, `accepte
 
 Economics: **1 verified-correct pair** out of 163 Kalshi econ markets. That is the genuine overlap, not a bug — the full uncapped `topScores` list was audited and every other Kalshi CPI/Fed-rate/GDP row's best candidate is a legitimately different market (wrong threshold, wrong country, or hike-count-vs-rate-level). Kalshi lists ~9 GDP threshold buckets per quarter where Polymarket lists one. Adding Polymarket's "interest rates" tag (131) produced 16 candidates, 15 of them ECB/Bank of England — all correctly filtered out.
 
-## Database (Supabase, no migrations in this repo)
+## v2 schema (live, running alongside v1)
 
-Schema and the RPC live only in the Supabase dashboard — no SQL is checked into this repo. Changes must be made there directly (or a migrations setup added).
+The v1 model can't express a third venue or a multi-outcome market (see `docs/architecture-v2.md` for the full argument). The v2 schema is **built and backfilled**, running in parallel — v1 still serves the live site.
+
+- **Migrations now live in `supabase/migrations/`.** Run them in the Supabase SQL editor; both are idempotent.
+  - `0001_v2_schema.sql` — `events` → `outcomes` → `listings` → `quotes`, plus `latest_quotes` and `v2_market_view`.
+  - `0002_v2_rls.sql` — RLS on v2 tables only (v1's posture is untouched so the live path can't break).
+- **Writes to v2 tables need `SUPABASE_SERVICE_ROLE_KEY`** (set in Vercel). It bypasses RLS; anon is SELECT-only. Server-side API routes only — never a `NEXT_PUBLIC_*` var. `lib/v2/db.js` falls back to anon and reports `credentialInUse()` so a missing key fails loudly.
+  - Vercel only exposes an env var to deployments built *after* it's added. Adding the key without redeploying reads as `credential: "anon"`.
+- **Routes**: `/api/v2/health` (credential + live RLS probe + row counts), `/api/v2/backfill` (`?dry=1`, `?category=`), `/api/v2/markets` (read path).
+- **Current state**: 67 events, 134 outcomes, 2566 listings (268 matched / 2298 unmatched), 2566 quotes. Re-running backfill is a no-op.
+
+Key v2 design points:
+- `listings` are unique on `(venue_id, venue_market_id, side)`. One Kalshi binary ticker is tradable from both sides and its no-side has its own bid/ask — **not** `1 − yes` — so each side needs its own quote stream.
+- `listings.outcome_id` is nullable by design; unmatched is a valid state and those rows are the review-queue backlog.
+- `quotes` is append-only and **write-on-change** (`lib/v2/quotes.js`), with a 6h heartbeat. Unconditional 5-min polling would be ~170k rows/day and fill the 500MB free tier in ~a month recording duplicates. It's also the only table that cannot be backfilled.
+- `lib/v2/claims.js` holds the claim extractors, imported by both `embed.js` and the v2 layer — v2 persists these as columns, so a divergent copy would write wrong data rather than just misreport it.
+
+**Arb numbers from `/api/v2/markets` are not yet executable.** v1 never stored bid/ask, so backfilled quotes have `mid` only and the arb calc falls back to it; fees aren't modelled either (`feesIncluded: false`). Treat any edge as "worth checking", not a trade, until ingestion writes real bid/ask and fees land.
+
+## v1 database (Supabase, schema still dashboard-only)
+
+The v1 `markets`/`pairs` schema and the `get_pairs` RPC live only in the Supabase dashboard — that SQL is not checked in. Changes must be made there directly.
 
 - **`markets`** — one row per market side. `id` (text PK — Kalshi IDs start with `KX`, Polymarket IDs are numeric strings), `platform`, `title`, `embedding` (JSON, null for sports), `yes_price`, `no_price`, `volume`, `sport_tag`, `event_ticker`, `side_label`, `slug`, `outcomes`, `outcome_prices`, `updated_at`. `platform` is NOT NULL — this matters, see pitfalls.
 - **`pairs`** — `id` (serial), `kalshi_id`, `polymarket_id`, `similarity`, `created_at`. UNIQUE on `(kalshi_id, polymarket_id)`.
