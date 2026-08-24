@@ -161,6 +161,13 @@ function extractNumericClaim(title) {
   m = t.match(/\b(\d+)\s+(?:\w+\s+){0,2}?(?:hikes?|cuts?)\b/);
   if (m) return { unit: "count", op: "eq", value: parseFloat(m[1]) };
 
+  // "25 bps increase/decrease" - a distinct unit from percent-level
+  // claims, so this alone is enough to block a mismatch even without
+  // fully parsing direction/magnitude (a bps claim can never be
+  // compatible with a percent claim, per the unit check below).
+  m = t.match(/(\d+(?:\.\d+)?)\+?\s*bps/);
+  if (m) return { unit: "bps", op: "eq", value: parseFloat(m[1]) };
+
   return null;
 }
 
@@ -207,6 +214,15 @@ const NON_US_REGION_PATTERNS = [
   /\bgermany\b/, /\bjapan\b/, /\bmexico\b/, /\bchina\b/, /\bfrance\b/,
   /\bitaly\b/, /\bcanada\b/, /\bworld\b/, /\bglobal\b/, /\bindia\b/,
   /\bbrazil\b/, /\bsouth korea\b/, /\baustralia\b/,
+  // Non-US central banks - the "interest rates" tag surfaces plenty of
+  // these (ECB, BOE, ...) phrased without a country/region word at all
+  // ("Will the ECB announce a 25 bps increase..."), so a country-name
+  // check alone missed them.
+  /\becb\b/, /\beuropean central bank\b/, /\bbank of england\b/, /\bboe\b/,
+  /\bbank of japan\b/, /\bboj\b/, /\breserve bank of australia\b/, /\brba\b/,
+  /\bbank of canada\b/, /\bboc\b/, /\bswiss national bank\b/, /\bsnb\b/,
+  /\bpeople'?s bank of china\b/, /\bpboc\b/, /\breserve bank of india\b/,
+  /\brbi\b/, /\bbank of korea\b/, /\bbok\b/,
 ];
 
 function mentionsNonUsRegion(title) {
