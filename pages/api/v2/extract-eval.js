@@ -39,6 +39,7 @@ export default async function handler(req, res) {
   const models = (req.query.models || DEFAULT_MODELS.join(",")).split(",").map(s => s.trim());
   const limit = Math.min(parseInt(req.query.limit || "100", 10), 500);
   const pairsOnly = req.query.pairsonly === "1";
+  const raw = req.query.raw === "1"; // dump extracted claims for inspection
 
   try {
     // ── 1. decision test on labeled pairs ───────────────────────
@@ -152,6 +153,11 @@ export default async function handler(req, res) {
           usage,
         },
         elapsedMs: Date.now() - modelStart,
+        ...(raw ? { rawClaims: sampleRun.claims.slice(0, 40).map(c => ({
+          title: c.title.slice(0, 70), subject: c.subject, metric: c.metric_type,
+          unit: c.unit, op: c.op, value: c.value, region: c.region,
+          y: c.period_year, q: c.period_quarter, m: c.period_month, conf: c.confidence,
+        })) } : {}),
         errors: [...pairRun.errors, ...sampleRun.errors].slice(0, 3),
       };
     }
