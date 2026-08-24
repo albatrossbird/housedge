@@ -81,6 +81,10 @@ export default async function handler(req, res) {
         regex: c.regexOk ? "accept" : "reject",
         claim: c.claimVerdict.compatible ? "accept" : "reject",
         claimReason: c.claimVerdict.reason,
+        // the extracted values behind the verdict, so a disagreement can
+        // be judged rather than taken on trust
+        claimK: { subj: c.k.claim_subject, metric: c.k.claim_metric_type, unit: c.k.claim_unit, op: c.k.claim_op, val: c.k.claim_value, y: c.k.claim_period_year, q: c.k.claim_period_quarter, m: c.k.claim_period_month, region: c.k.claim_region, conf: c.k.claim_confidence },
+        claimP: { subj: c.p.claim_subject, metric: c.p.claim_metric_type, unit: c.p.claim_unit, op: c.p.claim_op, val: c.p.claim_value, y: c.p.claim_period_year, q: c.p.claim_period_quarter, m: c.p.claim_period_month, region: c.p.claim_region, conf: c.p.claim_confidence },
       }));
 
     const accept = (list, pred) => {
