@@ -46,7 +46,16 @@ create index if not exists listings_claim_lookup_idx
 
 -- Surface claims on the read path so the UI can show *why* two listings
 -- were considered the same market, not just that they were.
-create or replace view v2_market_view as
+--
+-- DROP then CREATE, not CREATE OR REPLACE: replace can only append
+-- columns at the end of an existing view, and these claim columns sit
+-- before the quote columns, so replace fails with
+-- "cannot change name of view column \"bid\" to \"claim_subject\"".
+-- Nothing but our own API route reads this view, so dropping is safe —
+-- but the grant below must be re-applied, since dropping takes it too.
+drop view if exists v2_market_view;
+
+create view v2_market_view as
 select
   e.id                as event_id,
   e.category,
