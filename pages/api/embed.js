@@ -210,10 +210,14 @@ function periodsCompatible(a, b) {
 // assumption, so it's scoped to sportTag === "econ" rather than baked
 // into the general-purpose extractors above.
 const NON_US_REGION_PATTERNS = [
-  /\buk\b/, /\bunited kingdom\b/, /\beurozone\b/, /\beuropean union\b/,
-  /\bgermany\b/, /\bjapan\b/, /\bmexico\b/, /\bchina\b/, /\bfrance\b/,
-  /\bitaly\b/, /\bcanada\b/, /\bworld\b/, /\bglobal\b/, /\bindia\b/,
-  /\bbrazil\b/, /\bsouth korea\b/, /\baustralia\b/,
+  // Noun and adjective forms both - "Japanese GDP", "German inflation",
+  // "British jobs report" are as common as "Japan"/"Germany"/"UK", and
+  // \bjapan\b doesn't match "Japanese" (no word boundary between "n"
+  // and "e").
+  /\buk\b/, /\bbritish\b/, /\bunited kingdom\b/, /\beurozone\b/, /\beuropean union\b/, /\beuropean\b/,
+  /\bgermany\b/, /\bgerman\b/, /\bjapan(?:ese)?\b/, /\bmexic(?:o|an)\b/, /\bchin(?:a|ese)\b/, /\bfrance\b/, /\bfrench\b/,
+  /\bitaly\b/, /\bitalian\b/, /\bcanada\b/, /\bcanadian\b/, /\bworld\b/, /\bglobal\b/, /\bindia\b/, /\bindian\b/,
+  /\bbrazil\b/, /\bbrazilian\b/, /\bsouth korea\b/, /\bkorean\b/, /\baustralia\b/, /\baustralian\b/,
   // Non-US central banks - the "interest rates" tag surfaces plenty of
   // these (ECB, BOE, ...) phrased without a country/region word at all
   // ("Will the ECB announce a 25 bps increase..."), so a country-name
