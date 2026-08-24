@@ -17,7 +17,7 @@
 // including the caveat that the eval saturated.
 
 import crypto from "crypto";
-import { selectAll, upsert, credentialInUse } from "../../../lib/v2/db.js";
+import { selectAll, patchWhere, credentialInUse } from "../../../lib/v2/db.js";
 import { extractClaims, costOf } from "../../../lib/v2/extract.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
@@ -96,16 +96,24 @@ export default async function handler(req, res) {
     const claimByTitle = new Map(run.claims.map(c => [c.title, c]));
 
     const now = new Date().toISOString();
-    const rows = [];
-    for (const t of batchTitles) {
-      const c = claimByTitle.get(t);
-      if (!c) continue; // extraction failed for this title — leave hash null so it retries
-      for (const l of byTitle.get(t).listings) {
-        rows.push({
-          // full row identity so upsert resolves on the natural key
-          id: l.id,
-          venue_id: l.venue_id,
-          venue_market_id: undefined, // not needed; id PK conflict target below
+
+    // One PATCH per distinct title, setting the claim on every listing
+    // that shares it (both sides of a binary market). Deliberately not
+    // an upsert — see patchWhere() for why a partial upsert fails here,
+    // and why sending full rows is the wrong workaround on a table
+    // holding embeddings.
+    let listingsUpdated = 0;
+    const writeErrors = [];
+    const CONC = 8;
+    const work = batchTitles.filter(t => claimByTitle.has(t));
+
+    for (let i = 0; i < work.length; i += CONC) {
+      const slice = work.slice(i, i + CONC);
+      const settled = await Promise.all(slice.map(async t => {
+        const c = claimByTitle.get(t);
+        const ids = byTitle.get(t).listings.map(l => l.id);
+        const filter = `id=in.(${ids.map(id => `"${id}"`).join(",")})`;
+        const { error } = await patchWhere("listings", filter, {
           claim_subject: c.subject ?? null,
           claim_metric_type: c.metric_type ?? null,
           claim_unit: c.unit ?? null,
@@ -123,12 +131,13 @@ export default async function handler(req, res) {
           claim_extracted_at: now,
           claim_title_hash: titleHash(t, model),
         });
+        return { error, n: ids.length };
+      }));
+      for (const r of settled) {
+        if (r.error) writeErrors.push(JSON.stringify(r.error));
+        else listingsUpdated += r.n;
       }
     }
-    // strip the undefined placeholder so PostgREST doesn't see the key
-    for (const r of rows) delete r.venue_market_id;
-
-    const up = await upsert("listings", rows, "id");
 
     res.status(200).json({
       mode: "write",
@@ -137,11 +146,11 @@ export default async function handler(req, res) {
       category: category || "all",
       distinctTitlesProcessed: batchTitles.length,
       claimsReturned: run.claims.length,
-      listingsUpdated: up.count,
+      listingsUpdated,
       remaining: Math.max(0, distinctTitles.length - batchTitles.length),
       costUSD: Number((run.cost || 0).toFixed(5)),
       usage: run.usage,
-      errors: [...run.errors, ...up.errors].slice(0, 5),
+      errors: [...run.errors, ...writeErrors].slice(0, 5),
     });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack?.split("\n").slice(0, 4) });
