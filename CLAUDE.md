@@ -89,6 +89,17 @@ Key v2 design points:
 - `quotes` is append-only and **write-on-change** (`lib/v2/quotes.js`), with a 6h heartbeat. Unconditional 5-min polling would be ~170k rows/day and fill the 500MB free tier in ~a month recording duplicates. It's also the only table that cannot be backfilled.
 - `lib/v2/claims.js` holds the claim extractors, imported by both `embed.js` and the v2 layer — v2 persists these as columns, so a divergent copy would write wrong data rather than just misreport it.
 
+### LLM claim extraction (evaluated, not yet wired in)
+
+`lib/v2/extract.js` extracts structured resolution claims via the Claude API, as the eventual replacement for the regex gate. Model choice was decided by measurement — see `docs/extraction-model-eval.md`.
+
+- **Use `claude-haiku-4-5`.** It matched Sonnet 5 and Opus 5 on every measured axis (16/16 labeled decisions, zero regressions vs regex) at ~1/6 the cost and half the latency. ~$0.51 per 1k markets; the full 1,283-title backfill is ~$0.66.
+- Coverage roughly doubles vs regex (extracts a claim on ~50 of 100 markets where regex returns nothing) with zero cases where regex saw something the LLM missed.
+- **The eval saturated** — all three models scored 100%, so it cannot discriminate on accuracy. Add harder cases before trusting any of them on a new venue's phrasing.
+- Nullable enums in the JSON schema must use `anyOf: [{type,enum},{type:"null"}]`. A `type: ["string","null"]` union alongside `enum` is rejected with a 400.
+- Run one model per `/api/v2/extract-eval` request; three models x 100 markets exceeds the Vercel function timeout.
+- Requires `ANTHROPIC_API_KEY` in Vercel env (and a redeploy, same as the service-role key).
+
 **Arb numbers from `/api/v2/markets` are not yet executable.** v1 never stored bid/ask, so backfilled quotes have `mid` only and the arb calc falls back to it; fees aren't modelled either (`feesIncluded: false`). Treat any edge as "worth checking", not a trade, until ingestion writes real bid/ask and fees land.
 
 ## v1 database (Supabase, schema still dashboard-only)
