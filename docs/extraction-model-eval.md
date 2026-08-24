@@ -80,3 +80,83 @@ fallback. That keeps recurring spend proportional to novelty rather than volume.
 
 Run one model per request — three models x 100 markets exceeds the Vercel
 function timeout.
+
+---
+
+# Wiring extraction into the pipeline — result
+
+Run: 2026-08-21. Econ fully extracted (327 distinct titles, 654 listings,
+claude-haiku-4-5, **$0.165**).
+
+## Headline: extraction did NOT find more econ pairs
+
+| Gate | Econ pairs |
+|---|---|
+| Regex signature gate | 1 |
+| LLM claim gate | 1 |
+| Disagreements between them | **0** |
+
+Both gates independently accept exactly one pair — Kalshi "real GDP more
+than 3.0% in Q3 2026" ↔ Polymarket "US GDP growth in Q3 2026 greater than
+3.0%" — out of 3,745 candidate pairs above the 0.78 similarity threshold.
+
+**This is a real negative result, not a setup problem.** It confirms via
+an independent method what the uncapped `topScores` audit suggested:
+Polymarket does not list most of Kalshi's econ thresholds, so there is
+nothing to match them to. Kalshi publishes ~9 GDP threshold buckets per
+quarter plus a Fed rate ladder per meeting; Polymarket lists one GDP
+question per period and expresses Fed policy as hike *counts*. One pair
+is the genuine overlap.
+
+Two independent gates agreeing is considerably stronger evidence for that
+conclusion than one gate asserting it.
+
+## What the run did surface: a bug in the claim gate
+
+The first rematch reported 2 pairs vs regex's 1, which looked like the
+hoped-for improvement. The extra pair was wrong:
+
+```
+Kalshi:     GDP more than 2.5% in Q4 2026     (quarterly)
+Polymarket: US GDP growth in 2026  > 2.5%     (annual)
+```
+
+Quarterly growth and annual growth are different measures. Regex rejected
+it correctly; the claim gate accepted it.
+
+The fault was in `claimsCompatible`, not in extraction — the model
+extracted `quarter: 4` and `quarter: null` correctly. The gate only
+blocked when *both* sides had a quarter, applying the
+block-only-on-mutual-disagreement rule that is right for genuinely
+missing data. But a null quarter beside a populated one is not missing
+data: it means "annual", which is a different claim. The regex
+`periodsCompatible()` had always encoded this ("if either has a quarter,
+they must match"); porting it loosely is what introduced the bug.
+
+Fixed, re-verified against the 16 labeled cases (still 16/16), and the
+disagreement count fell to 0.
+
+**The lesson generalizes:** "don't block on missing data" is correct for
+fields where absence means *unknown*, and wrong for fields where absence
+means *a specific different value*. Period granularity is the second
+kind. Worth checking any future gate field against that distinction.
+
+## Not yet done: the write path
+
+`/api/v2/rematch?write=1` is implemented but was deliberately not run.
+It keys events on `source_key = claim:{listing_id}`, while backfilled
+events use `v1pair:{kalshi_id}` — so writing now would create a second
+event for the same market rather than updating the existing one. Before
+using it, events need deduplication on something canonical
+(subject + period + region), which is the natural next step and is also
+what the schema was designed to support.
+
+## Where extraction does earn its cost
+
+Not here, on two mature venues in a category whose overlap is genuinely
+one market. The value shows up where the bake-off measured it: **coverage
+roughly doubled** (a usable claim on ~50 of 100 markets where regex
+returns nothing), which is what determines whether a *new* venue or
+category works on day one instead of after four rounds of regex patching.
+Econ was the hardest case for regex and the least rewarding for
+extraction, precisely because we already hand-tuned regex against it.
