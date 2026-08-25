@@ -80,6 +80,29 @@ export function isMissingColumnError(error) {
   return /PGRST204|42703|column .* does not exist|Could not find the .* column/i.test(s);
 }
 
+// PostgREST requires every object in a bulk insert to carry the same
+// keys, and rejects the whole batch with PGRST102 "All object keys must
+// match" otherwise. Kalshi and Polymarket rows are upserted together and
+// legitimately diverge — only Kalshi has a separate NO book, a series
+// slug and a fee multiplier; only Polymarket has a fee schedule.
+//
+// This was masked until migration 0004 ran: with the columns absent,
+// every book field was stripped from both platforms, which happened to
+// make the key sets match again. Applying the migration is what exposed
+// it, so the fix belongs here rather than in the column list.
+//
+// Filling the gaps with null is accurate, not merely convenient — a
+// Polymarket row genuinely has no fee_multiplier.
+function alignKeys(batch) {
+  const keys = new Set();
+  for (const row of batch) for (const k of Object.keys(row)) keys.add(k);
+  return batch.map(row => {
+    const out = { ...row };
+    for (const k of keys) if (!(k in out)) out[k] = null;
+    return out;
+  });
+}
+
 async function upsertRows(table, rows, onConflict, batchSize = 50) {
   const errors = [];
   const warnings = [];
@@ -87,7 +110,7 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
   let stripBooks = false;
 
   for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize);
+    const batch = alignKeys(rows.slice(i, i + batchSize));
 
     const send = payload => restFetch(`${table}?on_conflict=${onConflict}`, {
       method: "POST",
@@ -95,7 +118,7 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
       body: JSON.stringify(payload),
     });
 
-    let { error } = await send(stripBooks ? batch.map(stripBookColumns) : batch);
+    let { error } = await send(stripBooks ? alignKeys(batch.map(stripBookColumns)) : batch);
 
     if (error && !stripBooks && isMissingColumnError(error)) {
       stripBooks = true;
@@ -103,7 +126,7 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
         "bid/ask columns missing - run supabase/migrations/0004_bid_ask_and_fees.sql; " +
         "writing prices without books until then"
       );
-      ({ error } = await send(batch.map(stripBookColumns)));
+      ({ error } = await send(alignKeys(batch.map(stripBookColumns))));
     }
 
     if (error) errors.push(JSON.stringify(error));
