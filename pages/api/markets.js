@@ -47,6 +47,9 @@ export default async function handler(req, res) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
 
+    const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0 };
+    const sampleDropped = [];
+
     const shaped = data
       .map(row => {
         let pYes = row.p_yes_price;
@@ -87,16 +90,37 @@ export default async function handler(req, res) {
         };
       })
       .filter(m => {
-        if (!m.kalshi.yes || !m.poly.yes) return false;
-        if (m.kalshi.yes <= 0.05 || m.kalshi.yes >= 0.95) return false;
-        if (m.poly.yes   <= 0.05 || m.poly.yes   >= 0.95) return false;
-        if (m._gameDate && m._gameDate.getTime() < todayMs) return false;
+        // Why a pair vanished between `pairs` and the page is otherwise
+        // invisible: an empty tab looks identical whether nothing
+        // matched, everything is priced outside the band, or every
+        // fixture has already been played. ?debug=1 reports the split.
+        const note = r => {
+          dropped[r]++;
+          if (sampleDropped.length < 5) {
+            sampleDropped.push({
+              reason: r, id: m.id, title: (m.title || "").slice(0, 70),
+              k: m.kalshi.yes, p: m.poly.yes,
+              gameDate: m._gameDate ? m._gameDate.toISOString().slice(0, 10) : null,
+            });
+          }
+          return false;
+        };
+        if (!m.kalshi.yes || !m.poly.yes)                   return note("missingPrice");
+        if (m.kalshi.yes <= 0.05 || m.kalshi.yes >= 0.95)   return note("kalshiOutOfBand");
+        if (m.poly.yes   <= 0.05 || m.poly.yes   >= 0.95)   return note("polyOutOfBand");
+        if (m._gameDate && m._gameDate.getTime() < todayMs) return note("expired");
         return true;
       })
       .map(({ _gameDate, ...m }) => m);
 
     res.setHeader("Cache-Control", "s-maxage=30");
-    res.status(200).json({ pairs: shaped, needsEmbed: shaped.length === 0 });
+    res.status(200).json({
+      pairs: shaped,
+      needsEmbed: shaped.length === 0,
+      ...(req.query.debug === "1"
+        ? { debug: { rowsFromRpc: data.length, dropped, sampleDropped: sampleDropped.slice(0, 5) } }
+        : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
