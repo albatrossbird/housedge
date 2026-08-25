@@ -12,6 +12,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
+import { cronAuthorized } from "../../lib/cronAuth.js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -570,6 +571,9 @@ export default async function handler(req, res) {
   const matchOnly = req.query.matchonly === "1";
   const sport     = req.query.sport || "all";
   const THRESHOLD = parseFloat(req.query.threshold || "0.78");
+
+  const auth = cronAuthorized(req);
+  if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
 
   try {
     if (matchOnly) {

@@ -1,0 +1,74 @@
+name: Discover and match markets
+
+# The expensive counterpart to refresh-prices: fetches new markets from
+# both venues, embeds the non-sports ones, and recomputes matches.
+#
+# Daily rather than every 15 minutes because it spends Voyage tokens and
+# does full re-matching. New sports fixtures appear daily, which sets the
+# useful floor; econ/crypto/politics move far slower than that.
+#
+# Categories run SEQUENTIALLY with a pause between them. Each /api/embed
+# call is a long-running serverless function, and firing five at once
+# risks Vercel concurrency and duration limits — the failure mode being a
+# half-written match set, which is worse than a slow job.
+
+on:
+  schedule:
+    - cron: "20 9 * * *"    # 09:20 UTC daily
+  workflow_dispatch:
+    inputs:
+      categories:
+        description: "Space-separated categories to run"
+        default: "mlb nba nhl soccer econ"
+        required: false
+
+concurrency:
+  group: discover-markets
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Run /api/embed per category
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nba nhl soccer econ' }}
+        run: |
+          set -uo pipefail
+          FAILED=0
+
+          for CAT in $CATEGORIES; do
+            echo "::group::$CAT"
+
+            if ! curl -sS --max-time 280 \
+                ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+                "https://housedge.vercel.app/api/embed?sport=$CAT" -o "resp-$CAT.json"; then
+              echo "::error::$CAT: curl failed"
+              FAILED=1
+              echo "::endgroup::"
+              continue
+            fi
+
+            head -c 1200 "resp-$CAT.json"; echo
+
+            if ! jq -e . "resp-$CAT.json" >/dev/null 2>&1; then
+              echo "::error::$CAT: response was not valid JSON"
+              FAILED=1
+            elif jq -e '.error' "resp-$CAT.json" >/dev/null 2>&1; then
+              echo "::error::$CAT: $(jq -r '.error' "resp-$CAT.json")"
+              FAILED=1
+            else
+              jq -r '"'"$CAT"': newPairs=\(.newPairs) totalPairs=\(.totalPairs) marketsUpserted=\(.writes.marketsUpserted // "n/a") embeddingUpserted=\(.writes.embeddingUpserted // "n/a")"' "resp-$CAT.json"
+
+              # Write errors are what silently produced empty results for
+              # most of this project's history — surface, never swallow.
+              jq -r '[(.writes.marketsErrors // []), (.writes.embeddingErrors // []), (.writes.pairsErrors // [])] | add[:3][]? | "::warning::" + .' "resp-$CAT.json" || true
+            fi
+
+            echo "::endgroup::"
+            sleep 20   # space out long serverless calls
+          done
+
+          exit $FAILED

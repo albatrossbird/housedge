@@ -1,0 +1,68 @@
+name: Refresh prices
+
+# Keeps market prices current. This is what fixes "the site shows a
+# price that's hours old" — /api/refresh works, nothing was calling it.
+#
+# WHY GITHUB ACTIONS RATHER THAN VERCEL CRON:
+# Vercel's Hobby plan caps cron frequency at once per DAY, which would
+# leave prices up to 24h stale — not a fix. This repo is public, so
+# Actions minutes are free and unmetered, with no cap beyond the
+# scheduler's 5-minute minimum. If the project moves to Vercel Pro, a
+# `crons` entry in vercel.json is a tidier home and this can be deleted.
+#
+# Scheduled runs are best-effort: GitHub delays them under load, so read
+# */15 as "roughly every 15 minutes". Price freshness degrades
+# gracefully, so that trade is fine.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # UTC
+  workflow_dispatch:          # manual trigger from the Actions tab
+
+concurrency:
+  # A slow run must not overlap the next tick.
+  group: refresh-prices
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Hit /api/refresh
+        env:
+          # Optional. Set as a repository secret to lock the endpoint
+          # down; lib/cronAuth.js ignores it until CRON_SECRET is also
+          # set on Vercel, so this is safe to leave unset.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          curl -sS --max-time 240 \
+            ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+            "https://housedge.vercel.app/api/refresh" -o response.json
+
+          head -c 2000 response.json; echo
+
+          # Fail loudly rather than silently doing nothing for weeks —
+          # which is exactly how the original stale-price bug survived.
+          if ! jq -e . response.json >/dev/null 2>&1; then
+            echo "::error::response was not valid JSON"
+            exit 1
+          fi
+
+          if jq -e '.error' response.json >/dev/null 2>&1; then
+            echo "::error::refresh returned: $(jq -r '.error' response.json)"
+            exit 1
+          fi
+
+          K=$(jq -r '.kalshiUpdated // 0' response.json)
+          P=$(jq -r '.polyUpdated // 0' response.json)
+          echo "kalshi updated: $K, polymarket updated: $P"
+
+          jq -r '(.errors // [])[:3][] | "::warning::" + .' response.json || true
+
+          if [ "$K" -eq 0 ] && [ "$P" -eq 0 ]; then
+            echo "::error::refresh updated 0 rows on both venues"
+            exit 1
+          fi
