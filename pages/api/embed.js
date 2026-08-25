@@ -885,12 +885,19 @@ export default async function handler(req, res) {
 
     if (isSport) {
       // Structured team matching for sports
-      const { data: kalshiDb } = await supabase
+      // Paged, like the non-sports branch. Without this the select
+      // stopped at Supabase's server-side 1000-row cap, and `markets`
+      // holds every fixture ever stored — so sports matched whichever
+      // thousand rows came back first, which was old finished games,
+      // and every pair it wrote was then dropped by markets.js's
+      // expired-date filter. The site showed an empty Sports tab while
+      // the discovery job reported 66 new pairs.
+      const kalshiDb = await fetchAllRows(() => supabase
         .from("markets").select("id, title, sport_tag, side_label, close_time")
-        .eq("platform", "kalshi").eq("sport_tag", sport);
-      const { data: polyDb } = await supabase
+        .eq("platform", "kalshi").eq("sport_tag", sport));
+      const polyDb = await fetchAllRows(() => supabase
         .from("markets").select("id, title, sport_tag, side_label, outcomes, outcome_prices, slug")
-        .eq("platform", "polymarket").eq("sport_tag", sport);
+        .eq("platform", "polymarket").eq("sport_tag", sport));
 
       // Clear existing pairs for this sport before re-matching
       const kalshiIds = (kalshiDb || []).map(m => m.id);

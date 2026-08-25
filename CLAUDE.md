@@ -33,20 +33,51 @@ The frontend never calls Kalshi/Polymarket directly. Data flows through three AP
    - Query params: `?sport=mlb|nba|nhl|soccer|econ|...`, `?matchonly=1` (re-match stored markets without re-fetching or re-embedding), `?force=1` (re-embed/re-match everything), `?threshold=`.
    - Not called by the page — triggered manually or by a scheduled job (no cron exists yet).
 
-2. **`pages/api/refresh.js`** — the cheap, frequent job. Updates price/volume for markets already in `markets` without rediscovering or rematching. **Working** (verified 163 Kalshi / 107 Polymarket rows updated). Still needs a cron to run automatically — until then prices go stale between manual hits, which is the usual explanation for "the site shows a price that's hours old."
+2. **`pages/api/refresh.js`** — the cheap, frequent job. Updates price/volume for markets already in `markets` without rediscovering or rematching. Runs every ~15 minutes from GitHub Actions (see "Automation"). Scoped to markets that appear in `pairs`; last verified run refreshed 46 Kalshi series / 241 rows in 40s.
 
 3. **`pages/api/markets.js`** — what the frontend polls (every 60s). Calls the `get_pairs(sport_tags)` Postgres RPC, which joins `markets` and `pairs` in SQL (chained Supabase JS-client filters were silently failing, hence the raw RPC). Filters stale/expired-date rows and prices outside 0.05–0.95, then shapes for the UI.
 
 `pages/index.js` is a single-file client (category tabs, sort controls, market cards, arb badges) with inline styles — no CSS framework. Arb logic: `min(kalshi.yes, poly.yes) + min(kalshi.no, poly.no) < 0.97` AND spread ≤ 15 points (larger spreads are treated as data errors, not real arbitrage — see the Polymarket outcome-price bug).
 
-### Manually refreshing data (until cron exists)
+### Automation
+
+Both jobs run from GitHub Actions, not Vercel cron: the Hobby plan caps
+crons at once per *day*, which is not a fix for stale prices. The repo is
+public, so Actions minutes are free and unmetered.
+
+- `.github/workflows/refresh-prices.yml` — `/api/refresh`, ~every 15 min.
+- `.github/workflows/discover-markets.yml` — `/api/embed` per category,
+  daily, sequential with a pause. Categories: `mlb nba nhl soccer econ
+  crypto politics`.
+
+Both fail the run loudly on non-JSON, an `error` field, or zero rows
+updated. The original stale-price bug survived for weeks precisely
+because a silent no-op looked like success.
+
+`lib/cronAuth.js` gates both endpoints behind an optional `CRON_SECRET`
+(permissive until the var is set on Vercel *and* as a repo secret).
+
+### Hitting the routes by hand
 
 ```
 /api/refresh                      # prices only, cheap, safe to hit often
 /api/embed?sport=econ             # fetch + store + embed + match one category
 /api/embed?matchonly=1&sport=econ # re-match only (no fetch, no re-embed) — use for threshold/gate iteration
+/api/embed?matchonly=1&sport=econ&dry=1  # same, but writes nothing
 /api/embed?force=1&sport=econ     # re-embed everything (needed after an embedding-model change)
 ```
+
+**Use `dry=1` whenever you are trying a threshold out.** `matchonly`
+deletes and rewrites the category's pairs by default, so "just looking"
+at a lower threshold publishes whatever it produces — that is how 71
+wrong crypto pairs once reached production.
+
+`/api/refresh` scopes itself to markets that appear in `pairs`: it derives
+the Kalshi series to poll from the paired tickers (`<SERIES>-<event>-<outcome>`)
+and fetches only the paired Polymarket ids. Those are the only markets
+the site renders; unpaired rows get their prices from the daily discovery
+run. A hand-maintained `KALSHI_SERIES` constant is what left every crypto
+and politics series unrefreshed.
 
 ## Scalar-market matching (the core non-sports problem)
 
@@ -57,7 +88,10 @@ The fix is embeddings for candidate generation + a **hard signature gate** befor
 - `extractNumericClaim(title)` → `{unit, op, value|low/high}`. Units are `percent`, `count` ("5 or more rate hikes"), `bps` ("25 bps increase"). A **unit mismatch is always incompatible** — a rate-*level* question is not a rate-*hike-count* question even though they're correlated.
 - `extractPeriod(title)` → `{quarter, year}`.
 - `mentionsNonUsRegion(title)` — Kalshi's econ series (KXFED/KXCPI/KXGDP/KXRECESSION) are implicitly US-only and never say "US", while Polymarket covers many countries with identical phrasing and thresholds. Blocks country names **and their adjective forms** (`\bjapan\b` does not match "Japanese") **and** foreign central banks (ECB, BOE, BOJ, …), which name no country at all. Scoped to `sportTag === "econ"` since it's a fact about that Kalshi series, not a general rule.
-- `scalarSignaturesCompatible(a, b, sportTag)` combines them. **Reject only when both sides have an extractable signature and it disagrees** — anything unrecognized falls through to embedding score alone, so the extractors don't need to understand every phrasing to be useful.
+- `extractUsdStrike(title)` → `{unit: "usd", op, value}`. Crypto is the same bucket problem with `$` where econ has `%`: "XRP above $6.50" vs "XRP reach $6.00" scored 0.917. Handles `$100k`/`$129,999.99` notation, normalises Kalshi's cent-below convention (`above $99,999.99` **is** the $100,000 market), and reads direction from both vocabularies — `above/reach/hit` vs `below/dip to/drop to` — because "XRP above $2.00" and "XRP dip to $2.00" are the same strike and opposite bets at 0.919. Strikes compare **exactly, in cents**: `NUMERIC_EPS` is an absolute margin sized for percentages and called `$0.02` and `$0.06` the same market. `"hit $50,000 before $100,000"` is a race between two strikes, not a threshold, and gets its own unit so nothing can pair with it.
+- `extractDeadline(title)` / `deadlinesCompatible(a, b)` — the numeric gate is inert on politics and crypto titles that carry no number at all, so deadlines are what separate "Tempo launch a token **before Jan 1, 2027**" from "**by December 31, 2027**" (0.962, a full year apart). Tolerance is 3 days, small but non-zero: "before Jan 1, 2027", "before 2027" and "end of 2026" name the same boundary while parsing a day apart. `by <year>` reads as the *start* of that year (Kalshi's own `side_label` confirms it — "by 2027" is labelled "Before 2027"); `in <year>` reads as the whole year.
+- `hasUnresolvedDeadline(title)` — Polymarket routinely drops the year ("by June 30?"). A stated cutoff we can see but cannot resolve is **not** a missing signature, so it is rejected against a side that does state its year. Two vague titles still fall through.
+- `scalarSignaturesCompatible(a, b, sportTag)` combines them. **Reject only when both sides have an extractable signature and it disagrees** — anything unrecognized falls through to embedding score alone, so the extractors don't need to understand every phrasing to be useful. The deadline rules above are the deliberate exception: absence of a *resolvable* year, where a year is clearly being stated, is itself information.
 
 Matching is **globally greedy**: build all gate-passing `(kalshi, poly, score)` candidates, sort by score descending, then assign. Assigning per-Kalshi-row in DB order (the old way) meant whichever row was processed first claimed a contested Polymarket market, not the best-scoring one.
 
@@ -69,7 +103,31 @@ Both modes return `matchDiagnostics` with `threshold`, embedded counts, `accepte
 
 ## Current match reality (as of last verification)
 
+Every pair below was read and confirmed by hand; the counts are small on
+purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
+
+| Category | Stored pairs | Shown on site | Floor |
+|---|---|---|---|
+| economics | 1 | 1 | 0.78 |
+| crypto | 17 | 12 | 0.90 |
+| politics | 14 | 5 | 0.94 |
+
+"Shown" is lower than "stored" because `markets.js` drops prices outside
+0.05–0.95, and the extra politics pairs are long shots (the seven-person
+Venezuela set, pardon markets) trading under a nickel.
+
 Economics: **1 verified-correct pair** out of 163 Kalshi econ markets. That is the genuine overlap, not a bug — the full uncapped `topScores` list was audited and every other Kalshi CPI/Fed-rate/GDP row's best candidate is a legitimately different market (wrong threshold, wrong country, or hike-count-vs-rate-level). Kalshi lists ~9 GDP threshold buckets per quarter where Polymarket lists one. Adding Polymarket's "interest rates" tag (131) produced 16 candidates, 15 of them ECB/Bank of England — all correctly filtered out.
+
+Crypto's floor sits at 0.90, not 0.94, because Kalshi phrases every
+strike as "<COIN> trimmed mean be above $X" against Polymarket's "Will
+<Coin> reach $X" — real matches land at 0.91–0.93, and 0.94 admitted
+nothing at all. The strike and deadline gates do the rejecting instead
+of the score. **0.90 is a gate limit, not a tuning preference**: below
+it, Kalshi's "Which of these cryptocurrencies will have a positive
+return in 2026?" family starts pairing with unrelated strike markets
+("Will Chainlink reach $26?", "Solana all time high?") and nothing
+currently catches it. Handling that claim type is what would let the
+floor come down to ~0.88, which is worth about 5 more correct pairs.
 
 ## v2 schema (live, running alongside v1)
 
@@ -137,6 +195,7 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - **`upsert()` with a partial column set fails on NOT NULL columns even when the row already exists.** `INSERT ... ON CONFLICT DO UPDATE` validates the attempted insert row *before* resolving the conflict, so sending `{id, embedding, updated_at}` into `markets` fails every row with `23502 null value in column "platform"`. Either send the full row, or use a plain `.update()`.
 - **Selects silently cap at 1000 rows.** Any unbounded `.select()` on `markets` needs an explicit `.limit()` and, where applicable, a `sport_tag` filter. This bit both `refresh.js` and `embed.js`'s matchonly query.
 - `supabase-js` flattens network-layer errors to a bare `"TypeError: fetch failed"` string. Where the real cause matters, the raw REST helpers in `embed.js`/`refresh.js` (`restFetch`, `upsertRows`) preserve `cause.code` and HTTP status/body.
+- **`.in()` puts its values in the query string, so a few thousand ids build a URL long enough to kill the request.** Clearing politics' pairs meant `.in("kalshi_id", [...1774 ids])` — a ~40KB URL — and supabase-js returns that as an error object the call sites were ignoring, so clearing looked like it worked. The visible symptom was a re-match at a corrected threshold writing its new pairs while every stale wrong one survived. Chunk at ~200 ids and check the error.
 - Non-sports matching in normal mode must clear existing pairs for the category before rematching, or stale wrong pairs survive: upsert only overwrites when *both* ids match, so a Kalshi row matching a *different* Polymarket market just adds a second row.
 
 ### Kalshi
@@ -151,6 +210,7 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - Default `/markets?active=true&closed=false` only returns high-volume *featured* markets. Individual markets require `/events?tag_id=X` with `offset` pagination. Only numeric `tag_id` filters — `tag=`, `label=`, `search=` are silently ignored.
 - Polymarket publishes no fixed tag list; discover IDs by paging `/tags` and matching label/slug. Known: soccer `100350`, nba `745`, nhl `899`, mlb `100381`, federal reserve `129`, interest rates `131`, Macro Inflation `101249`, recession `100201`, GDP `370`.
 - The `?id=` batch filter needs the key repeated (`?id=1&id=2`), not comma-joined.
+- **`?id=` silently omits closed markets** unless `closed=true` is also passed, and a non-integer id 422s the *whole batch*. Both are why `/api/refresh` returns fewer Polymarket rows than it asked for; the omission is correct behaviour for us (a closed market should not display), the 422 was not, and is now filtered on.
 - The "event has ≤4 markets" heuristic separates single games from tournament futures for **sports only** — a Fed decision legitimately has more outcomes. `fetchPolymarkets()` skips that filter for non-sports tags.
 - `outcomePrices` doesn't always align index-for-index with `outcomes`. Still unfixed; mitigated only by the ≤15pt arb spread guard.
 
@@ -161,9 +221,13 @@ $$ LANGUAGE sql SECURITY DEFINER;
 
 ## Known bugs / open work (priority order)
 
-1. **No automated refresh** — `/api/refresh` works but nothing calls it. Needs a Vercel cron. This is the cause of visibly stale prices on the live site.
+1. **Arb numbers are not executable** — v1 never stored bid/ask and no fee model exists, so every edge shown is a mid-to-mid estimate. Treat as "worth checking", never as a trade.
 2. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
 3. **Sports still uses rule-based matching only** — no embeddings. The planned direction is the same hybrid as econ: embeddings generate candidates, structured rules (date + side/outcome label) verify them, which removes the hand-maintained per-league team-alias maps without reintroducing sibling-swap bugs.
 4. **Soccer matching is unreliable** — World Cup games sometimes pair with the wrong Polymarket market.
-5. **Crypto/politics categories are unwired** — `POLY_TAGS` has no entries; UI shows "coming soon". Candidate tags: Crypto `21`, Politics `2`.
+5. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
 6. Date-window tuning is a tradeoff: tightening the 6-hour `datesCompatible()` window risks missing same-day matches across UTC/ET; loosening it risks matching different games in a back-to-back series.
+
+**Fixed since the last revision of this file:** automated refresh (both
+GitHub Actions workflows), crypto and politics wired end to end, the
+1000-row server-side cap, and `.in()`-based pair clearing.

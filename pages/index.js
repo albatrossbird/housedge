@@ -288,7 +288,7 @@ export default function HouseEdge() {
 
         {unsupported && (
           <div style={{ padding: "24px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, color: "#92400E", fontSize: 14 }}>
-            <strong>{CATEGORIES[activeCategory].label} coming soon</strong> — we're working on adding this category. Sports and Economics are live now.
+            <strong>{CATEGORIES[activeCategory].label} coming soon</strong> — we're working on adding this category.
           </div>
         )}
 
