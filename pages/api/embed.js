@@ -657,7 +657,28 @@ export default async function handler(req, res) {
   const force     = req.query.force     === "1";
   const matchOnly = req.query.matchonly === "1";
   const sport     = req.query.sport || "all";
-  const THRESHOLD = parseFloat(req.query.threshold || "0.78");
+  // Per-category similarity floor.
+  //
+  // 0.78 suits econ, where extractNumericClaim() carries most of the
+  // precision and similarity only has to generate candidates. Politics
+  // and crypto have NO numeric claim in most titles, so that gate is
+  // inert and embedding score is the only thing deciding — and embeddings
+  // do not distinguish "buy Greenland" from "visit Greenland", "nuclear
+  // deal" from "declare war", or "receive a pardon" from "charged".
+  //
+  // An audit of politics at 0.78 found ~7 correct pairs out of 30. At
+  // 0.94 only the genuinely-duplicate cluster survives (the Venezuela
+  // head-of-state set, 0.947-0.963) and every audited false positive is
+  // excluded.
+  //
+  // This is a blunt instrument standing in for a missing gate, not a
+  // fix: it buys precision by discarding real matches that happen to be
+  // worded differently. The real fix is a claim gate that understands
+  // predicates and deadlines — see docs/architecture-v2.md.
+  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.94 };
+  const THRESHOLD = parseFloat(
+    req.query.threshold || CATEGORY_THRESHOLDS[sport] || "0.78"
+  );
 
   const auth = cronAuthorized(req);
   if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
