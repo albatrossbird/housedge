@@ -64,7 +64,7 @@ async function restFetch(path, options = {}) {
 // populated.
 const V1_BOOK_COLUMNS = [
   "bid", "ask", "no_bid", "no_ask", "bid_size", "ask_size",
-  "fee_multiplier", "fee_schedule",
+  "fee_multiplier", "fee_schedule", "series_slug",
 ];
 
 export function stripBookColumns(row) {
@@ -406,13 +406,25 @@ function kalshiGameTitle(market) {
 // lives on /series/<ticker>, not on the market, so it needs its own
 // lookup — cached because it is static metadata and there are only a
 // few dozen distinct series across everything we pair.
-const seriesFeeCache = new Map();
+// Also the only source of the web URL's middle segment. Kalshi's market
+// page is /markets/<series>/<event-slug>/<event-ticker>, and the
+// event-slug is the SERIES title slugified — it appears on
+// /series/<ticker> and nowhere on the market or the event. Verified
+// against live pages: "Somaliland recognition" ->
+// somaliland-recognition, "Professional Baseball Game" ->
+// professional-baseball-game.
+const seriesMetaCache = new Map();
 
-async function seriesFeeMultiplier(seriesTicker) {
-  if (!seriesTicker) return null;
-  if (seriesFeeCache.has(seriesTicker)) return seriesFeeCache.get(seriesTicker);
+function slugifySeriesTitle(title) {
+  const t = String(title || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return t || null;
+}
 
-  let value = null;
+async function seriesMeta(seriesTicker) {
+  if (!seriesTicker) return { feeMultiplier: null, slug: null };
+  if (seriesMetaCache.has(seriesTicker)) return seriesMetaCache.get(seriesTicker);
+
+  let meta = { feeMultiplier: null, slug: null };
   try {
     const r = await fetch(
       `https://api.elections.kalshi.com/trade-api/v2/series/${encodeURIComponent(seriesTicker)}`
@@ -423,13 +435,14 @@ async function seriesFeeMultiplier(seriesTicker) {
       // A missing multiplier means the standard rate, i.e. 1 - not
       // "no fee". Defaulting it to 0 would price every Kalshi leg as
       // free and manufacture edges.
-      value = m == null ? 1 : Number(m);
-      if (!isFinite(value)) value = 1;
+      let mult = m == null ? 1 : Number(m);
+      if (!isFinite(mult)) mult = 1;
+      meta = { feeMultiplier: mult, slug: slugifySeriesTitle(d.series?.title) };
     }
-  } catch { /* leave null; the fee model treats null as 1 */ }
+  } catch { /* leave nulls; fees treat null as 1, URL falls back to search */ }
 
-  seriesFeeCache.set(seriesTicker, value);
-  return value;
+  seriesMetaCache.set(seriesTicker, meta);
+  return meta;
 }
 
 const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v) : null));
@@ -438,13 +451,15 @@ const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v
 // finished rows rather than inside the row builders so the /series
 // lookups happen once per distinct series instead of once per market —
 // KXMLBGAME alone is 74 markets behind one series.
-async function attachKalshiFees(rows) {
+async function attachKalshiSeriesMeta(rows) {
   const series = [...new Set(rows.map(r => String(r.id).split("-")[0]).filter(Boolean))];
-  const multipliers = new Map(
-    await Promise.all(series.map(async t => [t, await seriesFeeMultiplier(t)]))
+  const metas = new Map(
+    await Promise.all(series.map(async t => [t, await seriesMeta(t)]))
   );
   for (const r of rows) {
-    r.fee_multiplier = multipliers.get(String(r.id).split("-")[0]) ?? null;
+    const m = metas.get(String(r.id).split("-")[0]) || {};
+    r.fee_multiplier = m.feeMultiplier ?? null;
+    r.series_slug    = m.slug ?? null;
   }
   return rows;
 }
@@ -545,7 +560,7 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
     if (!cursor) break;
   }
 
-  await attachKalshiFees(out);
+  await attachKalshiSeriesMeta(out);
   return { markets: out, pages, seriesInCategory: tickers.size };
 }
 
@@ -601,7 +616,7 @@ async function fetchKalshiMarkets(sportFilter = "all") {
         }));
     })
   );
-  return attachKalshiFees(results.flat());
+  return attachKalshiSeriesMeta(results.flat());
 }
 
 // ── Fetch Polymarket markets ───────────────────────────────────

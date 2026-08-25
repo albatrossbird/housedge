@@ -308,7 +308,20 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - Base URL must be `https://api.elections.kalshi.com/trade-api/v2` — `api.kalshi.com` and `trading-api.kalshi.com` are wrong/dead.
 - Prices come from `yes_ask_dollars`/`yes_bid_dollars` as decimal strings (`"0.4200"`), not the `_fp` fields (those return `"0.00"`).
 - Default `/markets` is dominated by `KXMVE*` parlay tickers — always filter `!ticker.startsWith("KXMVE")`.
-- **Web URLs**: only the series-level page reliably resolves — `kalshi.com/markets/kxgdp`, `kalshi.com/markets/KXFED`. A path built from the full market ticker 404s. Event-level pages need a human-readable slug (`kalshi.com/markets/kxgdpyear/annual-gdp`) that the API doesn't give us, so `markets.js` links to the series page.
+- **Web URLs are three segments**: `/markets/<series>/<event-slug>/<event-ticker>`, all lowercase.
+
+  ```
+  kalshi.com/markets/kxmlbgame/professional-baseball-game/kxmlbgame-26aug271910milnym
+  kalshi.com/markets/kxrecogsomali/somaliland-recognition/kxrecogsomali-29
+  ```
+
+  **The series segment alone is not a route** — `kalshi.com/markets/kxgdp` errors, and an earlier note in this file claiming it resolved is what made every Kalshi link on the site dead. A path built from the full market ticker also fails.
+
+  The middle segment is the **series title, slugified** (`"Somaliland recognition"` → `somaliland-recognition`). It is returned by `/series/<ticker>` and appears nowhere on the market or the event, so `embed.js` fetches it once per series — on the same call that reads `fee_multiplier` — and stores it as `markets.series_slug`. The other two segments come from the ticker (`id.split("-")[0]` and `event_ticker`).
+
+  Without a slug there is no constructible market URL, so `markets.js` falls back to `kalshi.com/search?q=<title>`, which is a real route. **Never fall back to the bare series path.**
+
+  Note that kalshi.com sits behind Vercel bot protection and returns 429 to datacenter IPs, so these URLs cannot be verified with curl from a sandbox — they were confirmed against pages in a search index instead.
 
 ### Polymarket
 

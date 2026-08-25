@@ -42,6 +42,18 @@ alter table markets add column if not exists ask_size     numeric;
 alter table markets add column if not exists fee_multiplier numeric;
 alter table markets add column if not exists fee_schedule   jsonb;
 
+-- ── Kalshi web URL ─────────────────────────────────────────────
+-- Kalshi's market page is /markets/<series>/<event-slug>/<event-ticker>,
+-- e.g. .../kxmlbgame/professional-baseball-game/kxmlbgame-26aug271910milnym.
+-- The site links were built from the first segment alone, which is not
+-- a route, so every one of them errored.
+--
+-- The middle segment is the series TITLE slugified, and the API returns
+-- it on /series/<ticker> but nowhere on the market or event, so it has
+-- to be fetched once per series and stored. The other two segments we
+-- already have (id prefix, event_ticker).
+alter table markets add column if not exists series_slug text;
+
 -- ── get_pairs ──────────────────────────────────────────────────
 -- The return type changes, and Postgres will not replace a function
 -- whose OUT parameters differ — CREATE OR REPLACE fails with 42P13
@@ -55,7 +67,7 @@ returns table (
   k_title text, k_yes_price float, k_no_price float, k_volume float,
   k_sport_tag text, k_event_ticker text, k_side_label text, k_close_time text,
   k_bid numeric, k_ask numeric, k_no_bid numeric, k_no_ask numeric,
-  k_fee_multiplier numeric,
+  k_fee_multiplier numeric, k_series_slug text,
   p_title text, p_yes_price float, p_no_price float, p_volume float,
   p_slug text, p_side_label text, p_outcomes text, p_outcome_prices text,
   p_bid numeric, p_ask numeric, p_fee_schedule jsonb
@@ -63,7 +75,7 @@ returns table (
   select p.kalshi_id, p.polymarket_id, p.similarity,
     k.title, k.yes_price, k.no_price, k.volume, k.sport_tag, k.event_ticker,
     k.side_label, k.close_time,
-    k.bid, k.ask, k.no_bid, k.no_ask, k.fee_multiplier,
+    k.bid, k.ask, k.no_bid, k.no_ask, k.fee_multiplier, k.series_slug,
     pm.title, pm.yes_price, pm.no_price, pm.volume, pm.slug, pm.side_label,
     pm.outcomes, pm.outcome_prices,
     pm.bid, pm.ask, pm.fee_schedule

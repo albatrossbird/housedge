@@ -28,6 +28,41 @@ function extractTickerDate(id) {
   return new Date(`20${match[1]}-${MONTH_MAP[match[2]]}-${match[3]}`);
 }
 
+// Kalshi's market page is three segments:
+//
+//   /markets/<series>/<event-slug>/<event-ticker>
+//   /markets/kxmlbgame/professional-baseball-game/kxmlbgame-26aug271910milnym
+//   /markets/kxrecogsomali/somaliland-recognition/kxrecogsomali-29
+//
+// This used to emit the first segment alone, on the belief that the
+// series page resolved on its own. It does not — it is not a route, and
+// every Kalshi link on the site landed on an error.
+//
+// The middle segment is the series TITLE slugified. It appears on
+// /series/<ticker> and nowhere on the market or event, so embed.js
+// fetches it once per series and stores it as markets.series_slug.
+// The other two segments come from the ticker itself.
+//
+// Without the slug there is no constructible market URL, so the
+// fallback is Kalshi's search — a real route that lands the reader on
+// the right market rather than on an error page.
+function buildKalshiUrl(row) {
+  const series = String(row.kalshi_id || "").split("-")[0].toLowerCase();
+  const slug = row.k_series_slug || null;
+
+  if (series && slug) {
+    const eventTicker = String(row.k_event_ticker || "").toLowerCase();
+    // event_ticker can equal the market ticker for single-market events;
+    // both resolve, and the two-segment form is valid on its own.
+    return eventTicker
+      ? `https://kalshi.com/markets/${series}/${slug}/${eventTicker}`
+      : `https://kalshi.com/markets/${series}/${slug}`;
+  }
+
+  const q = encodeURIComponent(String(row.k_title || "").split("—")[0].trim());
+  return q ? `https://kalshi.com/search?q=${q}` : "https://kalshi.com/";
+}
+
 export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];
@@ -84,16 +119,7 @@ export default async function handler(req, res) {
           } catch {}
         }
 
-        // Kalshi's site only reliably resolves the series-level page
-        // (e.g. kalshi.com/markets/kxgdp) - a combined series+event+
-        // strike ticker as one path segment (what this used to build)
-        // 404s. The event-level URL needs a human-readable slug we
-        // don't have (e.g. "annual-gdp", not the raw ticker), so this
-        // links to the series page rather than guessing at that.
-        const seriesTicker = (row.kalshi_id || "").split("-")[0];
-        const kalshiUrl = seriesTicker
-          ? `https://kalshi.com/markets/${seriesTicker.toLowerCase()}`
-          : "https://kalshi.com/";
+        const kalshiUrl = buildKalshiUrl(row);
         const polyUrl = row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/";
 
         // ── Executable pricing ─────────────────────────────────
