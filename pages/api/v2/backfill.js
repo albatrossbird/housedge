@@ -189,6 +189,12 @@ export default async function handler(req, res) {
         match_method: outcomeId ? "v1-backfill" : null,
         match_confidence: null,
         match_decided_at: outcomeId ? new Date().toISOString() : null,
+        // Per-instrument and near-static, so they belong here rather
+        // than repeated on every quote row. Both sides of a Kalshi
+        // ticker share the series multiplier; a Polymarket market's
+        // schedule covers both its outcomes.
+        fee_multiplier: m.fee_multiplier == null ? null : Number(m.fee_multiplier),
+        fee_schedule: m.fee_schedule || null,
         last_seen: new Date().toISOString(),
       });
     };
@@ -218,24 +224,56 @@ export default async function handler(req, res) {
       return res.status(500).json({ stage: "listings", errors: lstUp.errors.slice(0, 3) });
     }
 
-    // ── seed quotes from v1 prices ────────────────────────────
-    // v1 has a single price per side and no bid/ask, so record `mid`
-    // only. recordQuotes' change detection means re-running backfill
-    // won't append duplicate rows.
+    // ── seed quotes from v1 ───────────────────────────────────
+    // Real books now, not just mids. v1 stored no bid/ask when this was
+    // first written, so every backfilled quote carried `mid` only and
+    // v2's arb calc fell back to it — the same midpoint fiction v1 has
+    // since shed. Migration 0004 populated the book columns, so there is
+    // no longer any reason to seed a midpoint.
+    //
+    // The two venues quote differently and the difference is real:
+    //   Kalshi     — the NO side has its own book, genuinely not 1-yes.
+    //   Polymarket — one book per market, on outcome 0; the other side
+    //                is its exact complement in a binary CLOB.
+    // Deriving Polymarket's no-side here rather than storing it twice
+    // keeps the copies from disagreeing.
     const listingByKey = new Map(
       lstUp.rows.map(l => [`${l.venue_id}|${l.venue_market_id}|${l.side}`, l])
     );
 
+    const n = v => (v == null || v === "" || !isFinite(Number(v)) ? null : Number(v));
+    const complement = v => (v == null ? null : Math.round((1 - v) * 10000) / 10000);
+
     const quoteInput = [];
     for (const m of markets || []) {
       if (category && m.sport_tag !== category) continue;
-      const venue = isKalshi(m.id) ? "kalshi" : "polymarket";
+      const kalshi = isKalshi(m.id);
+      const venue = kalshi ? "kalshi" : "polymarket";
+
+      const bid = n(m.bid), ask = n(m.ask);
+
+      const books = {
+        yes: { bid, ask, bid_size: n(m.bid_size), ask_size: n(m.ask_size) },
+        no: kalshi
+          ? { bid: n(m.no_bid), ask: n(m.no_ask), bid_size: null, ask_size: null }
+          // Selling the complement: what you can buy outcome 1 for is
+          // 1 minus what outcome 0 bids.
+          : { bid: complement(ask), ask: complement(bid), bid_size: null, ask_size: null },
+      };
+
       for (const [side, price] of [["yes", m.yes_price], ["no", m.no_price]]) {
         const l = listingByKey.get(`${venue}|${m.id}|${side}`);
-        if (!l || price == null) continue;
+        if (!l) continue;
+        const book = books[side];
+        // A row with neither a book nor a price says nothing.
+        if (price == null && book.bid == null && book.ask == null) continue;
         quoteInput.push({
           listing_id: l.id,
-          mid: Number(price),
+          bid: book.bid,
+          ask: book.ask,
+          bid_size: book.bid_size,
+          ask_size: book.ask_size,
+          mid: price == null ? null : Number(price),
           volume: m.volume == null ? null : Number(m.volume),
         });
       }

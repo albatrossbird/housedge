@@ -13,39 +13,75 @@
 // live site until this is validated against it.
 
 import { rest, credentialInUse } from "../../../lib/v2/db.js";
+import { takeCost } from "../../../lib/fees.js";
 
 // Cross-venue arb over a complete outcome set: if you can buy every
 // outcome for less than $1 total, the set pays $1 regardless of result.
 //
 // Only valid when the outcome set is mutually exclusive AND exhaustive,
 // hence the events.outcomes_exhaustive gate — summing a partial set is
-// meaningless. Uses ask (what you pay), never mid.
+// meaningless.
 //
-// NOTE: this is gross of fees. Kalshi and Polymarket have different fee
-// structures and neither is modelled yet, so treat a small positive edge
-// here as "worth checking", not "free money". See docs/architecture-v2.md.
+// Fee-aware since migration 0006. Before that this summed asks gross of
+// fees and, where a backfilled quote had no ask, fell back to `mid` —
+// pricing the leg at a midpoint nobody trades at. Both venues charge
+// takers on a quadratic curve worst at 50/50, and on live pairs those
+// costs exceed most of the edges this used to report.
+//
+// The generalisation v1 cannot express: this sums N outcomes across any
+// number of venues, picking the cheapest venue per outcome, rather than
+// pricing two sides of one pair.
 function computeArb(outcomes, exhaustive) {
   if (!exhaustive) return null;
 
   let total = 0;
   const legs = [];
+  let depthKnown = true;
+  let maxContracts = null;
+
   for (const o of outcomes) {
     let best = null;
     for (const l of o.listings) {
-      const px = l.ask ?? l.mid;
-      if (px == null) continue;
-      if (!best || px < best.price) best = { venue: l.venue_id, price: px, url: l.url };
+      // Ask only. A leg with no ask has no executable price, and
+      // substituting its midpoint invents one.
+      const cost = takeCost({
+        ask: l.ask,
+        venue: l.venue_id,
+        feeMultiplier: l.fee_multiplier,
+        feeSchedule: l.fee_schedule,
+      });
+      if (cost == null) continue;
+      if (!best || cost < best.cost) {
+        best = { venue: l.venue_id, ask: l.ask, cost, url: l.url, size: l.ask_size ?? null };
+      }
     }
     if (!best) return null; // incomplete pricing — can't claim anything
-    total += best.price;
-    legs.push({ outcome: o.label, ...best });
+
+    total += best.cost;
+    legs.push({
+      outcome: o.label,
+      venue: best.venue,
+      ask: best.ask,
+      cost: Number(best.cost.toFixed(4)),
+      url: best.url,
+      size: best.size,
+    });
+
+    if (best.size == null) depthKnown = false;
+    else maxContracts = maxContracts == null ? best.size : Math.min(maxContracts, best.size);
   }
 
+  const edge = 1 - total;
   return {
     totalCost: Number(total.toFixed(4)),
-    edge: Number((1 - total).toFixed(4)),
+    edge: Number(edge.toFixed(4)),
     isArb: total < 1,
-    feesIncluded: false,
+    feesIncluded: true,
+    // The set can only be bought as deep as its thinnest leg. Null where
+    // no venue on some leg publishes depth — unknown, not unlimited.
+    maxContracts,
+    depthKnown,
+    edgeDollars: maxContracts == null ? null : Number((edge * maxContracts).toFixed(2)),
     legs,
   };
 }
@@ -104,6 +140,8 @@ export default async function handler(req, res) {
           matchMethod: r.match_method,
           matchConfidence: r.match_confidence,
           bid: r.bid, ask: r.ask, mid: r.mid, last: r.last,
+          bid_size: r.bid_size, ask_size: r.ask_size,
+          fee_multiplier: r.fee_multiplier, fee_schedule: r.fee_schedule,
           volume: r.volume,
           quotedAt: r.quoted_at,
         });

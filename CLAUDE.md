@@ -181,6 +181,7 @@ confident wrong answers. Both are stored per market row.
   read time (`complementBook`) using the same identifier-based outcome
   index the sports join uses. Storing both would let the copies
   disagree.
+- **An edge without a size is not a finding.** The same Bitcoin strike family offered 7 contracts at one price and 710 at another — six cents of profit versus fifteen dollars. Kalshi publishes size on the YES book only, which covers both directions: taking NO at `no_ask` is the same trade as selling YES at `yes_bid`, so the YES bid queue backs it.
 - **A missing ask yields `null`, not a big number.** "No executable
   price" and "no edge" are different answers; the card says which.
 - **The threshold is $1.00**, because that is what a matched pair pays
@@ -274,7 +275,9 @@ Key v2 design points:
 - Run one model per `/api/v2/extract-eval` request; three models x 100 markets exceeds the Vercel function timeout.
 - Requires `ANTHROPIC_API_KEY` in Vercel env (and a redeploy, same as the service-role key).
 
-**Arb numbers from `/api/v2/markets` are still mid-only.** v1's *live* path is fee-aware now (see "Executable pricing"), but v2's backfilled quotes were copied from v1 before books were stored, so they carry `mid` only and v2's calc falls back to it. v2 reports `feesIncluded: false` and means it; `/api/markets` reports `true`. Re-backfilling v2 from the now-populated book columns is what closes this.
+**v2 is fee-aware too, as of migration 0006.** Its quotes were backfilled from v1 before v1 stored books, so they carried `mid` only and the arb calc fell back to it. `0006` adds `bid_size`/`ask_size` to `quotes` and `fee_multiplier`/`fee_schedule` to `listings`, the backfill seeds real books (deriving Polymarket's no-side as the complement rather than storing it twice), and `computeArb` prices every leg through `lib/fees.js`. Both `/api/markets` and `/api/v2/markets` now report `feesIncluded: true`.
+
+v2's calc is the generalisation v1 cannot express: it sums N outcomes across any number of venues, picking the cheapest venue per outcome, and caps the set at its thinnest leg. **`0006` drops and recreates both views** — `latest_quotes` and `v2_market_view` — because `CREATE OR REPLACE VIEW` can only append columns and these insert them mid-list. Drop the dependent view first.
 
 ## v1 database (Supabase, schema still dashboard-only)
 
@@ -353,10 +356,9 @@ $$ LANGUAGE sql SECURITY DEFINER;
 
 ## Known bugs / open work (priority order)
 
-1. **Depth is collected but unused.** `bid_size`/`ask_size` are stored; the arb calc still assumes the touch price is available for a full order. An edge that exists for 12 contracts (Kalshi's typical MLB size) is not the same finding as one that exists for 3,000, and nothing says which yet.
-2. **v2's arb numbers are still mid-only** — see the v2 section. v1's live path is fee-aware; v2's backfilled quotes predate the book columns.
+1. **No retention policy on `markets`.** The table holds every fixture ever stored and nothing prunes it. This is no longer theoretical: it grew far enough that reads carrying `embedding` began failing outright (see the pitfall on `fetchAllRows`), and the 500MB free tier is the ceiling.
+2. **Polymarket publishes no depth.** Gamma exposes aggregate liquidity but no size at the touch, so any leg on that venue reports `depthKnown: false` and `maxContracts` is an upper bound set by the Kalshi leg alone. Closing this means the CLOB API (`clob.polymarket.com/book`), which is a per-market call on a different host.
 3. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
-4. **No retention policy on `markets`.** The table holds every fixture ever stored (164 MLB rows for 37 live games) and nothing prunes it. Sports matching now skips past-dated games so this no longer produces wrong pairs, but the table grows without bound on a 500MB free tier.
 5. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
 6. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
 7. Polymarket's `outcomes`/`outcomePrices` alignment is still unverified for non-sports markets. Sports no longer depends on it (the index comes from the identifiers), but crypto/politics/econ still read `outcomePrices[0]`.
