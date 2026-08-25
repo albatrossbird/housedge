@@ -129,6 +129,10 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
       ({ error } = await send(alignKeys(batch.map(stripBookColumns))));
     }
 
+    // Counted only on success. This used to increment per batch
+    // attempted, so a run could report marketsUpserted=913 in the same
+    // response that carried a write error — the failure looked like a
+    // full write.
     if (error) errors.push(JSON.stringify(error));
     else count += batch.length;
   }
@@ -145,13 +149,34 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
 // matching (only the first 1000 rows are considered) and pair clearing
 // (stale rejected pairs survive because their ids were never in the
 // capped list), and neither reports anything wrong.
-async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000 } = {}) {
+async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000, errors = null } = {}) {
   const out = [];
-  for (let from = 0; from < maxRows; from += pageSize) {
-    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
-    if (error || !data || data.length === 0) break;
+  let size = pageSize;
+  let from = 0;
+
+  while (from < maxRows) {
+    const { data, error } = await buildQuery().range(from, from + size - 1);
+
+    if (error) {
+      // A page carrying `embedding` is enormous — roughly 20KB per row,
+      // so a 1000-row page is ~20MB — and past some size the request
+      // simply fails. When crypto and politics grew past ~4,000
+      // Polymarket rows this started failing on the FIRST page, and
+      // because the old code did `if (error) break` and returned [],
+      // the category reported zero stored markets while the live site
+      // was still serving pairs built from those very rows.
+      //
+      // Halve and retry before giving up: a smaller page nearly always
+      // succeeds, so the read degrades in speed rather than in truth.
+      if (size > 100) { size = Math.floor(size / 2); continue; }
+      if (errors) errors.push(`page at ${from} (size ${size}): ${error.message || JSON.stringify(error)}`);
+      break;
+    }
+
+    if (!data || data.length === 0) break;
     out.push(...data);
-    if (data.length < pageSize) break;
+    if (data.length < size) break;
+    from += size;
   }
   return out;
 }
@@ -825,8 +850,12 @@ export default async function handler(req, res) {
         if (sportFilter) q = q.eq("sport_tag", sportFilter);
         return q;
       };
-      const kalshiDb = await fetchAllRows(buildKalshi);
-      const kalshiReadError = null;
+      // Real errors, not a hardcoded null. `readErrors` was declared as
+      // `const kalshiReadError = null` and could therefore never report
+      // anything, which is what let a silently-failing read look like an
+      // empty category.
+      const readErrors = [];
+      const kalshiDb = await fetchAllRows(buildKalshi, { errors: readErrors });
 
       // Scope by sport_tag like the Kalshi query above - an unscoped
       // select silently caps at Supabase's default 1000-row limit, which
@@ -840,10 +869,7 @@ export default async function handler(req, res) {
         if (sportFilter) q = q.eq("sport_tag", sportFilter);
         return q;
       };
-      const polyDb = await fetchAllRows(buildPoly);
-      const polyReadError = null;
-
-      const readErrors = [kalshiReadError, polyReadError].filter(Boolean).map(e => e.message);
+      const polyDb = await fetchAllRows(buildPoly, { errors: readErrors });
 
       // Clear existing pairs for this sport
       let clearResult = { cleared: 0, errors: [] };
@@ -906,7 +932,11 @@ export default async function handler(req, res) {
     const allMarkets = [...kalshiRaw, ...polyRaw];
 
     // Find markets not yet in Supabase
-    const { data: existing } = await supabase.from("markets").select("id");
+    // Paged. As a plain select this capped at 1000 ids, so every market
+    // beyond the first thousand looked new on every run — re-embedding
+    // the entire catalogue each time (thousands of needless Voyage
+    // calls) and growing the table without bound.
+    const existing = await fetchAllRows(() => supabase.from("markets").select("id"));
     const existingIds = new Set((existing || []).map(r => r.id));
     const toEmbed = force
       ? allMarkets.filter(m => !SPORTS_TAGS.has(m.sport_tag))
