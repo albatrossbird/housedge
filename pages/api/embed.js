@@ -673,6 +673,35 @@ async function fetchPolymarkets(sportFilter = "all") {
   return results.flat();
 }
 
+// Delete every pair whose Kalshi side is in `kalshiIds`, in chunks.
+//
+// PostgREST puts .in() values in the query string, so one call with the
+// 1,774 Kalshi ids politics now has builds a ~40KB URL and the request
+// dies before it reaches the table. supabase-js returns that as an
+// unchecked error object, and the call sites ignored it, so clearing
+// looked like it worked: a re-match at a corrected threshold wrote its
+// new pairs and left every stale wrong one in place. That is why the
+// live site kept showing "Trump buy Greenland" against "Trump visit
+// Greenland by December 31" long after the run that should have
+// removed it.
+//
+// Chunked so the URL stays short, and errors are returned rather than
+// swallowed.
+async function clearPairsForKalshiIds(kalshiIds) {
+  const errors = [];
+  let cleared = 0;
+  for (let i = 0; i < kalshiIds.length; i += 200) {
+    const chunk = kalshiIds.slice(i, i + 200);
+    const { error, count } = await supabase
+      .from("pairs")
+      .delete({ count: "exact" })
+      .in("kalshi_id", chunk);
+    if (error) errors.push(`clearPairs: ${error.message || JSON.stringify(error)}`);
+    else cleared += count || 0;
+  }
+  return { cleared, errors };
+}
+
 // ── Main handler ───────────────────────────────────────────────
 export default async function handler(req, res) {
   const force     = req.query.force     === "1";
@@ -751,15 +780,17 @@ export default async function handler(req, res) {
       const readErrors = [kalshiReadError, polyReadError].filter(Boolean).map(e => e.message);
 
       // Clear existing pairs for this sport
+      let clearResult = { cleared: 0, errors: [] };
       if (dryRun) {
         // skip: dry runs must leave the pairs table exactly as they found it
       } else if (sportFilter) {
         const kalshiIds = (kalshiDb || []).map(m => m.id);
         if (kalshiIds.length > 0) {
-          await supabase.from("pairs").delete().in("kalshi_id", kalshiIds);
+          clearResult = await clearPairsForKalshiIds(kalshiIds);
         }
       } else if (force) {
-        await supabase.from("pairs").delete().neq("id", 0);
+        const { error } = await supabase.from("pairs").delete().neq("id", 0);
+        if (error) clearResult.errors.push(`clearPairs(all): ${error.message}`);
       }
 
       let newPairs = [];
@@ -796,7 +827,8 @@ export default async function handler(req, res) {
         kalshiCount: (kalshiDb || []).length,
         polyCount:   (polyDb || []).length,
         pairsUpserted: pairsUpsert.count,
-        pairsErrors: pairsUpsert.errors.slice(0, 5),
+        pairsCleared: clearResult.cleared,
+        pairsErrors: [...clearResult.errors, ...pairsUpsert.errors].slice(0, 5),
         readErrors,
         ...(matchDiagnostics ? { matchDiagnostics } : {}),
       });
@@ -846,6 +878,7 @@ export default async function handler(req, res) {
     }
 
     // Run matching
+    const clearErrors = [];
     let newPairs = [];
     let matchDiagnostics = null;
     const isSport = sport !== "all" && SPORTS_TAGS.has(sport);
@@ -862,7 +895,7 @@ export default async function handler(req, res) {
       // Clear existing pairs for this sport before re-matching
       const kalshiIds = (kalshiDb || []).map(m => m.id);
       if (kalshiIds.length > 0) {
-        await supabase.from("pairs").delete().in("kalshi_id", kalshiIds);
+        clearErrors.push(...(await clearPairsForKalshiIds(kalshiIds)).errors);
       }
 
       newPairs = matchSportsMarkets(kalshiDb || [], polyDb || [], sport);
@@ -890,7 +923,7 @@ export default async function handler(req, res) {
         .filter(m => sport === "all" || m.sport_tag === sport)
         .map(m => m.id);
       if (kalshiIdsForSport.length > 0) {
-        await supabase.from("pairs").delete().in("kalshi_id", kalshiIdsForSport);
+        clearErrors.push(...(await clearPairsForKalshiIds(kalshiIdsForSport)).errors);
       }
 
       const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
@@ -917,7 +950,7 @@ export default async function handler(req, res) {
         embeddingUpserted: embeddingUpsert.count,
         embeddingErrors: embeddingUpsert.errors.slice(0, 5),
         pairsUpserted: pairsUpsert.count,
-        pairsErrors: pairsUpsert.errors.slice(0, 5),
+        pairsErrors: [...clearErrors, ...pairsUpsert.errors].slice(0, 5),
       },
       ...(matchDiagnostics ? { matchDiagnostics } : {}),
     });

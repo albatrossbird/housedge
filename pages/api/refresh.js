@@ -6,10 +6,30 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-const KALSHI_SERIES = [
+// Seed series, kept so a run still refreshes the core sports and econ
+// books even if the pairs table is empty. The real list is discovered
+// from the data - see kalshiSeriesToRefresh().
+const SEED_KALSHI_SERIES = [
   "KXWCGAME", "KXNBAGAME", "KXNHLGAME", "KXMLBGAME",
   "KXBTC", "KXETH", "KXFED", "KXCPI", "KXRECESSION", "KXGDP", "KXPRES",
 ];
+
+// The seed list was the whole list, and it silently excluded every
+// series the crypto and politics categories added: KXXRPMAXY,
+// KXTOKENLAUNCH, KXRECOGSOMALI, KXVENEZDEFACTO and the rest. Those
+// markets are paired and on the live site, and their prices were frozen
+// at whatever the last /api/embed run wrote - the exact stale-price
+// symptom this job exists to fix, just in the categories nobody had
+// checked yet.
+//
+// A Kalshi ticker is "<SERIES>-<event>-<outcome>", so the series is
+// recoverable from the ids already in the pairs table. Scoped to paired
+// markets because those are the only ones the site renders; unpaired
+// rows get their prices from the daily discovery run.
+function seriesOf(ticker) {
+  const s = String(ticker || "").split("-")[0];
+  return s.startsWith("KX") ? s : null;
+}
 
 const CHUNK = 100;
 
@@ -96,9 +116,29 @@ export default async function handler(req, res) {
   if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
 
   try {
+    // Every pair on the site, so both venues' refresh lists come from
+    // what is actually rendered rather than a hand-maintained constant.
+    const pairRows = [];
+    for (let from = 0; from < 200000; from += 1000) {
+      const { data, error } = await supabase
+        .from("pairs")
+        .select("kalshi_id, polymarket_id")
+        .range(from, from + 999);
+      if (error || !data || data.length === 0) break;
+      pairRows.push(...data);
+      if (data.length < 1000) break;
+    }
+
+    const series = new Set(SEED_KALSHI_SERIES);
+    for (const row of pairRows) {
+      const s = seriesOf(row.kalshi_id);
+      if (s) series.add(s);
+    }
+    const kalshiSeries = [...series];
+
     // Fetch fresh prices from Kalshi
     const kalshiResults = await Promise.all(
-      KALSHI_SERIES.map(s =>
+      kalshiSeries.map(s =>
         fetch(`https://api.elections.kalshi.com/trade-api/v2/markets?status=open&limit=200&series_ticker=${s}`)
           .then(r => r.ok ? r.json() : { markets: [] })
           .then(d => d.markets || [])
@@ -126,17 +166,17 @@ export default async function handler(req, res) {
     // the same stuck-at-1000 behaviour. Range paging is the only way past
     // it, and without this refresh silently stops updating every
     // Polymarket market beyond the first thousand.
-    const polyIds = [];
-    for (let from = 0; from < 60000; from += 1000) {
-      const { data, error } = await supabase
-        .from("markets")
-        .select("id")
-        .not("id", "ilike", "KX%")
-        .range(from, from + 999);
-      if (error || !data || data.length === 0) break;
-      polyIds.push(...data.map(m => m.id));
-      if (data.length < 1000) break;
-    }
+    // Only the Polymarket side of a pair. Refreshing all ~10k stored
+    // Polymarket rows meant ~200 sequential Gamma calls and an 83-second
+    // run for prices nothing displays; the paired subset is two orders
+    // of magnitude smaller. Unpaired rows still get prices from the
+    // daily discovery run.
+    //
+    // Numeric-only: Gamma's ?id= rejects a non-integer with a 422 that
+    // fails the whole batch, and stored ids are text.
+    const polyIds = [...new Set(
+      pairRows.map(r => String(r.polymarket_id)).filter(id => /^\d+$/.test(id))
+    )];
 
     // Fetch Polymarket prices in batches
     const polyUpdates = [];
@@ -182,6 +222,8 @@ export default async function handler(req, res) {
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,
       polyIdsInDb: polyIds.length,
+      kalshiSeriesRefreshed: kalshiSeries.length,
+      pairsSeen: pairRows.length,
       errors: [...kalshiResult.errors, ...polyResult.errors].slice(0, 5),
       polyFetchErrors: polyFetchErrors.slice(0, 5),
     });

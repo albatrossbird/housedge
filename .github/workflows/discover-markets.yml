@@ -8,7 +8,7 @@ name: Discover and match markets
 # useful floor; econ/crypto/politics move far slower than that.
 #
 # Categories run SEQUENTIALLY with a pause between them. Each /api/embed
-# call is a long-running serverless function, and firing five at once
+# call is a long-running serverless function, and firing all seven at once
 # risks Vercel concurrency and duration limits — the failure mode being a
 # half-written match set, which is worse than a slow job.
 
@@ -19,7 +19,7 @@ on:
     inputs:
       categories:
         description: "Space-separated categories to run"
-        default: "mlb nba nhl soccer econ"
+        default: "mlb nba nhl soccer econ crypto politics"
         required: false
 
 concurrency:
@@ -29,12 +29,12 @@ concurrency:
 jobs:
   discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Run /api/embed per category
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nba nhl soccer econ' }}
+          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nba nhl soccer econ crypto politics' }}
         run: |
           set -uo pipefail
           FAILED=0
