@@ -37,7 +37,7 @@ The frontend never calls Kalshi/Polymarket directly. Data flows through three AP
 
 3. **`pages/api/markets.js`** — what the frontend polls (every 60s). Calls the `get_pairs(sport_tags)` Postgres RPC, which joins `markets` and `pairs` in SQL (chained Supabase JS-client filters were silently failing, hence the raw RPC). Filters stale/expired-date rows and prices outside 0.05–0.95, then shapes for the UI.
 
-`pages/index.js` is a single-file client (category tabs, sort controls, market cards, arb badges) with inline styles — no CSS framework. Arb logic: `min(kalshi.yes, poly.yes) + min(kalshi.no, poly.no) < 0.97` AND spread ≤ 15 points (larger spreads are treated as data errors, not real arbitrage — see the Polymarket outcome-price bug).
+`pages/index.js` is a single-file client (category tabs, sort controls, market cards, arb badges) with inline styles — no CSS framework. Arb logic lives in the API now, not the client — see "Executable pricing". The client only reads `market.arb` and keeps the spread ≤ 15 points guard (wider spreads are data errors, not arbitrage — see the Polymarket outcome-price bug).
 
 ### Automation
 
@@ -149,6 +149,62 @@ loud instead of silent.
 
 Both modes return `matchDiagnostics` with `threshold`, embedded counts, `acceptedPairs` (what was actually paired, post-gate, post-exclusivity), and `topScores` (best candidate per Kalshi row **regardless of threshold or gate**). `topScores` is what distinguishes "real candidates just under threshold" from "nothing close" from "gate correctly rejecting". Write routes return per-stage `writes` counts and real error strings. **Keep this** — nearly every bug this codebase has had was invisible until the relevant counter/error was surfaced in the response.
 
+## Executable pricing (books + fees)
+
+The arb number is what the trade actually costs, not what the midpoints
+suggest. `lib/fees.js` owns the maths; `/api/markets` returns
+`feesIncluded: true`.
+
+**Both venues charge takers on the same quadratic curve** — most
+expensive at 50/50, near zero at the extremes — and neither charges
+makers:
+
+```
+Kalshi      contracts x 0.07 x fee_multiplier x p(1-p)
+Polymarket  shares    x rate x (p(1-p))^exponent
+```
+
+**Fee parameters come from the APIs, never hardcoded.** Kalshi's
+`fee_multiplier` is per-series on `/series/<ticker>` (0.5 on KXMLBGAME);
+Polymarket's `feeSchedule` is on the market (`{rate, exponent,
+takerOnly, rebateRate}`, rate 0.05 for sports). Polymarket changed its
+rates mid-2026 — a constant in code goes stale silently and produces
+confident wrong answers. Both are stored per market row.
+
+- **A missing `fee_multiplier` means 1, not 0.** Defaulting it to zero
+  prices every Kalshi leg as free and manufactures edges.
+- **Kalshi rounds its fee up to the cent per ORDER.** Charging that
+  against a single contract bills 1.00¢ where the rate is 0.875¢ — 14%
+  high — so per-contract cost amortises over `DEFAULT_ORDER_SIZE`.
+- **Polymarket quotes one book per market, on outcome 0.** The other
+  outcome is its exact complement in a binary CLOB, so it is derived at
+  read time (`complementBook`) using the same identifier-based outcome
+  index the sports join uses. Storing both would let the copies
+  disagree.
+- **A missing ask yields `null`, not a big number.** "No executable
+  price" and "no edge" are different answers; the card says which.
+- **The threshold is $1.00**, because that is what a matched pair pays
+  out. The old `< 0.97` cushion was standing in for costs that are now
+  measured.
+
+Worked example — Kansas City vs Toronto on live books:
+
+```
+old  min(0.53, 0.545) + min(0.47, 0.455) = 0.9850  -> flagged ARB
+new  0.5388 + 0.4724                     = 1.0112  -> -1.1c, not a trade
+```
+
+`supabase/migrations/0004` adds `bid`/`ask`/`no_bid`/`no_ask`,
+`bid_size`/`ask_size`, `fee_multiplier`/`fee_schedule`, and rebuilds
+`get_pairs`. **`no_bid`/`no_ask` are Kalshi-only on purpose**: a Kalshi
+binary has a genuinely separate NO book (not `1 - yes`), while
+Polymarket's is a derived complement.
+
+Because the migration is run by hand, a deploy can land before it does.
+Both write paths detect the missing columns, retry without them, and
+return a warning naming the migration — a price refresh degrades instead
+of failing outright.
+
 ## Current match reality (as of last verification)
 
 Every pair below was read and confirmed by hand; the counts are small on
@@ -207,7 +263,7 @@ Key v2 design points:
 - Run one model per `/api/v2/extract-eval` request; three models x 100 markets exceeds the Vercel function timeout.
 - Requires `ANTHROPIC_API_KEY` in Vercel env (and a redeploy, same as the service-role key).
 
-**Arb numbers from `/api/v2/markets` are not yet executable.** v1 never stored bid/ask, so backfilled quotes have `mid` only and the arb calc falls back to it; fees aren't modelled either (`feesIncluded: false`). Treat any edge as "worth checking", not a trade, until ingestion writes real bid/ask and fees land.
+**Arb numbers from `/api/v2/markets` are still mid-only.** v1's *live* path is fee-aware now (see "Executable pricing"), but v2's backfilled quotes were copied from v1 before books were stored, so they carry `mid` only and v2's calc falls back to it. v2 reports `feesIncluded: false` and means it; `/api/markets` reports `true`. Re-backfilling v2 from the now-populated book columns is what closes this.
 
 ## v1 database (Supabase, schema still dashboard-only)
 
@@ -270,12 +326,13 @@ $$ LANGUAGE sql SECURITY DEFINER;
 
 ## Known bugs / open work (priority order)
 
-1. **Arb numbers are not executable** — v1 never stored bid/ask and no fee model exists, so every edge shown is a mid-to-mid estimate. Treat as "worth checking", never as a trade.
-2. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
-3. **No retention policy on `markets`.** The table holds every fixture ever stored (164 MLB rows for 37 live games) and nothing prunes it. Sports matching now skips past-dated games so this no longer produces wrong pairs, but the table grows without bound on a 500MB free tier.
-4. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
-5. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
-6. Polymarket's `outcomes`/`outcomePrices` alignment is still unverified for non-sports markets. Sports no longer depends on it (the index comes from the identifiers), but crypto/politics/econ still read `outcomePrices[0]`.
+1. **Depth is collected but unused.** `bid_size`/`ask_size` are stored; the arb calc still assumes the touch price is available for a full order. An edge that exists for 12 contracts (Kalshi's typical MLB size) is not the same finding as one that exists for 3,000, and nothing says which yet.
+2. **v2's arb numbers are still mid-only** — see the v2 section. v1's live path is fee-aware; v2's backfilled quotes predate the book columns.
+3. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
+4. **No retention policy on `markets`.** The table holds every fixture ever stored (164 MLB rows for 37 live games) and nothing prunes it. Sports matching now skips past-dated games so this no longer produces wrong pairs, but the table grows without bound on a 500MB free tier.
+5. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
+6. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
+7. Polymarket's `outcomes`/`outcomePrices` alignment is still unverified for non-sports markets. Sports no longer depends on it (the index comes from the identifiers), but crypto/politics/econ still read `outcomePrices[0]`.
 
 **Fixed since the last revision of this file:** automated refresh (both
 GitHub Actions workflows), crypto and politics wired end to end, the

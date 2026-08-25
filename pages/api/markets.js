@@ -179,16 +179,27 @@ export default async function handler(req, res) {
       })
       .map(({ _gameDate, ...m }) => m);
 
+    const priced = shaped.filter(m => m.arb).length;
+
     res.setHeader("Cache-Control", "s-maxage=30");
     res.status(200).json({
       pairs: shaped,
       needsEmbed: shaped.length === 0,
-      // Was false for v1's entire life: the arb numbers were mid-to-mid
-      // with no fee model. Clients should say so rather than implying
-      // an executable trade.
-      feesIncluded: true,
+      // A claim about the numbers actually in this response, not about
+      // what the code is capable of. Before migration 0004 is run there
+      // are no books to price, every `arb` is null, and answering
+      // `true` here would assert fee-inclusive figures that do not
+      // exist.
+      feesIncluded: priced > 0,
+      pricing: {
+        priced,
+        noExecutablePrice,
+        ...(priced === 0 && shaped.length > 0
+          ? { notice: "no book data - run supabase/migrations/0004_bid_ask_and_fees.sql" }
+          : {}),
+      },
       ...(req.query.debug === "1"
-        ? { debug: { rowsFromRpc: data.length, dropped, noExecutablePrice, sampleDropped: sampleDropped.slice(0, 5) } }
+        ? { debug: { rowsFromRpc: data.length, dropped, sampleDropped: sampleDropped.slice(0, 5) } }
         : {}),
     });
   } catch (err) {
