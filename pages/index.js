@@ -58,6 +58,16 @@ function SpreadBar({ market }) {
   const pPct = Math.round(market.poly.yes * 100);
   const diff = Math.abs(kPct - pPct);
 
+  // How far the touch prices sit apart on each venue. This is the cost
+  // the midpoint hides, and the reason a wide mid gap is often no edge
+  // while a narrow one can be.
+  const width = (bid, ask) =>
+    (bid == null || ask == null) ? null : Math.round((ask - bid) * 1000) / 10;
+  const kWide = width(market.kalshi.bid, market.kalshi.ask);
+  const pWide = width(market.poly.bid, market.poly.ask);
+  const widths = [kWide, pWide].filter(v => v != null);
+  const widestBook = widths.length ? Math.max(...widths) : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -74,13 +84,23 @@ function SpreadBar({ market }) {
         </div>
         <span style={{ width: 32, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{pPct}%</span>
       </div>
-      {diff > 0 && (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <span style={{ fontSize: 10, color: diff >= 5 ? T.arb : T.muted, fontWeight: diff >= 5 ? 700 : 400, letterSpacing: "0.04em" }}>
-            {diff >= 5 ? `⚡ ${diff}pt spread` : `${diff}pt spread`}
+      {/* The bars are MIDPOINTS; the arb is computed from asks. Those
+          two disagree constantly, and the old line here made it worse by
+          putting a lightning bolt on any mid gap over 5 points — so a
+          card could advertise "7pt spread" while costing 131c to own
+          both sides, and another could show 2pt and be a real edge.
+          What actually decides it is book width: DOGE's Polymarket book
+          was 0.08/0.49, so its 31% mid was unbuyable. Lightning is
+          reserved for ARB now, and the second number is the one that
+          explains the cost. */}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, fontSize: 10, letterSpacing: "0.04em" }}>
+        {diff > 0 && <span style={{ color: T.muted }}>{diff}pt mid gap</span>}
+        {widestBook != null && (
+          <span style={{ color: widestBook >= 5 ? T.arb : T.muted, fontWeight: widestBook >= 5 ? 700 : 400 }}>
+            {widestBook >= 5 ? `thin book · ${widestBook}pt wide` : `${widestBook}pt book`}
           </span>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -211,6 +231,14 @@ export default function HouseEdge() {
   }, [activeCategory, loadMarkets]);
 
   const sorted = [...markets].sort((a, b) => {
+    // The executable ranking, and the one that should be reachable
+    // first: mid gap sorts by an appearance, this sorts by what the
+    // trade costs. Unpriceable pairs sink rather than sorting as zero.
+    if (sort === "cost") {
+      const ca = a.arb ? a.arb.cost : Infinity;
+      const cb = b.arb ? b.arb.cost : Infinity;
+      return ca - cb;
+    }
     if (sort === "spread") return spread(b) - spread(a);
     if (sort === "volume") return (b.kalshi.volume + b.poly.volume) - (a.kalshi.volume + a.poly.volume);
     if (sort === "similarity") return (b.similarity || 0) - (a.similarity || 0);
@@ -274,7 +302,8 @@ export default function HouseEdge() {
             style={{ padding: "10px 14px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.text, background: T.surface, cursor: "pointer", outline: "none" }}
           >
             <option value="trending">Sort: Trending</option>
-            <option value="spread">Sort: Biggest spread</option>
+            <option value="cost">Sort: Cheapest to own both sides</option>
+            <option value="spread">Sort: Biggest mid gap</option>
             <option value="volume">Sort: Most volume</option>
             <option value="similarity">Sort: Best match</option>
           </select>
