@@ -124,6 +124,18 @@ function MarketCard({ market }) {
           {isArb && (
             <span style={{ fontSize: 10, fontWeight: 700, color: T.arb, letterSpacing: "0.04em" }}>
               ⚡ ARB +{(market.arb.edge * 100).toFixed(1)}¢
+              {/* The edge per contract is only half the finding — the
+                  same Bitcoin strike family offered 7 contracts at one
+                  price and 710 at another. Without size, +0.9c reads
+                  identically whether it is worth six cents or fifteen
+                  dollars. `~` because Polymarket publishes no depth, so
+                  this is an upper bound set by the Kalshi leg. */}
+              {market.arb.maxContracts != null && (
+                <span style={{ fontWeight: 400, color: T.muted }}>
+                  {" "}· {market.arb.depthKnown ? "" : "≤"}{Math.floor(market.arb.maxContracts)} contracts
+                  {market.arb.edgeDollars != null && ` (~$${market.arb.edgeDollars.toFixed(2)})`}
+                </span>
+              )}
             </span>
           )}
           {!isArb && market.arb && (

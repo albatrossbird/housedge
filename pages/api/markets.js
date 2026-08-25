@@ -157,6 +157,10 @@ export default async function handler(req, res) {
           {
             yesAsk: row.k_ask,
             noAsk:  row.k_no_ask,
+            // Kalshi publishes size on the YES book only; taking NO at
+            // no_ask is backed by the YES bid queue.
+            yesAskSize: row.k_ask_size,
+            yesBidSize: row.k_bid_size,
             feeMultiplier: row.k_fee_multiplier,
           },
           {
@@ -211,6 +215,14 @@ export default async function handler(req, res) {
             // Both conditions. A wide cross-venue disagreement is a data
             // or semantics problem, not free money — see IMPLAUSIBLE_SPREAD.
             profitable: arb.r.profitable && !implausible,
+            // An edge with no size is not a finding. maxContracts is an
+            // UPPER bound: Polymarket publishes no depth, so the smaller
+            // of the two legs may be smaller still — depthKnown says so.
+            maxContracts: arb.maxContracts,
+            depthKnown: arb.depthKnown,
+            edgeDollars: arb.maxContracts != null
+              ? Math.round(arb.r.edge * arb.maxContracts * 100) / 100
+              : null,
             ...(implausible ? { implausible: true, spreadPts: Math.round(spreadPts * 10) / 10 } : {}),
           } : null,
           trending: ((row.k_volume || 0) + (row.p_volume || 0)) > 5000,
