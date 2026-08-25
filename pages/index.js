@@ -29,12 +29,11 @@ function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
 //
 // m.arb is null when a leg has no executable price. That is not zero
 // edge, so it must not be flagged either way.
+// The implausible-spread guard now lives in the API alongside the
+// calculation, so `profitable` already accounts for it. Keeping a second
+// copy here would be two places to update and one to forget.
 function arbAlert(m) {
-  if (!m.arb) return false;
-  const spreadPct = Math.abs(m.kalshi.yes - m.poly.yes) * 100;
-  // A spread this wide is still far more likely to be a data error
-  // (wrong game, flipped outcome) than a real edge, so it stays.
-  return m.arb.profitable && spreadPct <= 15;
+  return Boolean(m.arb && m.arb.profitable);
 }
 
 // ── Categories (UI display only) ──────────────────────────────

@@ -2,6 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
 import { bestArb, complementBook } from "../../lib/fees.js";
 
+// Beyond this gap the two venues are not pricing the same thing, and
+// the difference is a matching or data fault rather than an edge.
+const IMPLAUSIBLE_SPREAD_PTS = 15;
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -97,6 +101,7 @@ export default async function handler(req, res) {
 
     const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0 };
     let noExecutablePrice = 0;
+    let implausibleArbs = 0;
     const sampleDropped = [];
 
     const shaped = data
@@ -164,6 +169,22 @@ export default async function handler(req, res) {
 
         if (arb == null) noExecutablePrice++;
 
+        // The two venues pricing the same claim 80 points apart is not
+        // an arbitrage. Live example: Kalshi had Delcy Rodriguez at
+        // 0.89/0.92 to be Venezuela's de facto head of state - a price
+        // consistent with the rest of its own outcome set, which sums to
+        // 1.15 - while Polymarket priced the identical-reading claim at
+        // 0.095. Executable pricing called that a 78c edge.
+        //
+        // This guard already existed in pages/index.js, so the site did
+        // not render it. But it only existed there: the API published
+        // profitable: true, and every other consumer - v2, any future
+        // client, and the checks in this session - believed it. A
+        // safety rule that lives in one client is not a safety rule.
+        const spreadPts = Math.abs((row.k_yes_price ?? 0) - (pYes ?? 0)) * 100;
+        const implausible = spreadPts > IMPLAUSIBLE_SPREAD_PTS;
+        if (implausible && arb?.r?.profitable) implausibleArbs++;
+
         return {
           id: row.kalshi_id,
           title: row.k_title,
@@ -187,7 +208,10 @@ export default async function handler(req, res) {
             side: arb.side,
             cost: Math.round(arb.r.total * 10000) / 10000,
             edge: Math.round(arb.r.edge * 10000) / 10000,
-            profitable: arb.r.profitable,
+            // Both conditions. A wide cross-venue disagreement is a data
+            // or semantics problem, not free money — see IMPLAUSIBLE_SPREAD.
+            profitable: arb.r.profitable && !implausible,
+            ...(implausible ? { implausible: true, spreadPts: Math.round(spreadPts * 10) / 10 } : {}),
           } : null,
           trending: ((row.k_volume || 0) + (row.p_volume || 0)) > 5000,
         };
@@ -231,6 +255,10 @@ export default async function handler(req, res) {
       pricing: {
         priced,
         noExecutablePrice,
+        // Pairs whose maths says profitable but whose cross-venue gap
+        // says "look at the data instead". Worth watching: a rising
+        // count means matching quality is slipping.
+        implausibleArbs,
         ...(priced === 0 && shaped.length > 0
           ? { notice: "no book data - run supabase/migrations/0004_bid_ask_and_fees.sql" }
           : {}),
