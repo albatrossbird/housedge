@@ -57,6 +57,29 @@ because a silent no-op looked like success.
 `lib/cronAuth.js` gates both endpoints behind an optional `CRON_SECRET`
 (permissive until the var is set on Vercel *and* as a repo secret).
 
+### Retention
+
+`/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
+neither venue lists any more. Runs from `discover-markets.yml` **after**
+the category loop — discovery is what refreshes `updated_at`, so running
+it first is what makes "not seen in N days" mean *delisted* rather than
+*not fetched yet*.
+
+- **Never deletes a row referenced by `pairs`**, and refuses to run at
+  all if the pairs read fails rather than pruning from a partial
+  protection set.
+- **14 days, chosen from the data**: at 21 days nothing qualified, at 14
+  exactly 872 rows did — the finished MLB fixtures. First real run
+  deleted those 872 of 23,342 with 144 protected and every tab unchanged.
+- Sports fixtures go by the same "not seen" rule, *not* by game date:
+  Kalshi keeps a game listed while it settles, and deleting mid-settlement
+  would drop a row `pairs` may still point at.
+- Reads without `embedding` (that is the read that was failing on payload
+  size) and deletes in chunks of 200, per the `.in()` URL-length lesson.
+
+**It prunes row count, not bytes.** The dominant cost is embeddings on
+unpaired non-sports rows — see known bug 1.
+
 ### Hitting the routes by hand
 
 ```
@@ -356,7 +379,7 @@ $$ LANGUAGE sql SECURITY DEFINER;
 
 ## Known bugs / open work (priority order)
 
-1. **No retention policy on `markets`.** The table holds every fixture ever stored and nothing prunes it. This is no longer theoretical: it grew far enough that reads carrying `embedding` began failing outright (see the pitfall on `fetchAllRows`), and the 500MB free tier is the ceiling.
+1. **Embedding storage is the real tier pressure, and `/api/prune` does not touch it.** ~11,300 embedded rows (politics 7,443, crypto 3,870) at ~20KB of JSON-encoded floats each is roughly 225MB of a 500MB tier, and only 62 of them are in a pair. They cannot simply be deleted — the unpaired ones *are* the candidate pool, and dropping them means re-embedding next run. **pgvector is the lever**: `vector(1024)` as float4 is ~4KB against ~20KB, a 5x reduction with no loss of function. Already the plan in `docs/architecture-v2.md`; now the thing standing between this project and the ceiling.
 2. **Polymarket publishes no depth.** Gamma exposes aggregate liquidity but no size at the touch, so any leg on that venue reports `depthKnown: false` and `maxContracts` is an upper bound set by the Kalshi leg alone. Closing this means the CLOB API (`clob.polymarket.com/book`), which is a per-market call on a different host.
 3. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
 5. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
