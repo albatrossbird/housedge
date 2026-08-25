@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -57,11 +58,26 @@ export default async function handler(req, res) {
           try {
             const outcomes = JSON.parse(row.p_outcomes);
             const prices   = JSON.parse(row.p_outcome_prices);
-            const titleSide = (row.k_title || "").split("—").pop().trim();
-            const sideKw = (row.k_side_label || titleSide).toLowerCase()
-              .split(/\W+/).filter(w => w.length > 2);
-            let idx = outcomes.findIndex(o => sideKw.some(w => o.toLowerCase().includes(w)));
-            if (idx >= 0 && prices[idx] != null) pYes = parseFloat(prices[idx]);
+
+            // Identifiers first. Keyword-matching the side label against
+            // the outcome text fails in both directions: "A's" has no
+            // token longer than two characters so it matches nothing and
+            // falls through to outcome 0 — the *opponent's* price — and
+            // "New York M" matches "New York Yankees" as readily as
+            // "New York Mets". Either way the card pairs one team's
+            // Kalshi price with the other team's Polymarket price, which
+            // renders as a large fake arbitrage.
+            let idx = polyOutcomeIndex(row.kalshi_id, row.p_slug);
+
+            if (idx == null) {
+              const titleSide = (row.k_title || "").split("—").pop().trim();
+              const sideKw = (row.k_side_label || titleSide).toLowerCase()
+                .split(/\W+/).filter(w => w.length > 2);
+              const kwIdx = outcomes.findIndex(o => sideKw.some(w => o.toLowerCase().includes(w)));
+              idx = kwIdx >= 0 ? kwIdx : null;
+            }
+
+            if (idx != null && prices[idx] != null) pYes = parseFloat(prices[idx]);
           } catch {}
         }
 

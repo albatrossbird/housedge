@@ -12,6 +12,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
+import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
 
 const supabase = createClient(
@@ -213,243 +214,145 @@ function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
     },
   };
 }
+// A Polymarket event carries several markets per game (moneyline, NRFI,
+// ── Sports matching: join on the game, don't parse the title ───
+//
+// The title-regex approach broke silently and took the whole Sports tab
+// with it. Kalshi changed its game-market wording:
+//
+//   stored Aug 11:  "Cincinnati vs Chicago WS Winner? — Chicago WS"
+//   live   Aug 25:  "San Francisco wins — San Francisco"
+//
+// extractKalshiTeams() required "<A> vs <B> Winner?", so all 74 open
+// MLB markets returned null and were skipped. Only the stale rows still
+// sitting in `markets` parsed, which is why a fresh discovery run
+// produced 66 pairs and 61 of them were for games played two weeks
+// earlier.
+//
+// Both venues already publish the game as structured identifiers, so
+// there is no need to read prose at all (see lib/sportsKeys.js):
+//
+//   Kalshi ticker  KXMLBGAME-26AUG271910MILNYM-NYM
+//                             ^date    ^teams ^side
+//   Poly    slug   mlb-mil-nym-2026-08-27
+//
+// Reduced to {date, unordered pair of team codes} these are the same
+// key, so matching is an exact join: no similarity score, no 6-hour
+// date window, and no 30-team alias map per league. On the live
+// Aug 25-27 fixtures this joins 37 of 37 games.
+//
+// A market with no parseable key simply has no key and cannot join,
+// which also closes the hole where a Polymarket futures market
+// ("mlb-world-series-champion-2026", no date in the slug) could match a
+// single game — datesCompatible() used to read a missing date as
+// permission to pair.
 
-// ── MLB team name map ──────────────────────────────────────────
-// Maps every Kalshi abbreviation AND common short form to canonical
-// full team name. Both platforms' titles get normalized through this
-// before comparison, so "Chicago C" and "Chicago Cubs" both become
-// "chicago cubs" and match exactly.
-const MLB_TEAMS = {
-  // Kalshi single-letter suffixes
-  "los angeles a":   "los angeles angels",
-  "los angeles d":   "los angeles dodgers",
-  "new york y":      "new york yankees",
-  "new york m":      "new york mets",
-  "chicago c":       "chicago cubs",
-  "chicago w":       "chicago white sox",
-  // City-only forms (Kalshi often omits nickname)
-  "arizona":         "arizona diamondbacks",
-  "atlanta":         "atlanta braves",
-  "baltimore":       "baltimore orioles",
-  "boston":          "boston red sox",
-  "cincinnati":      "cincinnati reds",
-  "cleveland":       "cleveland guardians",
-  "colorado":        "colorado rockies",
-  "detroit":         "detroit tigers",
-  "houston":         "houston astros",
-  "kansas city":     "kansas city royals",
-  "miami":           "miami marlins",
-  "milwaukee":       "milwaukee brewers",
-  "minnesota":       "minnesota twins",
-  "oakland":         "oakland athletics",
-  "philadelphia":    "philadelphia phillies",
-  "pittsburgh":      "pittsburgh pirates",
-  "san diego":       "san diego padres",
-  "san francisco":   "san francisco giants",
-  "seattle":         "seattle mariners",
-  "st. louis":       "st. louis cardinals",
-  "st louis":        "st. louis cardinals",
-  "tampa bay":       "tampa bay rays",
-  "texas":           "texas rangers",
-  "toronto":         "toronto blue jays",
-  "washington":      "washington nationals",
-  // Full names (already correct, included for normalization)
-  "los angeles angels":      "los angeles angels",
-  "los angeles dodgers":     "los angeles dodgers",
-  "new york yankees":        "new york yankees",
-  "new york mets":           "new york mets",
-  "chicago cubs":            "chicago cubs",
-  "chicago white sox":       "chicago white sox",
-  "arizona diamondbacks":    "arizona diamondbacks",
-  "atlanta braves":          "atlanta braves",
-  "baltimore orioles":       "baltimore orioles",
-  "boston red sox":          "boston red sox",
-  "cincinnati reds":         "cincinnati reds",
-  "cleveland guardians":     "cleveland guardians",
-  "colorado rockies":        "colorado rockies",
-  "detroit tigers":          "detroit tigers",
-  "houston astros":          "houston astros",
-  "kansas city royals":      "kansas city royals",
-  "miami marlins":           "miami marlins",
-  "milwaukee brewers":       "milwaukee brewers",
-  "minnesota twins":         "minnesota twins",
-  "oakland athletics":       "oakland athletics",
-  "philadelphia phillies":   "philadelphia phillies",
-  "pittsburgh pirates":      "pittsburgh pirates",
-  "san diego padres":        "san diego padres",
-  "san francisco giants":    "san francisco giants",
-  "seattle mariners":        "seattle mariners",
-  "st. louis cardinals":     "st. louis cardinals",
-  "tampa bay rays":          "tampa bay rays",
-  "texas rangers":           "texas rangers",
-  "toronto blue jays":       "toronto blue jays",
-  "washington nationals":    "washington nationals",
-  // Common alternates
-  "athletics":               "oakland athletics",
-  "a's":                     "oakland athletics",
-  "ath":                     "oakland athletics",
-};
-
-// Extract the canonical team name from a fragment of text
-function normalizeTeam(text) {
-  const t = text.toLowerCase().trim();
-  // Try longest match first
-  const sorted = Object.keys(MLB_TEAMS).sort((a, b) => b.length - a.length);
-  for (const key of sorted) {
-    if (t.includes(key)) return MLB_TEAMS[key];
-  }
-  return t;
+// A Polymarket event carries several markets per game (moneyline, NRFI,
+// spreads, totals). Only the moneyline is the same bet as Kalshi's
+// "<team> wins".
+function isMoneylineTitle(title) {
+  const t = String(title || "").toLowerCase();
+  return !/(inning|o\/u|over\/under|tied|score|spread|\(-|\(\+)/.test(t);
 }
 
-// Extract both teams from a Kalshi MLB title
-// Kalshi format: "Team A vs Team B Winner? — Side"
-function extractKalshiTeams(title) {
-  const lower = title.toLowerCase();
-  const vsMatch = lower.match(/^(.+?)\s+vs\s+(.+?)\s+(winner|game)/i);
-  if (!vsMatch) return null;
-  return {
-    team1: normalizeTeam(vsMatch[1].trim()),
-    team2: normalizeTeam(vsMatch[2].trim()),
-  };
-}
-
-// Extract both teams from a Polymarket MLB title
-// Polymarket format: "Team A vs. Team B" or "Will Team A win on DATE?"
-function extractPolyTeams(title) {
-  const lower = title.toLowerCase();
-  // "Team A vs. Team B" format
-  const vsMatch = lower.match(/^(.+?)\s+vs\.?\s+(.+?)(?:\s*:|$)/i);
-  if (vsMatch) {
-    return {
-      team1: normalizeTeam(vsMatch[1].trim()),
-      team2: normalizeTeam(vsMatch[2].trim()),
-    };
-  }
-  // "Will Team A win on DATE?" format
-  const willMatch = lower.match(/will\s+(.+?)\s+win/i);
-  if (willMatch) {
-    return { team1: normalizeTeam(willMatch[1].trim()), team2: null };
-  }
-  return null;
-}
-
-// Check if two team sets match (both teams must appear in both titles)
-function teamsMatch(kTeams, pTeams) {
-  if (!kTeams || !pTeams) return false;
-  const kSet = new Set([kTeams.team1, kTeams.team2].filter(Boolean));
-  const pSet = new Set([pTeams.team1, pTeams.team2].filter(Boolean));
-  // Both teams from Kalshi must appear in Polymarket's teams
-  let matches = 0;
-  for (const t of kSet) {
-    if (pSet.has(t)) matches++;
-  }
-  return matches >= Math.min(kSet.size, pSet.size);
-}
-
-// Extract YYYY-MM-DD from a string (slug, close_time, ticker, etc.)
-// Handles multiple formats:
-//   - ISO: "2026-07-19T22:40:00Z" → "2026-07-19"
-//   - Slug: "mlb-stl-laa-2026-07-19-..." → "2026-07-19"
-//   - Kalshi ticker: "KXMLBGAME-26JUL191915CWSTOR" → "2026-07-19"
-const MONTH_MAP = {
-  JAN:"01",FEB:"02",MAR:"03",APR:"04",MAY:"05",JUN:"06",
-  JUL:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12"
-};
-
-function extractDate(str) {
-  if (!str) return null;
-  const s = String(str).toUpperCase();
-
-  // Try ISO format first: 2026-07-19
-  const isoMatch = s.match(/(\d{4}-\d{2}-\d{2})/);
-  if (isoMatch) return isoMatch[1].toLowerCase();
-
-  // Try Kalshi ticker format: 26JUL19 → 2026-07-19
-  const tickerMatch = s.match(/(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})/);
-  if (tickerMatch) {
-    const year = `20${tickerMatch[1]}`;
-    const month = MONTH_MAP[tickerMatch[2]];
-    const day = tickerMatch[3].padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  return null;
-}
-
-// Check if two dates are close enough to be the same game
-// 6-hour window handles UTC/ET differences for games listed near midnight
-// but blocks yesterday's completed game from matching tomorrow's game
-function datesCompatible(d1, d2) {
-  if (!d1 || !d2) return true; // if either date missing, don't block
-  const t1 = new Date(d1).getTime();
-  const t2 = new Date(d2).getTime();
-  return Math.abs(t1 - t2) <= 21600000; // max 6 hours apart
-}
-
-// ── Sports-specific structured matching ────────────────────────
-// Extracts team names from both sides and requires BOTH to match.
-// Also checks game date to prevent matching same teams on different days.
 function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
-  const matched = [];
-  const usedPolyIds = new Set();
+  const todayIso = new Date().toISOString().slice(0, 10);
 
-  for (const km of kalshiMarkets) {
-    const kTeams = extractKalshiTeams(km.title || "");
-    if (!kTeams) continue;
+  const diagnostics = {
+    kalshiRows: kalshiMarkets.length,
+    polyRows: 0,
+    kalshiKeyed: 0,
+    polyKeyed: 0,
+    pastGamesSkipped: 0,
+    joined: 0,
+    // The failure that hid this bug for two weeks. If a venue changes
+    // its identifier format again, this goes to (near) zero while
+    // everything else still looks healthy.
+    kalshiKeyFailures: 0,
+    sampleKeyFailures: [],
+    unjoinedKalshiKeys: [],
+  };
 
-    // Extract Kalshi game date from ticker (most reliable — always present)
-    // e.g. "KXMLBGAME-26JUL191915CWSTOR" → "2026-07-19"
-    const kDate = extractDate(km.id) || extractDate(km.close_time);
+  // Index Polymarket by game key, preferring the moneyline market.
+  const polyByKey = new Map();
+  for (const pm of polyMarkets) {
+    if (pm.sport_tag !== sportTag) continue;
+    diagnostics.polyRows++;
+    const pk = polyGameKey(pm.slug);
+    if (!pk) continue;
+    diagnostics.polyKeyed++;
+    if (pk.date < todayIso) continue;
 
-    let bestMatch = null;
-    let bestScore = 0;
-
-    for (const pm of polyMarkets) {
-      if (usedPolyIds.has(pm.id)) continue;
-      if (pm.sport_tag !== sportTag) continue;
-
-      const pTeams = extractPolyTeams(pm.title || "");
-      if (!teamsMatch(kTeams, pTeams)) continue;
-
-      // Extract Polymarket game date from slug
-      const pDate = extractDate(pm.slug);
-
-      // HARD GATE: dates must be within 1 day of each other
-      // Prevents "Cardinals vs Angels tomorrow" matching
-      // "Cardinals vs Angels today" — same teams, wrong game
-      if (!datesCompatible(kDate, pDate)) continue;
-
-      const isMoneyline = !pm.title.toLowerCase().includes("inning") &&
-                          !pm.title.toLowerCase().includes("o/u") &&
-                          !pm.title.toLowerCase().includes("tied") &&
-                          !pm.title.toLowerCase().includes("score");
-
-      // Score = moneyline bonus + date proximity bonus
-      // Prefer the candidate whose date is closest to Kalshi's game date
-      const dateDiff = (kDate && pDate)
-        ? Math.abs(new Date(kDate).getTime() - new Date(pDate).getTime())
-        : Infinity;
-      const dateScore = dateDiff === Infinity ? 0 : 1 - (dateDiff / 86400000);
-      const score = (isMoneyline ? 1.0 : 0.9) + (dateScore * 0.1);
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = pm;
-      }
-    }
-
-    if (bestMatch) {
-      matched.push({
-        kalshi_id:     km.id,
-        polymarket_id: bestMatch.id,
-        similarity:    bestScore,
-        created_at:    Math.floor(Date.now() / 1000),
-      });
-      usedPolyIds.add(bestMatch.id);
+    const existing = polyByKey.get(pk.key);
+    if (!existing || (!isMoneylineTitle(existing.title) && isMoneylineTitle(pm.title))) {
+      polyByKey.set(pk.key, pm);
     }
   }
 
-  return matched;
+  // One pair per game. Kalshi lists a market per side and Polymarket
+  // one two-outcome market, so both Kalshi sides key to the same game;
+  // markets.js already resolves which Polymarket outcome a given side
+  // refers to. Taking the lowest ticker keeps that choice deterministic
+  // instead of dependent on row order.
+  const bySide = new Map();
+  for (const km of kalshiMarkets) {
+    const kk = kalshiGameKey(km.id);
+    if (!kk) {
+      diagnostics.kalshiKeyFailures++;
+      if (diagnostics.sampleKeyFailures.length < 5) {
+        diagnostics.sampleKeyFailures.push({ id: km.id, title: (km.title || "").slice(0, 60) });
+      }
+      continue;
+    }
+    diagnostics.kalshiKeyed++;
+    if (kk.date < todayIso) { diagnostics.pastGamesSkipped++; continue; }
+
+    const prev = bySide.get(kk.key);
+    if (!prev || String(km.id) < String(prev.id)) bySide.set(kk.key, km);
+  }
+
+  const matched = [];
+  for (const [key, km] of bySide) {
+    const pm = polyByKey.get(key);
+    if (!pm) {
+      if (diagnostics.unjoinedKalshiKeys.length < 10) diagnostics.unjoinedKalshiKeys.push(key);
+      continue;
+    }
+    diagnostics.joined++;
+    matched.push({
+      kalshi_id:     km.id,
+      polymarket_id: pm.id,
+      // An exact identifier join, not a similarity estimate.
+      similarity:    1.0,
+      created_at:    Math.floor(Date.now() / 1000),
+    });
+  }
+
+  return { newPairs: matched, matchDiagnostics: diagnostics };
+}
+
+
+// Kalshi's game markets are titled from one side only — "San Francisco
+// wins" — which reads as a fragment in the UI and drops the matchup
+// entirely. rules_primary states it in full:
+//
+//   "If San Francisco wins the Arizona vs San Francisco professional
+//    baseball game originally scheduled for Aug 27, 2026 at 9:45 PM EDT..."
+//
+// so the display title can be rebuilt from it without a team-name table.
+// Matching does not depend on this — that runs off the ticker — so a
+// wording change here degrades the label, not the pairing.
+function kalshiGameTitle(market) {
+  const rules = String(market.rules_primary || "");
+  const m = rules.match(
+    /\bwins the\s+(.+?)\s+game\s+originally\s+scheduled\s+for\b/i
+  );
+  if (!m) return null;
+  // Trim the sport descriptor: "professional baseball", "Pro Basketball".
+  const matchup = m[1].replace(/\s+(?:professional|pro)\s+\S+$/i, "").trim();
+  if (!/\svs\s/i.test(matchup)) return null;
+  const side = market.yes_sub_title || market.title;
+  return side ? `${matchup} — ${side}` : matchup;
 }
 
 // ── Fetch Kalshi markets ───────────────────────────────────────
@@ -518,7 +421,8 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
         out.push({
           id:             m.ticker,
           platform:       "kalshi",
-          title:          m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title,
+          title:          kalshiGameTitle(m) ||
+                          (m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
           yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
           volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
@@ -568,7 +472,8 @@ async function fetchKalshiMarkets(sportFilter = "all") {
         .map(m => ({
           id:             m.ticker,
           platform:       "kalshi",
-          title:          m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title,
+          title:          kalshiGameTitle(m) ||
+                          (m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
           yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
           volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
@@ -798,11 +703,9 @@ export default async function handler(req, res) {
 
       if (sportFilter && SPORTS_TAGS.has(sportFilter)) {
         // Use structured team-name matching for sports
-        newPairs = matchSportsMarkets(
-          kalshiDb || [],
-          polyDb || [],
-          sportFilter
-        );
+        const sportResult = matchSportsMarkets(kalshiDb || [], polyDb || [], sportFilter);
+        newPairs = sportResult.newPairs;
+        matchDiagnostics = sportResult.matchDiagnostics;
       } else {
         // Use embedding-based matching for non-sports
         const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
@@ -905,7 +808,9 @@ export default async function handler(req, res) {
         clearErrors.push(...(await clearPairsForKalshiIds(kalshiIds)).errors);
       }
 
-      newPairs = matchSportsMarkets(kalshiDb || [], polyDb || [], sport);
+      const sportResult = matchSportsMarkets(kalshiDb || [], polyDb || [], sport);
+      newPairs = sportResult.newPairs;
+      matchDiagnostics = sportResult.matchDiagnostics;
     } else {
       // Embedding matching for non-sports
       // Explicit limits: the implicit 1000-row cap silently truncated
