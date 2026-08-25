@@ -692,6 +692,7 @@ export default async function handler(req, res) {
         .from("markets")
         .select("id, title, sport_tag, embedding, side_label, close_time")
         .eq("platform", "kalshi")
+        .limit(20000);
       if (sportFilter) kalshiQuery = kalshiQuery.eq("sport_tag", sportFilter);
       const { data: kalshiDb, error: kalshiReadError } = await kalshiQuery;
 
@@ -824,12 +825,16 @@ export default async function handler(req, res) {
       newPairs = matchSportsMarkets(kalshiDb || [], polyDb || [], sport);
     } else {
       // Embedding matching for non-sports
+      // Explicit limits: the implicit 1000-row cap silently truncated
+      // matching once politics/crypto pushed these tables past 12k rows,
+      // which showed up as a category matching in matchonly mode but
+      // producing zero pairs in normal mode.
       const { data: kalshiDb } = await supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "kalshi").not("embedding", "is", null);
+        .eq("platform", "kalshi").not("embedding", "is", null).limit(20000);
       const { data: polyDb } = await supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "polymarket").not("embedding", "is", null);
+        .eq("platform", "polymarket").not("embedding", "is", null).limit(20000);
 
       // Clear existing pairs for this sport before re-matching. Missing
       // this meant stale pairs (e.g. wrong-threshold matches from
