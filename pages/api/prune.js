@@ -28,7 +28,12 @@ import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-const DEFAULT_DAYS = 21;
+// Two weeks past a market's last sighting. Chosen from the data, not
+// picked round: at 21 days nothing qualified, at 14 exactly 872 rows did
+// — the finished MLB fixtures neither venue lists any more. A shorter
+// window risks deleting a market during a quiet spell in discovery; a
+// longer one never bites on a table that churns daily.
+const DEFAULT_DAYS = 14;
 const CHUNK = 200;
 
 async function pageAll(build, { pageSize = 1000, maxRows = 200000 } = {}) {
