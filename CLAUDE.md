@@ -186,6 +186,17 @@ confident wrong answers. Both are stored per market row.
 - **The threshold is $1.00**, because that is what a matched pair pays
   out. The old `< 0.97` cushion was standing in for costs that are now
   measured.
+- **The <=15pt implausible-spread guard lives in the API, with the
+  calculation — never only in a client.** It was in `pages/index.js`
+  alone, so the site did not render the bad pair but `/api/markets`
+  published `profitable: true` on it and every other consumer believed
+  it. The live case: Kalshi had Delcy Rodriguez at 0.89/0.92 for
+  Venezuela's de facto head of state — consistent with its own outcome
+  set, which sums to 1.15 — against Polymarket's 0.09/0.10 on the
+  identical-reading claim. Executable pricing called that a 78c edge
+  because both legs were individually takeable.
+  `pricing.implausibleArbs` counts what the guard catches, so degrading
+  match quality stays visible.
 
 Worked example — Kansas City vs Toronto on live books:
 
@@ -212,9 +223,9 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Stored pairs | Shown on site | Floor |
 |---|---|---|---|
-| sports (mlb) | 37 | 37 | exact join |
+| sports (mlb) | 40 | 40 | exact join |
 | economics | 1 | 1 | 0.78 |
-| crypto | 17 | 12 | 0.90 |
+| crypto | 17 | 11 | 0.90 |
 | politics | 14 | 5 | 0.94 |
 
 "Shown" is lower than "stored" because `markets.js` drops prices outside
@@ -300,6 +311,9 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - **`upsert()` with a partial column set fails on NOT NULL columns even when the row already exists.** `INSERT ... ON CONFLICT DO UPDATE` validates the attempted insert row *before* resolving the conflict, so sending `{id, embedding, updated_at}` into `markets` fails every row with `23502 null value in column "platform"`. Either send the full row, or use a plain `.update()`.
 - **Selects silently cap at 1000 rows.** Any unbounded `.select()` on `markets` needs an explicit `.limit()` and, where applicable, a `sport_tag` filter. This bit both `refresh.js` and `embed.js`'s matchonly query.
 - `supabase-js` flattens network-layer errors to a bare `"TypeError: fetch failed"` string. Where the real cause matters, the raw REST helpers in `embed.js`/`refresh.js` (`restFetch`, `upsertRows`) preserve `cause.code` and HTTP status/body.
+- **A read that fails must not look like an empty table.** `fetchAllRows` did `if (error || !data || !data.length) break` and returned what it had, so a first-page failure returned `[]`. Selects carrying `embedding` are ~20KB a row, so a 1000-row page is ~20MB, and once crypto and politics passed ~4,000 Polymarket rows the first page stopped coming back — the category read as zero stored markets while the live site served pairs built from those rows. Paging now halves the page and retries before giving up.
+- **An error channel that cannot carry an error is worse than none.** `matchonly` declared `const kalshiReadError = null` and mapped it into `readErrors`, so the response reported `readErrors: []` because it was structurally incapable of anything else. Check that a diagnostic field *can* be non-empty before trusting it.
+- **PostgREST rejects a bulk insert whose objects have different keys** (`PGRST102`, "All object keys must match"). Kalshi and Polymarket rows are upserted together and legitimately diverge — only Kalshi has `no_bid`/`no_ask`/`series_slug`/`fee_multiplier`, only Polymarket has `fee_schedule`. `alignKeys()` fills the gaps with null. This was invisible until migration 0004 ran, because stripping the absent columns from both platforms happened to make the key sets match.
 - **`.in()` puts its values in the query string, so a few thousand ids build a URL long enough to kill the request.** Clearing politics' pairs meant `.in("kalshi_id", [...1774 ids])` — a ~40KB URL — and supabase-js returns that as an error object the call sites were ignoring, so clearing looked like it worked. The visible symptom was a re-match at a corrected threshold writing its new pairs while every stale wrong one survived. Chunk at ~200 ids and check the error.
 - Non-sports matching in normal mode must clear existing pairs for the category before rematching, or stale wrong pairs survive: upsert only overwrites when *both* ids match, so a Kalshi row matching a *different* Polymarket market just adds a second row.
 
