@@ -345,14 +345,18 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
 function kalshiGameTitle(market) {
   const rules = String(market.rules_primary || "");
   const m = rules.match(
-    /\bwins the\s+(.+?)\s+game\s+originally\s+scheduled\s+for\b/i
+    /\bwins the\s+(.+?)\s+game\s+originally\s+scheduled\s+for\s+([A-Z][a-z]{2}\s+\d{1,2}),/i
   );
   if (!m) return null;
   // Trim the sport descriptor: "professional baseball", "Pro Basketball".
   const matchup = m[1].replace(/\s+(?:professional|pro)\s+\S+$/i, "").trim();
   if (!/\svs\s/i.test(matchup)) return null;
+  // The date is part of the label, not decoration: a three-game series
+  // produces three cards whose teams and sides are identical, and
+  // without it they read as duplicated rows rather than three games.
   const side = market.yes_sub_title || market.title;
-  return side ? `${matchup} — ${side}` : matchup;
+  const head = `${matchup} (${m[2]})`;
+  return side ? `${head} — ${side}` : head;
 }
 
 // ── Fetch Kalshi markets ───────────────────────────────────────
