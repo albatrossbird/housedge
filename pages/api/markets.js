@@ -59,8 +59,19 @@ function buildKalshiUrl(row) {
       : `https://kalshi.com/markets/${series}/${slug}`;
   }
 
-  const q = encodeURIComponent(String(row.k_title || "").split("—")[0].trim());
-  return q ? `https://kalshi.com/search?q=${q}` : "https://kalshi.com/";
+  // Stored titles carry things that hurt a search query: Kalshi's own
+  // markdown emphasis ("Will **real GDP** increase..."), the side label
+  // after the em dash, and the game date we append to sports titles,
+  // which no market title contains.
+  const q = String(row.k_title || "")
+    .split("—")[0]
+    .replace(/\*+/g, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+    .trim();
+  return q ? `https://kalshi.com/search?q=${encodeURIComponent(q)}` : "https://kalshi.com/";
 }
 
 export default async function handler(req, res) {
