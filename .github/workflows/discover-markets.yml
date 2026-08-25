@@ -71,4 +71,24 @@ jobs:
             sleep 20   # space out long serverless calls
           done
 
+          # Retention, after discovery rather than before: discovery
+          # refreshes updated_at on everything the venues still list, so
+          # running it first is what makes "not seen in N days" mean
+          # "delisted" instead of "not fetched yet".
+          echo "::group::prune"
+          if curl -sS --max-time 280 \
+              ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+              "https://housedge.vercel.app/api/prune" -o prune.json; then
+            head -c 600 prune.json; echo
+            if jq -e '.error' prune.json >/dev/null 2>&1; then
+              echo "::warning::prune: $(jq -r '.error' prune.json)"
+            else
+              jq -r '"pruned \(.deleted) of \(.marketsScanned) markets, \(.pairsProtecting) protected"' prune.json
+              jq -r '(.errors // [])[:3][] | "::warning::prune: " + .' prune.json || true
+            fi
+          else
+            echo "::warning::prune: curl failed"
+          fi
+          echo "::endgroup::"
+
           exit $FAILED
