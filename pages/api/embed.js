@@ -677,6 +677,11 @@ async function fetchPolymarkets(sportFilter = "all") {
 export default async function handler(req, res) {
   const force     = req.query.force     === "1";
   const matchOnly = req.query.matchonly === "1";
+  // Inspect a threshold/gate change without touching the pairs table.
+  // Iterating on thresholds against the live table once wrote 71 wrong
+  // crypto pairs to production before they could be reviewed; matchonly
+  // deletes and rewrites by default, so "just looking" needs its own flag.
+  const dryRun   = req.query.dry       === "1";
   const sport     = req.query.sport || "all";
   // Per-category similarity floor.
   //
@@ -738,7 +743,9 @@ export default async function handler(req, res) {
       const readErrors = [kalshiReadError, polyReadError].filter(Boolean).map(e => e.message);
 
       // Clear existing pairs for this sport
-      if (sportFilter) {
+      if (dryRun) {
+        // skip: dry runs must leave the pairs table exactly as they found it
+      } else if (sportFilter) {
         const kalshiIds = (kalshiDb || []).map(m => m.id);
         if (kalshiIds.length > 0) {
           await supabase.from("pairs").delete().in("kalshi_id", kalshiIds);
@@ -764,7 +771,7 @@ export default async function handler(req, res) {
         matchDiagnostics = result.matchDiagnostics;
       }
 
-      const pairsUpsert = newPairs.length > 0
+      const pairsUpsert = (newPairs.length > 0 && !dryRun)
         ? await upsertRows("pairs", newPairs, "kalshi_id,polymarket_id")
         : { count: 0, errors: [] };
 
@@ -773,7 +780,8 @@ export default async function handler(req, res) {
         .select("*", { count: "exact", head: true });
 
       return res.status(200).json({
-        mode:        "match-only",
+        mode:        dryRun ? "match-only (dry)" : "match-only",
+        dryRun,
         sport,
         newPairs:    newPairs.length,
         totalPairs:  count || 0,
