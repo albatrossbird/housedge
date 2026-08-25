@@ -33,8 +33,8 @@ function arbAlert(m) {
 const CATEGORIES = {
   sports:    { label: "Sports",    icon: "⚽", supported: true  },
   economics: { label: "Economics", icon: "📊", supported: true  },
-  crypto:    { label: "Crypto",    icon: "₿",  supported: false },
-  politics:  { label: "Politics",  icon: "🏛️", supported: false },
+  crypto:    { label: "Crypto",    icon: "₿",  supported: true  },
+  politics:  { label: "Politics",  icon: "🏛️", supported: true  },
 };
 
 // ── Fetch from new Supabase-backed API ─────────────────────────

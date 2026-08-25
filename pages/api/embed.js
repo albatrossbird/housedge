@@ -446,7 +446,91 @@ const KALSHI_SERIES = [
   { ticker: "KXPRES",      sport: "politics" },
 ];
 
+// ── Kalshi fetch by CATEGORY (politics/crypto) ─────────────────
+//
+// The hardcoded KALSHI_SERIES list works for sports and econ, where a
+// handful of series covers the whole category. It does not generalize:
+// Kalshi lists 2,248 politics series, of which our list had exactly one
+// (KXPRES) — and that one is currently empty, so politics looked like a
+// matching problem when it was really a fetching problem.
+//
+// Two API traps found the hard way:
+//   - /markets?category=X ignores the filter and returns KXMVE parlay
+//     junk, same as the undocumented default behaviour.
+//   - /events?category=X ALSO ignores it — Crypto and Politics return
+//     byte-identical results. Only /series?category=X actually filters.
+//
+// So: get the category's series tickers from /series, then paginate all
+// open /events and keep the ones whose series_ticker is in that set.
+// One pass covers any category and replaces per-series fan-out.
+async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
+  const sres = await fetch(
+    `https://api.elections.kalshi.com/trade-api/v2/series?category=${encodeURIComponent(kalshiCategory)}`
+  );
+  if (!sres.ok) return { markets: [], pages: 0, seriesInCategory: 0 };
+  const sdata = await sres.json();
+  const tickers = new Set(
+    (sdata.series || []).map(x => x.ticker).filter(Boolean)
+  );
+  if (!tickers.size) return { markets: [], pages: 0, seriesInCategory: 0 };
+
+  const out = [];
+  let cursor = null;
+  let pages = 0;
+
+  while (pages < maxPages) {
+    const url = new URL("https://api.elections.kalshi.com/trade-api/v2/events");
+    url.searchParams.set("status", "open");
+    url.searchParams.set("limit", "200");
+    url.searchParams.set("with_nested_markets", "true");
+    if (cursor) url.searchParams.set("cursor", cursor);
+
+    const r = await fetch(url);
+    if (!r.ok) break;
+    const d = await r.json();
+    pages++;
+
+    for (const ev of d.events || []) {
+      if (!tickers.has(ev.series_ticker)) continue;
+      for (const m of ev.markets || []) {
+        if (!m.ticker || m.ticker.startsWith("KXMVE") || !m.title) continue;
+        out.push({
+          id:             m.ticker,
+          platform:       "kalshi",
+          title:          m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title,
+          yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
+          no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
+          volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
+          close_time:     m.close_time || null,
+          sport_tag:      sportTag,
+          event_ticker:   m.event_ticker || ev.event_ticker || m.ticker,
+          side_label:     m.yes_sub_title || null,
+          slug:           null,
+          outcomes:       null,
+          outcome_prices: null,
+          updated_at:     Math.floor(Date.now() / 1000),
+        });
+      }
+    }
+
+    cursor = d.cursor;
+    if (!cursor) break;
+  }
+
+  return { markets: out, pages, seriesInCategory: tickers.size };
+}
+
+// Categories fetched by enumeration rather than a fixed series list.
+const KALSHI_CATEGORIES = { politics: "Politics", crypto: "Crypto" };
+
 async function fetchKalshiMarkets(sportFilter = "all") {
+  // politics/crypto come from category enumeration, not the fixed
+  // series list — see fetchKalshiByCategory for why.
+  if (KALSHI_CATEGORIES[sportFilter]) {
+    const res = await fetchKalshiByCategory(KALSHI_CATEGORIES[sportFilter], sportFilter);
+    return res.markets;
+  }
+
   const series = sportFilter === "all"
     ? KALSHI_SERIES
     : KALSHI_SERIES.filter(s => s.sport === sportFilter);
@@ -492,6 +576,9 @@ const POLY_TAGS = [
   { tag: "101249", sport: "econ"   }, // Macro Inflation (CPI)
   { tag: "100201", sport: "econ"   }, // recession
   { tag: "370",    sport: "econ"   }, // GDP
+  { tag: "21",     sport: "crypto"   }, // Crypto
+  { tag: "1312",   sport: "crypto"   }, // Crypto Prices
+  { tag: "2",      sport: "politics" }, // Politics
 ];
 
 // Sports that use structured team matching (not embeddings). Also used
