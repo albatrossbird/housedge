@@ -701,7 +701,15 @@ export default async function handler(req, res) {
   // fix: it buys precision by discarding real matches that happen to be
   // worded differently. The real fix is a claim gate that understands
   // predicates and deadlines — see docs/architecture-v2.md.
-  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.94 };
+  // Per-category similarity floors. Politics titles are near-verbatim
+  // across venues when they match at all, so 0.94 is where the noise
+  // stops. Crypto sits lower because Kalshi phrases every strike as
+  // "<COIN> trimmed mean be above $X" against Polymarket's "Will <Coin>
+  // reach $X" — real matches land around 0.91-0.93, and the dollar-strike
+  // and deadline gates, not the score, are what reject the near-misses.
+  // Below 0.90 the "positive return in 2026" family starts pairing with
+  // unrelated strike markets, which no current gate catches.
+  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.90 };
   const THRESHOLD = parseFloat(
     req.query.threshold || CATEGORY_THRESHOLDS[sport] || "0.78"
   );
