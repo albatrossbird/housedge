@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
+import { bestArb, complementBook } from "../../lib/fees.js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -49,11 +50,13 @@ export default async function handler(req, res) {
     }
 
     const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0 };
+    let noExecutablePrice = 0;
     const sampleDropped = [];
 
     const shaped = data
       .map(row => {
         let pYes = row.p_yes_price;
+        let idx = null;
         if (row.p_outcomes && row.p_outcome_prices) {
           try {
             const outcomes = JSON.parse(row.p_outcomes);
@@ -67,7 +70,7 @@ export default async function handler(req, res) {
             // "New York Mets". Either way the card pairs one team's
             // Kalshi price with the other team's Polymarket price, which
             // renders as a large fake arbitrage.
-            let idx = polyOutcomeIndex(row.kalshi_id, row.p_slug);
+            idx = polyOutcomeIndex(row.kalshi_id, row.p_slug);
 
             if (idx == null) {
               const titleSide = (row.k_title || "").split("—").pop().trim();
@@ -93,6 +96,37 @@ export default async function handler(req, res) {
           : "https://kalshi.com/";
         const polyUrl = row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/";
 
+        // ── Executable pricing ─────────────────────────────────
+        // Polymarket quotes one book per market, on outcome 0. When the
+        // Kalshi side maps to outcome 1 the book is that book's exact
+        // complement, so the ask for the side we care about is
+        // 1 - bid(outcome 0). Using the raw book either way would
+        // quote the opponent's price.
+        const polyOnOutcome1 = idx === 1;
+        const rawPolyBook = { bid: row.p_bid, ask: row.p_ask };
+        const polyBook = polyOnOutcome1
+          ? complementBook(row.p_bid, row.p_ask)
+          : rawPolyBook;
+        const polyOtherBook = polyOnOutcome1
+          ? rawPolyBook
+          : complementBook(row.p_bid, row.p_ask);
+
+        const arb = bestArb(
+          {
+            yesAsk: row.k_ask,
+            noAsk:  row.k_no_ask,
+            feeMultiplier: row.k_fee_multiplier,
+          },
+          {
+            yesAsk: polyBook.ask,
+            // The other side of a binary CLOB: buying the complement.
+            noAsk:  polyOtherBook.ask,
+            feeSchedule: row.p_fee_schedule || null,
+          }
+        );
+
+        if (arb == null) noExecutablePrice++;
+
         return {
           id: row.kalshi_id,
           title: row.k_title,
@@ -100,8 +134,24 @@ export default async function handler(req, res) {
           similarity: row.similarity,
           category: row.k_sport_tag,
           _gameDate: extractTickerDate(row.kalshi_id),
-          kalshi: { yes: row.k_yes_price, no: row.k_no_price, volume: row.k_volume || 0, url: kalshiUrl },
-          poly: { yes: pYes, no: 1 - pYes, volume: row.p_volume || 0, url: polyUrl },
+          kalshi: {
+            yes: row.k_yes_price, no: row.k_no_price, volume: row.k_volume || 0, url: kalshiUrl,
+            bid: row.k_bid ?? null, ask: row.k_ask ?? null,
+            noBid: row.k_no_bid ?? null, noAsk: row.k_no_ask ?? null,
+          },
+          poly: {
+            yes: pYes, no: 1 - pYes, volume: row.p_volume || 0, url: polyUrl,
+            bid: polyBook.bid ?? null, ask: polyBook.ask ?? null,
+          },
+          // null means "no executable price on at least one leg", which
+          // is a different answer from "no edge" and must not render as
+          // a zero.
+          arb: arb ? {
+            side: arb.side,
+            cost: Math.round(arb.r.total * 10000) / 10000,
+            edge: Math.round(arb.r.edge * 10000) / 10000,
+            profitable: arb.r.profitable,
+          } : null,
           trending: ((row.k_volume || 0) + (row.p_volume || 0)) > 5000,
         };
       })
@@ -133,8 +183,12 @@ export default async function handler(req, res) {
     res.status(200).json({
       pairs: shaped,
       needsEmbed: shaped.length === 0,
+      // Was false for v1's entire life: the arb numbers were mid-to-mid
+      // with no fee model. Clients should say so rather than implying
+      // an executable trade.
+      feesIncluded: true,
       ...(req.query.debug === "1"
-        ? { debug: { rowsFromRpc: data.length, dropped, sampleDropped: sampleDropped.slice(0, 5) } }
+        ? { debug: { rowsFromRpc: data.length, dropped, noExecutablePrice, sampleDropped: sampleDropped.slice(0, 5) } }
         : {}),
     });
   } catch (err) {

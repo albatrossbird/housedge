@@ -54,20 +54,62 @@ async function restFetch(path, options = {}) {
   }
 }
 
+// Columns added by supabase/migrations/0004. The migration is run by
+// hand in the Supabase dashboard, so a deploy can land before it does —
+// and PostgREST rejects the whole batch when a payload names a column
+// that doesn't exist, which would take /api/refresh down entirely
+// rather than degrading. When that happens these keys are dropped and
+// the write retried, with a warning in the response so the cause is
+// visible rather than looking like the fields were simply never
+// populated.
+const V1_BOOK_COLUMNS = [
+  "bid", "ask", "no_bid", "no_ask", "bid_size", "ask_size",
+  "fee_multiplier", "fee_schedule",
+];
+
+export function stripBookColumns(row) {
+  const out = { ...row };
+  for (const c of V1_BOOK_COLUMNS) delete out[c];
+  return out;
+}
+
+export function isMissingColumnError(error) {
+  const s = typeof error === "string" ? error : JSON.stringify(error || "");
+  // PostgREST surfaces this as PGRST204 or Postgres 42703 depending on
+  // whether it is the schema cache or the planner that notices first.
+  return /PGRST204|42703|column .* does not exist|Could not find the .* column/i.test(s);
+}
+
 async function upsertRows(table, rows, onConflict, batchSize = 50) {
   const errors = [];
+  const warnings = [];
   let count = 0;
+  let stripBooks = false;
+
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
-    const { error } = await restFetch(`${table}?on_conflict=${onConflict}`, {
+
+    const send = payload => restFetch(`${table}?on_conflict=${onConflict}`, {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(batch),
+      body: JSON.stringify(payload),
     });
+
+    let { error } = await send(stripBooks ? batch.map(stripBookColumns) : batch);
+
+    if (error && !stripBooks && isMissingColumnError(error)) {
+      stripBooks = true;
+      warnings.push(
+        "bid/ask columns missing - run supabase/migrations/0004_bid_ask_and_fees.sql; " +
+        "writing prices without books until then"
+      );
+      ({ error } = await send(batch.map(stripBookColumns)));
+    }
+
     if (error) errors.push(JSON.stringify(error));
     else count += batch.length;
   }
-  return { count, errors };
+  return { count, errors, warnings };
 }
 
 // ── Paged reads ────────────────────────────────────────────────
@@ -359,6 +401,54 @@ function kalshiGameTitle(market) {
   return side ? `${head} — ${side}` : head;
 }
 
+// Kalshi's taker fee is quadratic in price and scaled by a per-series
+// multiplier (0.5 on KXMLBGAME, absent-and-therefore-1 elsewhere). It
+// lives on /series/<ticker>, not on the market, so it needs its own
+// lookup — cached because it is static metadata and there are only a
+// few dozen distinct series across everything we pair.
+const seriesFeeCache = new Map();
+
+async function seriesFeeMultiplier(seriesTicker) {
+  if (!seriesTicker) return null;
+  if (seriesFeeCache.has(seriesTicker)) return seriesFeeCache.get(seriesTicker);
+
+  let value = null;
+  try {
+    const r = await fetch(
+      `https://api.elections.kalshi.com/trade-api/v2/series/${encodeURIComponent(seriesTicker)}`
+    );
+    if (r.ok) {
+      const d = await r.json();
+      const m = d.series?.fee_multiplier;
+      // A missing multiplier means the standard rate, i.e. 1 - not
+      // "no fee". Defaulting it to 0 would price every Kalshi leg as
+      // free and manufacture edges.
+      value = m == null ? 1 : Number(m);
+      if (!isFinite(value)) value = 1;
+    }
+  } catch { /* leave null; the fee model treats null as 1 */ }
+
+  seriesFeeCache.set(seriesTicker, value);
+  return value;
+}
+
+const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v) : null));
+
+// Attach each row's per-series fee multiplier. Done as a pass over the
+// finished rows rather than inside the row builders so the /series
+// lookups happen once per distinct series instead of once per market —
+// KXMLBGAME alone is 74 markets behind one series.
+async function attachKalshiFees(rows) {
+  const series = [...new Set(rows.map(r => String(r.id).split("-")[0]).filter(Boolean))];
+  const multipliers = new Map(
+    await Promise.all(series.map(async t => [t, await seriesFeeMultiplier(t)]))
+  );
+  for (const r of rows) {
+    r.fee_multiplier = multipliers.get(String(r.id).split("-")[0]) ?? null;
+  }
+  return rows;
+}
+
 // ── Fetch Kalshi markets ───────────────────────────────────────
 const KALSHI_SERIES = [
   { ticker: "KXWCGAME",    sport: "soccer"   },
@@ -430,6 +520,15 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
           yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
           volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
+          // The real books. yes_price above is the ask, which is what
+          // v1 has always stored as though it were a mid.
+          bid:            num(m.yes_bid_dollars),
+          ask:            num(m.yes_ask_dollars),
+          // Kalshi's NO side is its own book, not 1 - yes.
+          no_bid:         num(m.no_bid_dollars),
+          no_ask:         num(m.no_ask_dollars),
+          bid_size:       num(m.yes_bid_size_fp),
+          ask_size:       num(m.yes_ask_size_fp),
           close_time:     m.close_time || null,
           sport_tag:      sportTag,
           event_ticker:   m.event_ticker || ev.event_ticker || m.ticker,
@@ -446,6 +545,7 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
     if (!cursor) break;
   }
 
+  await attachKalshiFees(out);
   return { markets: out, pages, seriesInCategory: tickers.size };
 }
 
@@ -481,6 +581,15 @@ async function fetchKalshiMarkets(sportFilter = "all") {
           yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
           volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
+          // The real books. yes_price above is the ask, which is what
+          // v1 has always stored as though it were a mid.
+          bid:            num(m.yes_bid_dollars),
+          ask:            num(m.yes_ask_dollars),
+          // Kalshi's NO side is its own book, not 1 - yes.
+          no_bid:         num(m.no_bid_dollars),
+          no_ask:         num(m.no_ask_dollars),
+          bid_size:       num(m.yes_bid_size_fp),
+          ask_size:       num(m.yes_ask_size_fp),
           close_time:     m.close_time || null,
           sport_tag:      sport,
           event_ticker:   m.event_ticker || m.ticker,
@@ -492,7 +601,7 @@ async function fetchKalshiMarkets(sportFilter = "all") {
         }));
     })
   );
-  return results.flat();
+  return attachKalshiFees(results.flat());
 }
 
 // ── Fetch Polymarket markets ───────────────────────────────────
@@ -566,6 +675,16 @@ async function fetchPolymarkets(sportFilter = "all") {
               yes_price,
               no_price,
               volume:         parseFloat(m.volumeNum || m.volume || 0),
+              // Polymarket quotes one book per market, on outcome 0.
+              // The other outcome is its exact complement in a binary
+              // CLOB, so it is derived at read time rather than stored
+              // twice — see lib/fees.js complementBook.
+              bid:            num(m.bestBid),
+              ask:            num(m.bestAsk),
+              // {rate, exponent, takerOnly, rebateRate}. Null when the
+              // market predates fees or has them disabled, which the
+              // fee model reads as genuinely zero.
+              fee_schedule:   m.feesEnabled && m.feeSchedule ? m.feeSchedule : null,
               close_time:     null,
               sport_tag:      sport,
               slug:           e.slug || m.slug || null,

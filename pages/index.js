@@ -20,12 +20,21 @@ const fmt = (v) =>
 
 function spread(m) { return Math.abs(m.kalshi.yes - m.poly.yes); }
 function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
+// The API now computes this from real books with both venues' taker
+// fees applied (see lib/fees.js), so an alert means the two legs
+// together cost less than the $1 they pay out — an actual trade rather
+// than a midpoint artefact. The old check compared mids and allowed a
+// 3-point cushion to stand in for costs it could not measure, which
+// flagged edges that vanished the moment you crossed a spread.
+//
+// m.arb is null when a leg has no executable price. That is not zero
+// edge, so it must not be flagged either way.
 function arbAlert(m) {
-  const cost = Math.min(m.kalshi.yes, m.poly.yes) + Math.min(m.kalshi.no, m.poly.no);
+  if (!m.arb) return false;
   const spreadPct = Math.abs(m.kalshi.yes - m.poly.yes) * 100;
-  // Only flag as arb if mathematically valid AND spread is plausible
-  // Spreads over 15pt are almost always data errors (wrong date, flipped team)
-  return cost < 0.97 && spreadPct <= 15;
+  // A spread this wide is still far more likely to be a data error
+  // (wrong game, flipped outcome) than a real edge, so it stays.
+  return m.arb.profitable && spreadPct <= 15;
 }
 
 // ── Categories (UI display only) ──────────────────────────────
@@ -93,7 +102,19 @@ function MarketCard({ market }) {
       <div>
         <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
           {market.trending && <span style={{ fontSize: 10, fontWeight: 600, color: T.yes, letterSpacing: "0.04em" }}>↑ TRENDING</span>}
-          {isArb && <span style={{ fontSize: 10, fontWeight: 700, color: T.arb, letterSpacing: "0.04em" }}>⚡ ARB</span>}
+          {isArb && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.arb, letterSpacing: "0.04em" }}>
+              ⚡ ARB +{(market.arb.edge * 100).toFixed(1)}¢
+            </span>
+          )}
+          {!isArb && market.arb && (
+            <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.04em" }}>
+              {(market.arb.cost * 100).toFixed(1)}¢ to own both sides
+            </span>
+          )}
+          {!market.arb && (
+            <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.04em" }}>no executable price</span>
+          )}
           {market.similarity && (
             <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.04em" }}>
               {Math.round(market.similarity * 100)}% match

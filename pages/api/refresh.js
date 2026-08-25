@@ -1,6 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
 
+const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v) : null));
+
+// Columns added by supabase/migrations/0004, which is run by hand in
+// the Supabase dashboard. A deploy can land before the migration does,
+// and PostgREST rejects an entire batch that names a column it doesn't
+// know — which would stop price refreshes outright instead of degrading
+// to what it can still write.
+const BOOK_COLUMNS = [
+  "bid", "ask", "no_bid", "no_ask", "bid_size", "ask_size",
+  "fee_multiplier", "fee_schedule",
+];
+
+function stripBookColumns(row) {
+  const out = { ...row };
+  for (const c of BOOK_COLUMNS) delete out[c];
+  return out;
+}
+
+function isMissingColumnError(error) {
+  const s = typeof error === "string" ? error : JSON.stringify(error || "");
+  return /PGRST204|42703|column .* does not exist|Could not find the .* column/i.test(s);
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -77,6 +100,7 @@ async function restFetch(path, options = {}) {
 async function applyUpdates(updates) {
   let updated = 0;
   const errors = [];
+  const warnings = [];
 
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = updates.slice(i, i + CHUNK);
@@ -99,16 +123,27 @@ async function applyUpdates(updates) {
 
     if (merged.length === 0) continue;
 
-    const { error } = await restFetch("markets?on_conflict=id", {
+    const send = payload => restFetch("markets?on_conflict=id", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(merged),
+      body: JSON.stringify(payload),
     });
+
+    let { error } = await send(merged);
+
+    if (error && isMissingColumnError(error)) {
+      warnings.push(
+        "bid/ask columns missing - run supabase/migrations/0004_bid_ask_and_fees.sql; " +
+        "refreshing mid prices only until then"
+      );
+      ({ error } = await send(merged.map(stripBookColumns)));
+    }
+
     if (error) errors.push(`upsert: ${JSON.stringify(error)}`);
     else updated += merged.length;
   }
 
-  return { updated, errors };
+  return { updated, errors, warnings: [...new Set(warnings)] };
 }
 
 export default async function handler(req, res) {
@@ -154,6 +189,15 @@ export default async function handler(req, res) {
         yes_price:  parseFloat(m.yes_ask_dollars),
         no_price:   1 - parseFloat(m.yes_ask_dollars),
         volume:     parseFloat(m.volume_24h_fp || 0),
+        // The books this job has been discarding all along: it already
+        // fetched them on every poll and kept only the ask, stored as
+        // though it were a mid.
+        bid:        num(m.yes_bid_dollars),
+        ask:        num(m.yes_ask_dollars),
+        no_bid:     num(m.no_bid_dollars),
+        no_ask:     num(m.no_ask_dollars),
+        bid_size:   num(m.yes_bid_size_fp),
+        ask_size:   num(m.yes_ask_size_fp),
         updated_at: Math.floor(Date.now() / 1000),
       }));
 
@@ -199,6 +243,12 @@ export default async function handler(req, res) {
                 yes_price: prices[0] != null ? parseFloat(prices[0]) : null,
                 no_price:  prices[1] != null ? parseFloat(prices[1]) : null,
                 volume:    parseFloat(m.volumeNum || m.volume || 0),
+                bid:       num(m.bestBid),
+                ask:       num(m.bestAsk),
+                // Refreshed rather than written once: Polymarket has
+                // changed its per-category rates mid-year, and a stale
+                // schedule prices every edge in that category wrong.
+                fee_schedule: m.feesEnabled && m.feeSchedule ? m.feeSchedule : null,
                 updated_at: Math.floor(Date.now() / 1000),
               });
             } catch (err) {
@@ -225,6 +275,7 @@ export default async function handler(req, res) {
       kalshiSeriesRefreshed: kalshiSeries.length,
       pairsSeen: pairRows.length,
       errors: [...kalshiResult.errors, ...polyResult.errors].slice(0, 5),
+      warnings: [...new Set([...(kalshiResult.warnings || []), ...(polyResult.warnings || [])])],
       polyFetchErrors: polyFetchErrors.slice(0, 5),
     });
   } catch (err) {
