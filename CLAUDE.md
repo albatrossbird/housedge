@@ -28,7 +28,7 @@ Housedge is a prediction-market odds comparison dashboard: it pulls live markets
 The frontend never calls Kalshi/Polymarket directly. Data flows through three API routes that run at different cadences:
 
 1. **`pages/api/embed.js`** — the expensive, infrequent job. Fetches raw markets from both platforms, upserts them into `markets`, and computes cross-platform matches into `pairs`. Two matching strategies:
-   - **Sports (mlb/nba/nhl/soccer)**: structured matching — extracts both team names per title (via `MLB_TEAMS`-style alias maps + regex on Kalshi's "Team A vs Team B" / Polymarket's "Will Team A win" formats), requires both teams to match, gates on game date within 6 hours. No embeddings.
+   - **Sports (mlb/nba/nhl/soccer)**: an exact join on the game identifier, not a text match — see "Sports matching" below. No embeddings, no similarity score.
    - **Economics/crypto/politics**: `matchNonSportsMarkets()` — Voyage AI (`voyage-4-large`) embeddings + cosine similarity above `?threshold=` (default 0.78), **then** a hard signature gate (see "Scalar-market matching" below).
    - Query params: `?sport=mlb|nba|nhl|soccer|econ|...`, `?matchonly=1` (re-match stored markets without re-fetching or re-embedding), `?force=1` (re-embed/re-match everything), `?threshold=`.
    - Not called by the page — triggered manually or by a scheduled job (no cron exists yet).
@@ -97,6 +97,54 @@ Matching is **globally greedy**: build all gate-passing `(kalshi, poly, score)` 
 
 `matchNonSportsMarkets()` is shared by both `matchonly` and normal mode. They were separately duplicated for a while and drifted (a diagnostic added to one branch, missing in the other) — keep them unified.
 
+## Sports matching (an exact join, not a text match)
+
+Sports does **not** use embeddings or similarity. Both venues publish
+the game as structured identifiers, so matching is a join on
+`{date, unordered pair of team codes}`:
+
+```
+Kalshi ticker  KXMLBGAME-26AUG271910MILNYM-NYM
+                          ^date    ^teams ^side
+Poly    slug   mlb-mil-nym-2026-08-27
+```
+
+Helpers live in **`lib/sportsKeys.js`**, imported by both `embed.js`
+(which builds the pairs) and `markets.js` (which prices them). They must
+agree on the team-code vocabulary — a divergent copy would pair a game
+correctly and then price the wrong half of it.
+
+- The Kalshi side suffix (`-NYM`) is what makes the concatenated team
+  blob splittable: `MILNYM` minus `NYM` leaves `MIL`. There is no other
+  unambiguous split point between two variable-length codes.
+- `TEAM_CODE_ALIASES` maps Kalshi codes to Polymarket's. It has **two**
+  entries (`AZ→ARI`, `ATH→OAK`) — the venues agree on every other MLB
+  code. This replaced a 30-entry full-name map per league.
+- **`polyOutcomeIndex()` decides which Polymarket price belongs to a
+  Kalshi side.** Slug order matches `outcomes` order on every 2026
+  fixture Polymarket lists (45/45), so it is a lookup. Do not go back to
+  keyword-matching the side label: `"A's"` has no token longer than two
+  characters, so it matched nothing and fell through to outcome 0 — the
+  *opponent's* price — and `"New York M"` matches "New York Yankees" as
+  readily as "New York Mets". Both render a large fake arbitrage.
+- Games whose date has passed are skipped at match time.
+- A market with no parseable key cannot join. That closes the hole where
+  a Polymarket futures market (`mlb-world-series-champion-2026`, no date
+  in the slug) matched a single game, because the old `datesCompatible()`
+  read a missing date as permission to pair.
+- Kalshi titles its game markets from one side ("San Francisco wins"),
+  so the display title is rebuilt from `rules_primary`, which states the
+  matchup and date in full. Matching does not depend on this.
+
+**Why it was rewritten:** Kalshi changed its wording from
+`"Cincinnati vs Chicago WS Winner? — Chicago WS"` to
+`"San Francisco wins"`, the title regex returned null for all 74 open
+MLB markets, and every one was skipped. Only stale rows still in
+`markets` parsed, so a discovery run reported 66 new pairs of which 61
+were games played two weeks earlier — and reported success throughout.
+`matchDiagnostics.kalshiKeyFailures` exists so the next format change is
+loud instead of silent.
+
 ### Diagnostics convention
 
 Both modes return `matchDiagnostics` with `threshold`, embedded counts, `acceptedPairs` (what was actually paired, post-gate, post-exclusivity), and `topScores` (best candidate per Kalshi row **regardless of threshold or gate**). `topScores` is what distinguishes "real candidates just under threshold" from "nothing close" from "gate correctly rejecting". Write routes return per-stage `writes` counts and real error strings. **Keep this** — nearly every bug this codebase has had was invisible until the relevant counter/error was surfaced in the response.
@@ -108,6 +156,7 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Stored pairs | Shown on site | Floor |
 |---|---|---|---|
+| sports (mlb) | 37 | 37 | exact join |
 | economics | 1 | 1 | 0.78 |
 | crypto | 17 | 12 | 0.90 |
 | politics | 14 | 5 | 0.94 |
@@ -217,17 +266,16 @@ $$ LANGUAGE sql SECURITY DEFINER;
 ### Matching generally
 
 - Bulk keyword/fuzzy matching across all markets (the original approach) produced repeated false positives — cross-sport matches on shared words, tournament-winner markets matching single games, sibling markets within an event getting swapped, date noise diluting scores. Hence per-category scoping and structured gates.
-- Game dates live in IDs, not separate fields: Kalshi `KXMLBGAME-26AUG121940CINCWS` → Aug 12 2026; Polymarket slug `mlb-cin-cws-2026-08-12` → same. `datesCompatible()` allows 6 hours for UTC/ET edges.
+- Game identity lives in IDs, not in the titles — which is the whole basis of sports matching now. See "Sports matching".
 
 ## Known bugs / open work (priority order)
 
 1. **Arb numbers are not executable** — v1 never stored bid/ask and no fee model exists, so every edge shown is a mid-to-mid estimate. Treat as "worth checking", never as a trade.
 2. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
-3. **Sports still uses rule-based matching only** — no embeddings. The planned direction is the same hybrid as econ: embeddings generate candidates, structured rules (date + side/outcome label) verify them, which removes the hand-maintained per-league team-alias maps without reintroducing sibling-swap bugs.
-4. **The Sports tab renders nothing, and it is not a matching-count problem.** `/api/markets?category=sports&debug=1` on a fresh MLB discovery run: 66 pairs from the RPC, **61 dropped as expired** (games from Aug 11-12 against a run on Aug 25) and the remaining 5 dropped for missing or out-of-band prices. Both venues do list the current fixtures — Kalshi has 74 open MLB markets for Aug 25-27, Polymarket has events for Aug 25-28 — so the matcher is pairing two-week-old rows in preference to today's. `markets` accumulates every fixture ever stored and nothing prunes it, which is the likely root. Needs a retention policy, or a recency filter in `matchSportsMarkets()`, before the sports hybrid rewrite is worth starting.
-5. **Soccer matching is unreliable** — World Cup games sometimes pair with the wrong Polymarket market.
-6. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
-7. Date-window tuning is a tradeoff: tightening the 6-hour `datesCompatible()` window risks missing same-day matches across UTC/ET; loosening it risks matching different games in a back-to-back series.
+3. **No retention policy on `markets`.** The table holds every fixture ever stored (164 MLB rows for 37 live games) and nothing prunes it. Sports matching now skips past-dated games so this no longer produces wrong pairs, but the table grows without bound on a 500MB free tier.
+4. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
+5. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
+6. Polymarket's `outcomes`/`outcomePrices` alignment is still unverified for non-sports markets. Sports no longer depends on it (the index comes from the identifiers), but crypto/politics/econ still read `outcomePrices[0]`.
 
 **Fixed since the last revision of this file:** automated refresh (both
 GitHub Actions workflows), crypto and politics wired end to end, the
