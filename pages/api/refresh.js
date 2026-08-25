@@ -118,17 +118,25 @@ export default async function handler(req, res) {
       }));
 
     // Fetch fresh prices from Polymarket for pairs already in DB.
-    // Explicit higher limit - the implicit default (1000) was silently
-    // capping this as the table grew across more categories, so
-    // refresh stopped reaching every Polymarket row (see embed.js's
-    // matchonly query, which had the same bug).
-    const { data: polyMarkets } = await supabase
-      .from("markets")
-      .select("id")
-      .not("id", "ilike", "KX%")
-      .limit(5000);
-
-    const polyIds = (polyMarkets || []).map(m => m.id);
+    //
+    // Paged, not .limit(): Supabase enforces a 1000-row cap SERVER-side,
+    // so a larger client limit is silently ignored. An earlier fix here
+    // raised .limit() to 5000 and appeared to work, but the query kept
+    // returning exactly 1000 rows — confirmed later when embed.js showed
+    // the same stuck-at-1000 behaviour. Range paging is the only way past
+    // it, and without this refresh silently stops updating every
+    // Polymarket market beyond the first thousand.
+    const polyIds = [];
+    for (let from = 0; from < 60000; from += 1000) {
+      const { data, error } = await supabase
+        .from("markets")
+        .select("id")
+        .not("id", "ilike", "KX%")
+        .range(from, from + 999);
+      if (error || !data || data.length === 0) break;
+      polyIds.push(...data.map(m => m.id));
+      if (data.length < 1000) break;
+    }
 
     // Fetch Polymarket prices in batches
     const polyUpdates = [];

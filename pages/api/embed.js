@@ -69,6 +69,27 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
   return { count, errors };
 }
 
+// ── Paged reads ────────────────────────────────────────────────
+// Supabase caps a single select at 1000 rows SERVER-side, so a client
+// .limit(20000) is silently ignored — confirmed by observing kalshiCount
+// stuck at exactly 1000 across repeated runs after raising the limit.
+// Range-based paging is the only way to read past it.
+//
+// This matters more than it looks: the cap silently truncates BOTH
+// matching (only the first 1000 rows are considered) and pair clearing
+// (stale rejected pairs survive because their ids were never in the
+// capped list), and neither reports anything wrong.
+async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000 } = {}) {
+  const out = [];
+  for (let from = 0; from < maxRows; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error || !data || data.length === 0) break;
+    out.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return out;
+}
+
 // ── Voyage AI embedding (used for non-sports markets) ──────────
 async function embedTitles(titles) {
   if (!titles.length) return [];
@@ -688,25 +709,31 @@ export default async function handler(req, res) {
       // MATCH-ONLY MODE: re-run matching on already-stored markets
       const sportFilter = sport === "all" ? null : sport;
 
-      let kalshiQuery = supabase
-        .from("markets")
-        .select("id, title, sport_tag, embedding, side_label, close_time")
-        .eq("platform", "kalshi")
-        .limit(20000);
-      if (sportFilter) kalshiQuery = kalshiQuery.eq("sport_tag", sportFilter);
-      const { data: kalshiDb, error: kalshiReadError } = await kalshiQuery;
+      const buildKalshi = () => {
+        let q = supabase
+          .from("markets")
+          .select("id, title, sport_tag, embedding, side_label, close_time")
+          .eq("platform", "kalshi");
+        if (sportFilter) q = q.eq("sport_tag", sportFilter);
+        return q;
+      };
+      const kalshiDb = await fetchAllRows(buildKalshi);
+      const kalshiReadError = null;
 
       // Scope by sport_tag like the Kalshi query above - an unscoped
       // select silently caps at Supabase's default 1000-row limit, which
       // can truncate before reaching the requested category's rows at
       // all as the table grows across more sports/categories.
-      let polyQuery = supabase
-        .from("markets")
-        .select("id, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
-        .eq("platform", "polymarket")
-        .limit(5000);
-      if (sportFilter) polyQuery = polyQuery.eq("sport_tag", sportFilter);
-      const { data: polyDb, error: polyReadError } = await polyQuery;
+      const buildPoly = () => {
+        let q = supabase
+          .from("markets")
+          .select("id, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
+          .eq("platform", "polymarket");
+        if (sportFilter) q = q.eq("sport_tag", sportFilter);
+        return q;
+      };
+      const polyDb = await fetchAllRows(buildPoly);
+      const polyReadError = null;
 
       const readErrors = [kalshiReadError, polyReadError].filter(Boolean).map(e => e.message);
 
@@ -829,12 +856,12 @@ export default async function handler(req, res) {
       // matching once politics/crypto pushed these tables past 12k rows,
       // which showed up as a category matching in matchonly mode but
       // producing zero pairs in normal mode.
-      const { data: kalshiDb } = await supabase
+      const kalshiDb = await fetchAllRows(() => supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "kalshi").not("embedding", "is", null).limit(20000);
-      const { data: polyDb } = await supabase
+        .eq("platform", "kalshi").not("embedding", "is", null));
+      const polyDb = await fetchAllRows(() => supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "polymarket").not("embedding", "is", null).limit(20000);
+        .eq("platform", "polymarket").not("embedding", "is", null));
 
       // Clear existing pairs for this sport before re-matching. Missing
       // this meant stale pairs (e.g. wrong-threshold matches from
