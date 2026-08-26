@@ -64,7 +64,7 @@ async function restFetch(path, options = {}) {
 // populated.
 const V1_BOOK_COLUMNS = [
   "bid", "ask", "no_bid", "no_ask", "bid_size", "ask_size",
-  "fee_multiplier", "fee_schedule", "series_slug",
+  "fee_multiplier", "fee_schedule", "series_slug", "embedding_v",
 ];
 
 export function stripBookColumns(row) {
@@ -226,11 +226,118 @@ function cosineSimilarity(a, b) {
 // lib/v2/claims.js so the v2 schema layer uses the exact same parsers —
 // see that file for why these gates exist and how they're scoped.
 
+// ── Candidate generation in the database (pgvector) ─────────────
+//
+// The JS matcher below reads every embedding out of Postgres and
+// compares them in this process. That is ~20KB a row, which is what
+// made a 1000-row page ~20MB and started failing outright once crypto
+// and politics grew past a few thousand rows — a read failure that
+// presented as an empty category.
+//
+// match_candidates() (migration 0007) does the comparison in the
+// database and returns only (kalshi_id, polymarket_id, score), so no
+// embedding crosses the wire. Titles still come back — they are small,
+// and the scalar-signature gate needs them.
+//
+// Returns null when the RPC is unavailable (0007 not run yet), so the
+// caller falls back to the JS path rather than failing.
+async function candidatesFromDb(sportTag, topK = 10) {
+  const { data, error } = await supabase.rpc("match_candidates", {
+    p_sport_tag: sportTag,
+    p_top_k: topK,
+  });
+
+  if (error) {
+    // "function does not exist" is the expected pre-migration state, not
+    // a fault. Anything else is worth surfacing rather than silently
+    // degrading to the slow path forever.
+    const msg = error.message || JSON.stringify(error);
+    return /does not exist|PGRST202|schema cache/i.test(msg)
+      ? null
+      : { error: msg };
+  }
+  return { rows: data || [] };
+}
+
 // ── Shared embedding-based matcher for non-sports markets ────────
 // Used by both matchonly and normal mode so they can't drift apart -
 // they duplicated this logic separately for a while this session and
 // it caused real bugs (a diagnostic added to one branch and forgotten
 // in the other).
+// Exclusivity and ordering, shared by both matchers.
+//
+// Greedy by globally descending score, not by Kalshi row order: when
+// several Kalshi rows compete for the same Polymarket market, the
+// best-scoring candidate should win it rather than whichever row
+// happened to be processed first.
+function assignGreedy(candidates, topScores, threshold, counts = {}) {
+  candidates.sort((a, b) => b.score - a.score);
+
+  const usedKalshi = new Set();
+  const usedPoly = new Set();
+  const newPairs = [];
+  const acceptedPairs = [];
+
+  for (const c of candidates) {
+    if (usedKalshi.has(c.km.id) || usedPoly.has(c.pm.id)) continue;
+    newPairs.push({
+      kalshi_id:     c.km.id,
+      polymarket_id: c.pm.id,
+      similarity:    c.score,
+      created_at:    Math.floor(Date.now() / 1000),
+    });
+    acceptedPairs.push({ score: c.score, kalshi: c.km.title, poly: c.pm.title });
+    usedKalshi.add(c.km.id);
+    usedPoly.add(c.pm.id);
+  }
+
+  topScores.sort((a, b) => b.score - a.score);
+  acceptedPairs.sort((a, b) => b.score - a.score);
+
+  return {
+    newPairs,
+    matchDiagnostics: {
+      threshold,
+      ...counts,
+      acceptedPairs: acceptedPairs.slice(0, 100),
+      // Uncapped rather than top-10: the head of the list is dominated
+      // by one cluster (e.g. GDP buckets), which hides whether other
+      // families have real candidates further down.
+      topScores,
+    },
+  };
+}
+
+// Same policy as the JS matcher — gate, then globally-greedy assignment
+// — over candidates the database produced. Deliberately shares the
+// assignment and diagnostics code path so the two cannot drift, which
+// is the mistake matchonly and normal mode already made once.
+function matchFromDbCandidates(rows, byId, threshold) {
+  const topScores = [];
+  const candidates = [];
+  const bestPerKalshi = new Map();
+
+  for (const r of rows) {
+    const km = byId.get(String(r.kalshi_id));
+    const pm = byId.get(String(r.polymarket_id));
+    if (!km || !pm) continue; // row pruned between the RPC and the read
+    const score = Number(r.score);
+
+    const prev = bestPerKalshi.get(km.id);
+    if (!prev || score > prev.score) bestPerKalshi.set(km.id, { score, km, pm });
+
+    if (score >= threshold && scalarSignaturesCompatible(km.title, pm.title, km.sport_tag)) {
+      candidates.push({ km, pm, score });
+    }
+  }
+
+  for (const b of bestPerKalshi.values()) {
+    topScores.push({ score: b.score, kalshi: b.km.title, poly: b.pm.title });
+  }
+
+  return assignGreedy(candidates, topScores, threshold, { matcher: "pgvector" });
+}
+
 function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
   const polyEmbedded = (polyDb || [])
     .filter(m => m.embedding)
@@ -266,43 +373,11 @@ function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
   // when several Kalshi rows compete for the same Polymarket market,
   // the actual best-scoring candidate wins it instead of whichever
   // Kalshi row happened to be processed first.
-  candidates.sort((a, b) => b.score - a.score);
-
-  const usedKalshi = new Set();
-  const usedPoly = new Set();
-  const newPairs = [];
-  const acceptedPairs = [];
-
-  for (const c of candidates) {
-    if (usedKalshi.has(c.km.id) || usedPoly.has(c.pm.id)) continue;
-    newPairs.push({
-      kalshi_id:     c.km.id,
-      polymarket_id: c.pm.id,
-      similarity:    c.score,
-      created_at:    Math.floor(Date.now() / 1000),
-    });
-    acceptedPairs.push({ score: c.score, kalshi: c.km.title, poly: c.pm.title });
-    usedKalshi.add(c.km.id);
-    usedPoly.add(c.pm.id);
-  }
-
-  topScores.sort((a, b) => b.score - a.score);
-  acceptedPairs.sort((a, b) => b.score - a.score);
-
-  return {
-    newPairs,
-    matchDiagnostics: {
-      threshold,
-      kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
-      polyEmbeddedCount: polyEmbedded.length,
-      acceptedPairs: acceptedPairs.slice(0, 100),
-      // Uncapped (bounded only by kalshiDb size) rather than top-10 -
-      // the top of the list is dominated by one cluster (e.g. GDP
-      // buckets), which hides whether other categories (CPI, Fed rate)
-      // have real candidates further down.
-      topScores,
-    },
-  };
+  return assignGreedy(candidates, topScores, threshold, {
+    kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
+    polyEmbeddedCount: polyEmbedded.length,
+    matcher: "js",
+  });
 }
 // A Polymarket event carries several markets per game (moneyline, NRFI,
 // ── Sports matching: join on the game, don't parse the title ───
@@ -894,10 +969,26 @@ export default async function handler(req, res) {
         newPairs = sportResult.newPairs;
         matchDiagnostics = sportResult.matchDiagnostics;
       } else {
-        // Use embedding-based matching for non-sports
-        const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
-        newPairs = result.newPairs;
-        matchDiagnostics = result.matchDiagnostics;
+        // pgvector first: the database compares the vectors and returns
+        // only ids and scores, so the ~20KB-a-row embeddings never cross
+        // the wire. Falls back to the JS matcher when migration 0007 has
+        // not been run.
+        const db = sportFilter ? await candidatesFromDb(sportFilter) : null;
+
+        if (db && db.rows) {
+          const byId = new Map();
+          for (const m of [...(kalshiDb || []), ...(polyDb || [])]) byId.set(String(m.id), m);
+          const result = matchFromDbCandidates(db.rows, byId, THRESHOLD);
+          newPairs = result.newPairs;
+          matchDiagnostics = { ...result.matchDiagnostics, dbCandidates: db.rows.length };
+        } else {
+          const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
+          newPairs = result.newPairs;
+          matchDiagnostics = {
+            ...result.matchDiagnostics,
+            ...(db && db.error ? { rpcError: db.error } : {}),
+          };
+        }
       }
 
       const pairsUpsert = (newPairs.length > 0 && !dryRun)
@@ -962,11 +1053,21 @@ export default async function handler(req, res) {
       // NOT NULL columns like `platform` on the attempted insert row
       // even when the row already exists and conflict resolution will
       // just update it, so a partial payload fails every time.
-      const records = toEmbed.map((m, i) => ({
-        ...m,
-        embedding: JSON.stringify(embeddings[i]),
-        updated_at: Math.floor(Date.now() / 1000),
-      }));
+      // Both columns. `embedding_v` (migration 0007) is the vector the
+      // database matches on; `embedding` is the original JSON, kept
+      // until the vector path has proven itself on real matches.
+      //
+      // pgvector parses the same bracketed form JSON.stringify produces,
+      // so one string serves both — no separate encoding to drift.
+      const records = toEmbed.map((m, i) => {
+        const encoded = JSON.stringify(embeddings[i]);
+        return {
+          ...m,
+          embedding: encoded,
+          embedding_v: encoded,
+          updated_at: Math.floor(Date.now() / 1000),
+        };
+      });
       embeddingUpsert = await upsertRows("markets", records, "id");
       embedded = toEmbed.length;
     }
