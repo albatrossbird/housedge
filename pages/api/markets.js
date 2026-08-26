@@ -136,7 +136,13 @@ export default async function handler(req, res) {
         }
 
         const kalshiUrl = buildKalshiUrl(row);
-        const polyUrl = row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/";
+        // Two different exchanges. Sending a US trader to a .com market
+        // they cannot trade is the same class of error as a dead link,
+        // and worse because it looks like it worked.
+        const isPolyUs = row.p_platform === "polymarket_us";
+        const polyHost = isPolyUs ? "https://polymarket.us" : "https://polymarket.com";
+        const polyUrl = row.p_slug ? `${polyHost}/event/${row.p_slug}` : `${polyHost}/`;
+        const polyVenue = isPolyUs ? "Polymarket US" : "Polymarket (global)";
 
         // ── Executable pricing ─────────────────────────────────
         // Polymarket quotes one book per market, on outcome 0. When the
@@ -167,6 +173,8 @@ export default async function handler(req, res) {
             yesAsk: polyBook.ask,
             // The other side of a binary CLOB: buying the complement.
             noAsk:  polyOtherBook.ask,
+            yesAskSize: isPolyUs ? row.p_ask_size : null,
+            yesBidSize: isPolyUs ? row.p_bid_size : null,
             feeSchedule: row.p_fee_schedule || null,
           }
         );
@@ -204,6 +212,11 @@ export default async function handler(req, res) {
           poly: {
             yes: pYes, no: 1 - pYes, volume: row.p_volume || 0, url: polyUrl,
             bid: polyBook.bid ?? null, ask: polyBook.ask ?? null,
+            venue: polyVenue,
+            // A US account can trade polymarket.us and not
+            // polymarket.com. The site should say which, rather than
+            // leaving the reader to infer it from a hostname.
+            usTradable: isPolyUs,
           },
           // null means "no executable price on at least one leg", which
           // is a different answer from "no edge" and must not render as

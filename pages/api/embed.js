@@ -13,6 +13,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
 import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
+import { fetchUsGameMarket, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
 
 const supabase = createClient(
@@ -438,19 +439,25 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
     unjoinedKalshiKeys: [],
   };
 
-  // Index Polymarket by game key, preferring the moneyline market.
+  // Index Polymarket by (game key, venue), preferring the moneyline
+  // market. Keyed by venue as well as game because polymarket.com and
+  // polymarket.us are different exchanges with different books, and a US
+  // account can only trade the .us one — so a game should pair against
+  // each venue that lists it rather than one of them winning.
   const polyByKey = new Map();
   for (const pm of polyMarkets) {
     if (pm.sport_tag !== sportTag) continue;
     diagnostics.polyRows++;
-    const pk = polyGameKey(pm.slug);
+    const pk = polyGameKey(String(pm.slug || "").replace(/^aec-/, ""));
     if (!pk) continue;
     diagnostics.polyKeyed++;
     if (pk.date < todayIso) continue;
 
-    const existing = polyByKey.get(pk.key);
+    const venue = pm.platform === POLY_US_PLATFORM ? POLY_US_PLATFORM : "polymarket";
+    const mapKey = `${pk.key}|${venue}`;
+    const existing = polyByKey.get(mapKey);
     if (!existing || (!isMoneylineTitle(existing.title) && isMoneylineTitle(pm.title))) {
-      polyByKey.set(pk.key, pm);
+      polyByKey.set(mapKey, pm);
     }
   }
 
@@ -477,20 +484,26 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   }
 
   const matched = [];
+  diagnostics.joinedByVenue = {};
   for (const [key, km] of bySide) {
-    const pm = polyByKey.get(key);
-    if (!pm) {
-      if (diagnostics.unjoinedKalshiKeys.length < 10) diagnostics.unjoinedKalshiKeys.push(key);
-      continue;
+    let any = false;
+    for (const venue of ["polymarket", POLY_US_PLATFORM]) {
+      const pm = polyByKey.get(`${key}|${venue}`);
+      if (!pm) continue;
+      any = true;
+      diagnostics.joined++;
+      diagnostics.joinedByVenue[venue] = (diagnostics.joinedByVenue[venue] || 0) + 1;
+      matched.push({
+        kalshi_id:     km.id,
+        polymarket_id: pm.id,
+        // An exact identifier join, not a similarity estimate.
+        similarity:    1.0,
+        created_at:    Math.floor(Date.now() / 1000),
+      });
     }
-    diagnostics.joined++;
-    matched.push({
-      kalshi_id:     km.id,
-      polymarket_id: pm.id,
-      // An exact identifier join, not a similarity estimate.
-      similarity:    1.0,
-      created_at:    Math.floor(Date.now() / 1000),
-    });
+    if (!any && diagnostics.unjoinedKalshiKeys.length < 10) {
+      diagnostics.unjoinedKalshiKeys.push(key);
+    }
   }
 
   return { newPairs: matched, matchDiagnostics: diagnostics };
@@ -740,6 +753,49 @@ async function fetchKalshiMarkets(sportFilter = "all") {
     })
   );
   return attachKalshiSeriesMeta(results.flat());
+}
+
+// ── Fetch Polymarket US game markets ───────────────────────────
+//
+// Games are not returned by any Polymarket US list endpoint — 1,200
+// events paged from /v1/events contain zero of them — so they have to be
+// requested by slug. The slug is `aec-<league>-<away>-<home>-<date>`,
+// using the same team codes AND the same order as polymarket.com, so
+// the .com rows we already fetched supply the order and no second alias
+// table is needed.
+//
+// Two requests per game (metadata for the outcome order, /bbo for the
+// book and depth), which is why this is scoped to the games Kalshi
+// actually lists rather than sweeping a schedule.
+async function fetchPolymarketUsGames(kalshiRows, polyRows, sportTag) {
+  const orderByKey = new Map();
+  for (const pm of polyRows || []) {
+    const pk = polyGameKey(pm.slug);
+    if (pk) orderByKey.set(pk.key, pk.codes);
+  }
+
+  const wanted = new Map();
+  const todayIso = new Date().toISOString().slice(0, 10);
+  for (const km of kalshiRows || []) {
+    const kk = kalshiGameKey(km.id);
+    if (!kk || kk.date < todayIso) continue;
+    const codes = orderByKey.get(kk.key);
+    if (!codes) continue; // no .com listing, so no known slug order
+    wanted.set(kk.key, { codes, date: kk.date });
+  }
+
+  const out = [];
+  const diagnostics = { requested: wanted.size, listed: 0, notListed: 0 };
+
+  // Sequential rather than parallel: this is a courtesy poll of a
+  // venue's public gateway, not a race.
+  for (const { codes, date } of wanted.values()) {
+    const row = await fetchUsGameMarket(sportTag, codes, date);
+    if (row) { out.push({ ...row, sport_tag: sportTag }); diagnostics.listed++; }
+    else diagnostics.notListed++;
+  }
+
+  return { markets: out, diagnostics };
 }
 
 // ── Fetch Polymarket markets ───────────────────────────────────
@@ -1020,7 +1076,17 @@ export default async function handler(req, res) {
       fetchKalshiMarkets(sport),
       fetchPolymarkets(sport),
     ]);
-    const allMarkets = [...kalshiRaw, ...polyRaw];
+
+    // Polymarket US is a separate exchange with its own books, and a US
+    // account can only trade that one — so its games are fetched
+    // alongside .com's rather than instead of them, and each game pairs
+    // against whichever venues list it.
+    let usGames = { markets: [], diagnostics: null };
+    if (SPORTS_TAGS.has(sport)) {
+      usGames = await fetchPolymarketUsGames(kalshiRaw, polyRaw, sport);
+    }
+
+    const allMarkets = [...kalshiRaw, ...polyRaw, ...usGames.markets];
 
     // Find markets not yet in Supabase
     // Paged. As a plain select this capped at 1000 ids, so every market
@@ -1147,6 +1213,8 @@ export default async function handler(req, res) {
       newPairs:    newPairs.length,
       totalKalshi: kalshiRaw.length,
       totalPoly:   polyRaw.length,
+      totalPolyUs: usGames.markets.length,
+      ...(usGames.diagnostics ? { polyUsDiagnostics: usGames.diagnostics } : {}),
       totalPairs:  count || 0,
       writes: {
         marketsUpserted: marketsUpsert.count,
