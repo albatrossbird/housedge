@@ -78,7 +78,12 @@ function SpreadBar({ market }) {
         <span style={{ width: 32, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{kPct}%</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 52, fontSize: 11, color: T.poly, fontWeight: 600, letterSpacing: "0.03em" }}>POLY</span>
+        <span style={{ width: 52, fontSize: 11, color: T.poly, fontWeight: 600, letterSpacing: "0.03em" }}>
+          {/* polymarket.com and polymarket.us are different exchanges
+              with different books, and a US account can only trade the
+              .us one — so this cannot say "POLY" for both. */}
+          {market.poly.usTradable ? "POLY US" : "POLY"}
+        </span>
         <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 99, overflow: "hidden" }}>
           <div style={{ width: `${pPct}%`, height: "100%", background: T.poly, borderRadius: 99, transition: "width 0.6s ease" }} />
         </div>
