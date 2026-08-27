@@ -45,7 +45,11 @@ Both jobs run from GitHub Actions, not Vercel cron: the Hobby plan caps
 crons at once per *day*, which is not a fix for stale prices. The repo is
 public, so Actions minutes are free and unmetered.
 
-- `.github/workflows/refresh-prices.yml` — `/api/refresh`, ~every 15 min.
+- `.github/workflows/refresh-prices.yml` — `/api/refresh`. The cron says
+  `*/15` but **GitHub does not honour that**: measured gaps between
+  scheduled runs on this repo were 45 minutes to 3.5 hours. High-frequency
+  schedules on public repos are throttled hard, so treat stored prices as
+  up to a few hours old, not fifteen minutes.
 - `.github/workflows/discover-markets.yml` — `/api/embed` per category,
   daily, sequential with a pause. Categories: `mlb nba nhl soccer econ
   crypto politics`.
@@ -256,6 +260,14 @@ confident wrong answers. Both are stored per market row.
   read time (`complementBook`) using the same identifier-based outcome
   index the sports join uses. Storing both would let the copies
   disagree.
+- **Depth goes stale far faster than price, and the cron is slower than
+  it claims.** A stored 917-contract queue was really 44 by the time it
+  was read — turning "+1.26¢, ~$11.55" into ~$0.56, a 20x overstatement
+  on the one number a reader would act on. `/api/markets` therefore
+  re-checks the Kalshi touch size **live** for pairs the maths calls
+  profitable (a handful, batched by series) and reports
+  `pricing.depthChecked` / `depthCorrected`. Prices tolerate staleness;
+  sizes do not.
 - **An edge without a size is not a finding.** The same Bitcoin strike family offered 7 contracts at one price and 710 at another — six cents of profit versus fifteen dollars. Kalshi publishes size on the YES book only, which covers both directions: taking NO at `no_ask` is the same trade as selling YES at `yes_bid`, so the YES bid queue backs it.
 - **A missing ask yields `null`, not a big number.** "No executable
   price" and "no edge" are different answers; the card says which.

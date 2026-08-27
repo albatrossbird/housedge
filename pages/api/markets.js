@@ -78,6 +78,67 @@ function buildKalshiUrl(row) {
   return q ? `https://kalshi.com/search?q=${encodeURIComponent(q)}` : "https://kalshi.com/";
 }
 
+// Re-check the touch size for pairs that look profitable, live.
+//
+// Depth is the fastest-moving thing on the card and the slowest to
+// refresh. The scheduled refresh claims every 15 minutes but GitHub
+// throttles high-frequency crons hard on public repos — measured gaps
+// today were 45 minutes to 3.5 HOURS — so a stored size can be hours
+// old. That produced a headline of "+1.26c on 917 contracts, ~$11.55"
+// when the queue actually held 44 contracts and the trade was worth
+// $0.56. A 20x overstatement on the one number a reader would act on.
+//
+// Prices survive staleness far better than sizes do, so rather than
+// re-fetching everything this re-checks only the pairs the maths says
+// are takeable — typically a handful — and only their Kalshi leg, which
+// is the side that publishes size. Batched by series, so it is a couple
+// of requests, not one per pair.
+async function verifyKalshiDepth(pairs) {
+  const profitable = pairs.filter(p => p.arb && p.arb.profitable && p.id);
+  if (!profitable.length) return { checked: 0 };
+
+  const series = [...new Set(profitable.map(p => String(p.id).split("-")[0]))];
+  const sizes = new Map();
+
+  await Promise.all(series.map(async ticker => {
+    try {
+      const r = await fetch(
+        `https://api.elections.kalshi.com/trade-api/v2/markets?status=open&limit=200&series_ticker=${encodeURIComponent(ticker)}`
+      );
+      if (!r.ok) return;
+      for (const m of (await r.json()).markets || []) {
+        sizes.set(m.ticker, {
+          bid: Number(m.yes_bid_size_fp) || null,
+          ask: Number(m.yes_ask_size_fp) || null,
+        });
+      }
+    } catch { /* leave unverified rather than guessing */ }
+  }));
+
+  let checked = 0, corrected = 0;
+  for (const p of profitable) {
+    const live = sizes.get(p.id);
+    if (!live) { p.arb.depthVerified = false; continue; }
+    checked++;
+
+    // Which Kalshi queue backs this trade: taking YES uses the ask
+    // queue, taking NO is the same as selling YES and uses the bid.
+    const takesKalshiYes = String(p.arb.side || "").startsWith("kalshi-yes");
+    const liveSize = takesKalshiYes ? live.ask : live.bid;
+    if (liveSize == null) { p.arb.depthVerified = false; continue; }
+
+    const before = p.arb.maxContracts;
+    const next = p.arb.maxContracts == null ? liveSize : Math.min(p.arb.maxContracts, liveSize);
+    if (before != null && Math.abs(next - before) > 0.01) corrected++;
+
+    p.arb.maxContracts = next;
+    p.arb.edgeDollars = Math.round(p.arb.edge * next * 100) / 100;
+    p.arb.depthVerified = true;
+  }
+
+  return { checked, corrected };
+}
+
 export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];
@@ -265,6 +326,7 @@ export default async function handler(req, res) {
       })
       .map(({ _gameDate, ...m }) => m);
 
+    const depthCheck = await verifyKalshiDepth(shaped);
     const priced = shaped.filter(m => m.arb).length;
 
     res.setHeader("Cache-Control", "s-maxage=30");
@@ -280,6 +342,10 @@ export default async function handler(req, res) {
       pricing: {
         priced,
         noExecutablePrice,
+        // Live size re-check on the takeable pairs. `corrected` counts
+        // how many had a stored depth that no longer held.
+        depthChecked: depthCheck.checked,
+        depthCorrected: depthCheck.corrected || 0,
         // Pairs whose maths says profitable but whose cross-venue gap
         // says "look at the data instead". Worth watching: a rising
         // count means matching quality is slipping.
