@@ -37,7 +37,7 @@ The frontend never calls Kalshi/Polymarket directly. Data flows through three AP
 
 3. **`pages/api/markets.js`** — what the frontend polls (every 60s). Calls the `get_pairs(sport_tags)` Postgres RPC, which joins `markets` and `pairs` in SQL (chained Supabase JS-client filters were silently failing, hence the raw RPC). Filters stale/expired-date rows and prices outside 0.05–0.95, then shapes for the UI.
 
-`pages/index.js` is a single-file client (category tabs, sort controls, market cards, arb badges) with inline styles — no CSS framework. Arb logic lives in the API now, not the client — see "Executable pricing". The client only reads `market.arb` and keeps the spread ≤ 15 points guard (wider spreads are data errors, not arbitrage — see the Polymarket outcome-price bug).
+`pages/index.js` is a single-file client (category tabs, sort controls, market cards, arb badges) with inline styles — no CSS framework. **One card per Kalshi market, with a leg per Polymarket venue** — see "One card, N venues" below. Arb logic lives in the API now, not the client — see "Executable pricing". The client only reads `market.arb` and keeps the spread ≤ 15 points guard (wider spreads are data errors, not arbitrage — see the Polymarket outcome-price bug).
 
 ### Automation
 
@@ -331,6 +331,36 @@ Worked example — Kansas City vs Toronto on live books:
 old  min(0.53, 0.545) + min(0.47, 0.455) = 0.9850  -> flagged ARB
 new  0.5388 + 0.4724                     = 1.0112  -> -1.1c, not a trade
 ```
+
+### One card, N venues
+
+A Kalshi market listed on both `polymarket.com` and `polymarket.us`
+produces two rows in `pairs`, and the site used to render them as two
+cards: the same fixture twice, a few cents apart, with nothing saying
+they were the same claim. 66 sports pairs were 35 games. Since a US
+account cannot trade `.com`, "which of these is mine?" was the first
+question that layout raised and the last one it answered.
+
+`/api/markets` now merges on `kalshi_id` and returns `legs[]`; the
+response still calls them `pairs` but `pairCount` says how many stored
+pairs it took.
+
+- **Merged in the API, not the client**, for the same reason the
+  implausible-spread guard is: the arb figures are computed there, and a
+  client that recombined them would be a second place for that maths to
+  live and a first place for it to drift.
+- **Every leg keeps its own arb, cost and match score.** A single
+  blended "best" number would quote an edge on `.com` to a reader who
+  can only trade `.us`. The venues are separate exchanges, not mirrors.
+- **The venue filter filters LEGS and drops cards left with none.**
+  Filtering whole cards would hide a game the reader *can* trade just
+  because its `.com` twin exists; leaving the other leg attached would
+  quote them a price they cannot take.
+- Every derived figure — spread, volume, age, arb badge, the stat row —
+  reads the legs currently displayed, never all of them.
+- The React key is the Kalshi id again. It was `pairId` precisely
+  because one Kalshi market yielded two rows; merging removes the
+  collision at its source.
 
 ### What the card must admit
 

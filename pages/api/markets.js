@@ -172,6 +172,63 @@ function ageSeconds(...stamps) {
   return ages.length ? Math.max(...ages) : null;
 }
 
+// One card per Kalshi market, with a leg per Polymarket venue.
+//
+// A Kalshi market listed on both polymarket.com and polymarket.us
+// produces two rows in `pairs`, and the site rendered them as two
+// separate cards: the same fixture twice, a few cents apart, with
+// nothing saying they were the same claim. The reader is here to
+// compare venues, so the comparison belongs inside one card rather
+// than between two.
+//
+// Merged here rather than in the client for the same reason the
+// implausible-spread guard lives here: the arb figures are per-leg and
+// computed in this file, and a client that recombined them would be a
+// second place for that maths to live and a first place for it to drift.
+//
+// Each leg keeps its OWN arb. Picking a single best number across
+// venues would quietly quote an edge on .com to a reader who can only
+// trade .us — the venues are separate exchanges, not mirrors.
+function mergeByKalshiMarket(pairs) {
+  const byKalshi = new Map();
+
+  for (const p of pairs) {
+    let card = byKalshi.get(p.id);
+    if (!card) {
+      card = {
+        id: p.id,
+        title: p.title,
+        category: p.category,
+        kalshi: p.kalshi,
+        legs: [],
+      };
+      byKalshi.set(p.id, card);
+    }
+    card.legs.push({
+      pairId: p.pairId,
+      polyTitle: p.polyTitle,
+      similarity: p.similarity,
+      // The staler of this leg's two sides. Per leg, not per card: one
+      // venue can be hours behind the other, and averaging that away
+      // is how a stale book passes for a fresh one.
+      priceAgeSeconds: p.priceAgeSeconds,
+      poly: p.poly,
+      arb: p.arb,
+    });
+  }
+
+  for (const card of byKalshi.values()) {
+    // Best-priced venue first, so the leg a reader is most likely to
+    // act on leads. Legs with no executable price sink rather than
+    // sorting as a zero-cost trade.
+    card.legs.sort((a, b) => (a.arb ? a.arb.cost : Infinity) - (b.arb ? b.arb.cost : Infinity));
+    card.trending = (card.kalshi.volume || 0) +
+      Math.max(0, ...card.legs.map(l => l.poly.volume || 0)) > 5000;
+  }
+
+  return [...byKalshi.values()];
+}
+
 export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];
@@ -375,11 +432,18 @@ export default async function handler(req, res) {
 
     const depthCheck = await verifyKalshiDepth(shaped);
     const priced = shaped.filter(m => m.arb).length;
+    // After the depth re-check, so every leg carries its final numbers.
+    const cards = mergeByKalshiMarket(shaped);
 
     res.setHeader("Cache-Control", "s-maxage=30");
     res.status(200).json({
-      pairs: shaped,
-      needsEmbed: shaped.length === 0,
+      // One entry per Kalshi market; the Polymarket venues are `legs`
+      // inside it. `pairs` remains the key because that is what a
+      // reader of this response is counting, but the shape is now a
+      // card, and `pairCount` says how many stored pairs it took.
+      pairs: cards,
+      pairCount: shaped.length,
+      needsEmbed: cards.length === 0,
       // A claim about the numbers actually in this response, not about
       // what the code is capable of. Before migration 0004 is run there
       // are no books to price, every `arb` is null, and answering
