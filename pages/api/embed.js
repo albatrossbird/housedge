@@ -274,13 +274,26 @@ async function candidatesFromDb(sportTag, topK = 10) {
 function assignGreedy(candidates, topScores, threshold, counts = {}) {
   candidates.sort((a, b) => b.score - a.score);
 
+  // A Kalshi market may pair once PER POLYMARKET VENUE, not once
+  // overall. polymarket.com and polymarket.us are different exchanges
+  // and a US account can only trade the .us one, so letting a single
+  // .com match consume the Kalshi row hides the only pair the reader
+  // could actually take. That is why 307 ingested and embedded US
+  // non-sports markets produced zero pairs: they were not rejected by
+  // threshold or by the gate, they simply lost the exclusivity race to
+  // a .com candidate that scored higher.
+  //
+  // The sports join was already one pair per (game, venue); this makes
+  // the embedding path agree.
   const usedKalshi = new Set();
   const usedPoly = new Set();
+  const venueOf = pm => (pm.platform === POLY_US_PLATFORM ? POLY_US_PLATFORM : "polymarket");
   const newPairs = [];
   const acceptedPairs = [];
 
   for (const c of candidates) {
-    if (usedKalshi.has(c.km.id) || usedPoly.has(c.pm.id)) continue;
+    const kalshiSlot = `${c.km.id}|${venueOf(c.pm)}`;
+    if (usedKalshi.has(kalshiSlot) || usedPoly.has(c.pm.id)) continue;
     newPairs.push({
       kalshi_id:     c.km.id,
       polymarket_id: c.pm.id,
@@ -288,7 +301,7 @@ function assignGreedy(candidates, topScores, threshold, counts = {}) {
       created_at:    Math.floor(Date.now() / 1000),
     });
     acceptedPairs.push({ score: c.score, kalshi: c.km.title, poly: c.pm.title });
-    usedKalshi.add(c.km.id);
+    usedKalshi.add(kalshiSlot);
     usedPoly.add(c.pm.id);
   }
 
