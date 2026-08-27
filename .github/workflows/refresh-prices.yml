@@ -10,13 +10,24 @@ name: Refresh prices
 # scheduler's 5-minute minimum. If the project moves to Vercel Pro, a
 # `crons` entry in vercel.json is a tidier home and this can be deleted.
 #
-# Scheduled runs are best-effort: GitHub delays them under load, so read
-# */15 as "roughly every 15 minutes". Price freshness degrades
-# gracefully, so that trade is fine.
+# Scheduled runs are best-effort: GitHub delays them under load, so this
+# is a floor on freshness, not a promise. The page tops it up on demand
+# (see /api/refresh?ifStale=), which is what covers the case that
+# matters: someone is looking at it right now.
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # UTC
+    # GitHub does not honour this: measured gaps between scheduled runs
+    # on this public repo were 45 minutes to 3.5 hours. Asking for */5
+    # rather than */15 does not make it five minutes -- it just means the
+    # throttle has something to throttle. The reliable ways to get a real
+    # interval are an external cron hitting /api/refresh (cron-job.org
+    # runs every minute, free) or Vercel Pro, whose crons have a 1-minute
+    # minimum. The page also asks for a refresh of its own when what it
+    # is showing is over three minutes old, which covers the case that
+    # actually matters: someone is looking at it.
+    - cron: "*/5 * * * *"   # UTC
+
   workflow_dispatch:          # manual trigger from the Actions tab
 
 concurrency:

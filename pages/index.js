@@ -38,6 +38,12 @@ function ageLabel(seconds) {
 // normal and two hours means a run was actually missed.
 const STALE_SECONDS = 2 * 3600;
 
+// How old stored prices have to be before an open page goes and gets
+// new ones. Below the scheduled interval, so a reader sitting on the
+// page is never waiting on the cron; above the time a refresh takes, so
+// two visitors seconds apart do not both trigger one.
+const ON_DEMAND_AFTER_SECONDS = 180;
+
 // Why a stored pair is not on screen, in the reader's words.
 //
 // A thin tab is honest work - economics is six verified pairs out of
@@ -113,6 +119,31 @@ async function fetchMarkets(category) {
   const res = await fetch(`/api/markets?category=${category}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return await res.json();
+}
+
+// Ask the server to go read the venues, but only if what it has stored
+// is already older than `ifStale` seconds.
+//
+// The scheduled job is the floor, not the ceiling: it runs whether or
+// not anyone is looking, and between runs the prices on screen age. A
+// reader who has the page open is exactly the person for whom fresh
+// prices matter, so their visit is what triggers the read. The
+// cooldown is enforced server-side (see /api/refresh), so a hundred
+// open tabs still produce one venue fetch.
+//
+// Failure is deliberately silent. This is an improvement on top of the
+// scheduled prices, not a dependency: if CRON_SECRET is set later this
+// call starts returning 401, and the page must keep working exactly as
+// it does now — just with older numbers.
+async function requestPriceRefresh(ifStale = 180) {
+  try {
+    const res = await fetch(`/api/refresh?ifStale=${ifStale}`);
+    if (!res.ok) return false;
+    const body = await res.json();
+    return !body.skipped;
+  } catch {
+    return false;
+  }
 }
 
 // ── Spread bar ─────────────────────────────────────────────────
@@ -294,7 +325,12 @@ export default function HouseEdge() {
   // Which Polymarket to compare against. They are different exchanges
   // and a US account can only trade the .us one, so this is not cosmetic
   // — it decides whether a card in front of you is actionable.
-  const [venue, setVenue] = useState("all");
+  // Defaults to the venue the reader can actually trade. A US account
+  // cannot trade polymarket.com, so showing .com prices and .com links
+  // by default hands them numbers they cannot act on and a link that
+  // goes nowhere useful — which is exactly what happened on economics
+  // and politics, where every pair is .com.
+  const [venue, setVenue] = useState("us");
   const [markets, setMarkets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -302,6 +338,7 @@ export default function HouseEdge() {
   const [unsupported, setUnsupported] = useState(false);
   const [needsEmbed, setNeedsEmbed] = useState(false);
   const [hidden, setHidden] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadMarkets = useCallback(async (categoryKey) => {
     const cat = CATEGORIES[categoryKey];
@@ -336,11 +373,27 @@ export default function HouseEdge() {
     }
   }, []);
 
+  // Pull fresh prices, then re-read. Used by the ↻ button and by the
+  // staleness check below.
+  const refreshPrices = useCallback(async (categoryKey, ifStale) => {
+    setRefreshing(true);
+    try {
+      const didWork = await requestPriceRefresh(ifStale);
+      // Only re-read when the server actually wrote something. A skipped
+      // call means the stored prices were already fresh, and re-fetching
+      // to display the same numbers is a spinner for nothing.
+      if (didWork) await loadMarkets(categoryKey);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadMarkets]);
+
   useEffect(() => {
     loadMarkets(activeCategory);
     const interval = setInterval(() => loadMarkets(activeCategory), 60_000);
     return () => clearInterval(interval);
   }, [activeCategory, loadMarkets]);
+
 
   const venueOf = leg => (leg.poly.usTradable ? "us" : "global");
   // Cards carrying at least one leg on that venue. A card with both is
@@ -387,6 +440,16 @@ export default function HouseEdge() {
     const a = cardAge(m);
     return a != null && (worst == null || a > worst) ? a : worst;
   }, null);
+  // Someone is looking, so it is worth going to get current prices.
+  // Guarded on the stored age rather than fired on every render: the
+  // server would no-op anyway, but not making the call at all is
+  // cheaper than being told it was pointless.
+  useEffect(() => {
+    if (loading || refreshing) return;
+    if (oldestAge == null || oldestAge < ON_DEMAND_AFTER_SECONDS) return;
+    refreshPrices(activeCategory, ON_DEMAND_AFTER_SECONDS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oldestAge, loading, activeCategory]);
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -436,7 +499,10 @@ export default function HouseEdge() {
           {Object.entries(CATEGORIES).map(([key, cat]) => (
             <button
               key={key}
-              onClick={() => { setActiveCategory(key); setVenue("all"); }}
+              /* The venue choice survives a category switch. Resetting it
+                 silently re-showed .com markets the reader had just
+                 chosen to hide. */
+              onClick={() => setActiveCategory(key)}
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: `1px solid ${activeCategory === key ? T.kalshi : T.border}`,
@@ -464,29 +530,55 @@ export default function HouseEdge() {
             <option value="volume">Sort: Most volume</option>
             <option value="similarity">Sort: Best match</option>
           </select>
-          {/* Only worth showing when both venues actually have pairs in
-              this category — a filter offering one option is noise. */}
-          {/* Rendered whenever a choice is meaningful OR one is already
-              in effect. Showing it only when both venues have pairs
-              stranded the user: pick "US only" on sports, switch to
-              politics, and the control vanished while the filter kept
-              applying — an empty tab with no way to undo it. */}
-          {(venue !== "all" || (venueCounts.us > 0 && venueCounts.global > 0)) && (
-            <select
-              value={venue}
-              onChange={e => setVenue(e.target.value)}
-              style={{ padding: "10px 14px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.text, background: T.surface, cursor: "pointer", outline: "none" }}
-            >
-              <option value="all">Both Polymarkets ({markets.length})</option>
-              <option value="us">Polymarket US only ({venueCounts.us || 0})</option>
-              <option value="global">Polymarket global only ({venueCounts.global || 0})</option>
-            </select>
-          )}
+          {/* Always rendered, never conditionally. Hiding it when only
+              one venue had pairs stranded the reader: pick "US" on
+              sports, switch to politics, and the control vanished while
+              the filter kept applying — an empty tab with no way out.
+              A segmented control also states the current venue at a
+              glance, which a dropdown only does once you read it. */}
+          <div style={{ display: "flex", border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden", background: T.surface }}>
+            {[
+              { key: "us",     label: "US",     n: venueCounts.us || 0 },
+              { key: "global", label: "Global", n: venueCounts.global || 0 },
+              { key: "all",    label: "Both",   n: markets.length },
+            ].map(({ key, label, n }, i) => (
+              <button
+                key={key}
+                onClick={() => setVenue(key)}
+                title={
+                  key === "us" ? "Polymarket US — the exchange a US account can trade"
+                  : key === "global" ? "polymarket.com — a separate exchange, not tradable from a US account"
+                  : "Both exchanges, side by side"
+                }
+                style={{
+                  padding: "10px 14px", fontSize: 13, fontWeight: venue === key ? 700 : 500,
+                  cursor: "pointer", border: "none",
+                  borderLeft: i === 0 ? "none" : `1px solid ${T.border}`,
+                  background: venue === key ? `${T.poly}14` : "transparent",
+                  color: venue === key ? T.poly : T.muted,
+                  transition: "all 0.15s",
+                }}
+              >
+                {label} <span style={{ fontWeight: 400, opacity: 0.75 }}>{n}</span>
+              </button>
+            ))}
+          </div>
+          {/* Reads the venues, rather than re-reading the database.
+              Labelled "Refresh", it previously fetched the same stored
+              prices again and returned instantly — which looks like a
+              working refresh button and is not one. `ifStale=0` means
+              this always does the work, because a person who clicked it
+              is asking for exactly that. */}
           <button
-            onClick={() => loadMarkets(activeCategory)}
-            style={{ padding: "10px 16px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.muted, background: T.surface, cursor: "pointer" }}
+            onClick={() => refreshPrices(activeCategory, 0)}
+            disabled={refreshing}
+            style={{
+              padding: "10px 16px", border: `1px solid ${T.border}`, borderRadius: 8,
+              fontSize: 13, color: T.muted, background: T.surface,
+              cursor: refreshing ? "default" : "pointer", opacity: refreshing ? 0.6 : 1,
+            }}
           >
-            ↻ Refresh
+            {refreshing ? "↻ Reading books…" : "↻ Refresh prices"}
           </button>
         </div>
 
@@ -543,16 +635,37 @@ export default function HouseEdge() {
         {!loading && !error && !unsupported && !needsEmbed && sorted.length === 0 && (
           <div style={{ textAlign: "center", padding: "60px 0", color: T.muted, fontSize: 14 }}>
             {venue !== "all" && markets.length > 0 ? (
-              <>
-                No {venue === "us" ? "Polymarket US" : "Polymarket global"} matches in{" "}
-                {CATEGORIES[activeCategory].label.toLowerCase()} — {markets.length} on the other venue.{" "}
+              /* The default is US-only, so this is the state economics,
+                 crypto and politics land in — Kalshi and Polymarket US
+                 barely overlap outside sports. An empty tab with no
+                 explanation reads as a broken site, and silently
+                 showing .com instead would hand the reader prices they
+                 cannot trade and links that go to the wrong exchange.
+                 So: say what is missing, say what exists, and make
+                 taking the other venue one deliberate click. */
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 15, color: T.text, fontWeight: 600 }}>
+                  Nothing on {venue === "us" ? "Polymarket US" : "Polymarket global"} for{" "}
+                  {CATEGORIES[activeCategory].label.toLowerCase()} yet
+                </div>
+                <div style={{ fontSize: 13, color: T.muted, maxWidth: 440, lineHeight: 1.5 }}>
+                  {venue === "us"
+                    ? `Kalshi and Polymarket US list almost the same games, but barely the same ${CATEGORIES[activeCategory].label.toLowerCase()} markets. ${markets.length} ${markets.length === 1 ? "pair exists" : "pairs exist"} on polymarket.com — a separate exchange a US account cannot trade.`
+                    : `${markets.length} ${markets.length === 1 ? "pair is" : "pairs are"} listed on Polymarket US.`}
+                </div>
                 <button
-                  onClick={() => setVenue("all")}
-                  style={{ background: "none", border: "none", color: T.kalshi, cursor: "pointer", fontSize: 14, textDecoration: "underline", padding: 0 }}
+                  onClick={() => setVenue(venue === "us" ? "global" : "us")}
+                  style={{
+                    padding: "9px 16px", border: `1px solid ${T.poly}`, borderRadius: 8,
+                    background: `${T.poly}12`, color: T.poly, cursor: "pointer",
+                    fontSize: 13, fontWeight: 600,
+                  }}
                 >
-                  Show both
+                  {venue === "us"
+                    ? `Show polymarket.com anyway (${markets.length})`
+                    : `Show Polymarket US (${markets.length})`}
                 </button>
-              </>
+              </div>
             ) : hidden && hidden.total > 0 ? (
               <>
                 No {CATEGORIES[activeCategory].label.toLowerCase()} pairs are tradable right now —{" "}
