@@ -448,7 +448,7 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   for (const pm of polyMarkets) {
     if (pm.sport_tag !== sportTag) continue;
     diagnostics.polyRows++;
-    const pk = polyGameKey(String(pm.slug || "").replace(/^aec-/, ""));
+    const pk = polyGameKey(pm.slug);
     if (!pk) continue;
     diagnostics.polyKeyed++;
     if (pk.date < todayIso) continue;
