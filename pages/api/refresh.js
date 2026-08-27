@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
+import { fetchUsBbo } from "../../lib/polymarketUs.js";
 
 const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v) : null));
 
@@ -263,14 +264,47 @@ export default async function handler(req, res) {
       }
     }
 
+    // Polymarket US books. Its market ids ARE slugs, and /bbo is a
+    // per-market call — fine here because this job is already scoped to
+    // markets that appear in `pairs`, so it costs one request per pair
+    // rather than one per market in the catalogue.
+    //
+    // This is also where non-sports US rows get their books at all:
+    // discovery stores them from the bulk list endpoint, which carries
+    // prices but no book.
+    const usIds = [...new Set(
+      pairRows.map(r => String(r.polymarket_id)).filter(id => /^[a-z]/.test(id))
+    )];
+    const usUpdates = [];
+    const usErrors = [];
+    for (const slug of usIds) {
+      const b = await fetchUsBbo(slug);
+      if (!b || b.notListed) continue;
+      if (b.error) { usErrors.push(`${slug}: ${b.error}`); continue; }
+      usUpdates.push({
+        id: slug,
+        bid: b.bid,
+        ask: b.ask,
+        bid_size: b.bidDepth,
+        ask_size: b.askDepth,
+        yes_price: b.ask,
+        no_price: b.ask == null ? null : Math.round((1 - b.ask) * 10000) / 10000,
+        updated_at: Math.floor(Date.now() / 1000),
+      });
+    }
+
     const kalshiResult = await applyUpdates(kalshiUpdates);
     const polyResult   = await applyUpdates(polyUpdates);
+    const usResult     = usUpdates.length ? await applyUpdates(usUpdates) : { updated: 0, errors: [], warnings: [] };
 
     res.status(200).json({
       kalshiUpdated: kalshiResult.updated,
       polyUpdated: polyResult.updated,
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,
+      polyUsUpdated: usResult.updated,
+      polyUsRequested: usIds.length,
+      polyUsErrors: usErrors.slice(0, 3),
       polyIdsInDb: polyIds.length,
       kalshiSeriesRefreshed: kalshiSeries.length,
       pairsSeen: pairRows.length,

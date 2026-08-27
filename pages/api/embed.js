@@ -13,7 +13,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
 import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
-import { fetchUsGameMarket, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
+import { fetchUsGameMarket, fetchPolymarketUs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
 
 const supabase = createClient(
@@ -1089,6 +1089,18 @@ export default async function handler(req, res) {
     let usGames = { markets: [], diagnostics: null };
     if (SPORTS_TAGS.has(sport)) {
       usGames = await fetchPolymarketUsGames(kalshiRaw, polyRaw, sport);
+    } else if (sport !== "all") {
+      // Non-sports US markets DO come back from the list endpoints, so
+      // these arrive in bulk rather than one slug at a time. They are
+      // where a tradeable edge would actually show up for a US account:
+      // every non-sports pair the site has surfaced so far sits on
+      // polymarket.com, which a US trader cannot touch.
+      const us = await fetchPolymarketUs();
+      const rows = us.markets.map(toMarketRow).filter(r => r && r.sport_tag === sport);
+      usGames = {
+        markets: rows,
+        diagnostics: { fetched: us.markets.length, forCategory: rows.length, errors: us.errors.slice(0, 3) },
+      };
     }
 
     const allMarkets = [...kalshiRaw, ...polyRaw, ...usGames.markets];
