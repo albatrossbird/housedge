@@ -734,7 +734,16 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
 }
 
 // Categories fetched by enumeration rather than a fixed series list.
-const KALSHI_CATEGORIES = { politics: "Politics", crypto: "Crypto" };
+// Categories enumerated from Kalshi's own series list rather than a
+// hand-written ticker list.
+//
+// econ was four hardcoded series — KXFED, KXCPI, KXRECESSION, KXGDP —
+// against Kalshi's 767-series Economics category. That is 0.5% of the
+// catalogue, and it is the real reason econ had one pair: not "the
+// venues do not overlap" (which is what I concluded and said), but that
+// we were barely looking. Polymarket US alone lists Fed decisions,
+// GDP growth, unemployment and payrolls, all of which Kalshi carries.
+const KALSHI_CATEGORIES = { politics: "Politics", crypto: "Crypto", econ: "Economics" };
 
 async function fetchKalshiMarkets(sportFilter = "all") {
   // politics/crypto come from category enumeration, not the fixed
