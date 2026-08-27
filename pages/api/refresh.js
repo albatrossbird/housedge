@@ -219,6 +219,40 @@ export default async function handler(req, res) {
   if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
 
   try {
+    // ?ifStale=<seconds> — do the work only if the stored prices are
+    // already older than that, otherwise no-op.
+    //
+    // This is what makes an on-demand refresh safe to expose to the
+    // page. Every visitor whose prices look stale asks for one, and
+    // without a cooldown that is an unbounded number of Kalshi and
+    // Polymarket calls for the same answer. The check is a single
+    // one-row read, and it is server-side on purpose: a client-side
+    // cooldown is one open tab away from not existing.
+    //
+    // Freshness is read from the data rather than from a timer, because
+    // there is no shared state between serverless invocations to keep a
+    // timer in. `markets.updated_at` is written by this job and by
+    // discovery, so "something wrote prices N seconds ago" is exactly
+    // the question worth asking.
+    const ifStale = parseInt(req.query.ifStale, 10);
+    if (Number.isFinite(ifStale) && ifStale >= 0) {
+      const { data, error } = await restFetch(
+        "markets?select=updated_at&order=updated_at.desc&limit=1"
+      );
+      if (!error && data && data.length) {
+        const newest = Number(data[0].updated_at) || 0;
+        const ageSeconds = Math.floor(Date.now() / 1000) - newest;
+        if (ageSeconds < ifStale) {
+          return res.status(200).json({
+            skipped: true, reason: "prices already fresh", ageSeconds, ifStale,
+          });
+        }
+      }
+      // A failed freshness read falls through and refreshes. Skipping on
+      // an error would turn a transient Supabase blip into "prices are
+      // fine", which is the failure mode this whole file exists to stop.
+    }
+
     // Every pair on the site, so both venues' refresh lists come from
     // what is actually rendered rather than a hand-maintained constant.
     const pairRows = [];

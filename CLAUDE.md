@@ -49,7 +49,7 @@ public, so Actions minutes are free and unmetered.
   `*/15` but **GitHub does not honour that**: measured gaps between
   scheduled runs on this repo were 45 minutes to 3.5 hours. High-frequency
   schedules on public repos are throttled hard, so treat stored prices as
-  up to a few hours old, not fifteen minutes. Kalshi rate-limits
+  up to a few hours old, not what the schedule says. Kalshi rate-limits
   datacenter IPs, so the per-series fetches run at bounded concurrency
   with retry and `kalshiSeriesFailed` **names** the series — a throttled
   one used to return `{ markets: [] }`, read as a series with nothing
@@ -68,6 +68,40 @@ this one job.
 
 `lib/cronAuth.js` gates both endpoints behind an optional `CRON_SECRET`
 (permissive until the var is set on Vercel *and* as a repo secret).
+
+### Price freshness
+
+Three layers, because the scheduled job alone cannot deliver what a
+reader expects from a prices page:
+
+1. **GitHub Actions** — the floor. Asks for `*/5`, gets 45 minutes to
+   3.5 hours. Runs whether or not anyone is looking.
+2. **On-demand** — `/api/refresh?ifStale=<seconds>`. The page asks for a
+   read when what it is showing is over `ON_DEMAND_AFTER_SECONDS` (180)
+   old. The person with the page open is the one for whom fresh prices
+   matter, so their visit is what triggers the work.
+3. The **↻ button** passes `ifStale=0` and always reads the venues. It
+   used to re-read the database and return instantly, which looks like a
+   working refresh button and is not one.
+
+**The cooldown is server-side**, and is a one-row `updated_at` read
+rather than a timer — serverless invocations share no state to keep a
+timer in. A hundred open tabs produce one venue fetch. A *failed*
+freshness read falls through and refreshes: skipping on error would turn
+a Supabase blip into "prices are fine", which is the failure mode this
+whole area exists to stop.
+
+On-demand failure is silent by design. If `CRON_SECRET` is ever set, the
+browser's call starts 401ing and the page must keep working exactly as
+before, just with older numbers.
+
+**To get a real interval**: point an external cron (cron-job.org is
+free and goes to every minute) at `/api/refresh`, or move to Vercel Pro,
+whose crons have a 1-minute minimum against Hobby's once-per-day. The
+binding constraint on Hobby is **Active CPU: 4 CPU-hours/month
+included** — a ~10s refresh every minute is ~43k runs and blows through
+it; every 5 minutes is ~8.6k runs and fits. Supabase's 5GB egress is the
+next ceiling after that.
 
 ### Retention
 
