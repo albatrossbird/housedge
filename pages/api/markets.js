@@ -259,6 +259,12 @@ export default async function handler(req, res) {
         if (implausible && arb?.r?.profitable) implausibleArbs++;
 
         return {
+          // `id` is the KALSHI id and is no longer unique per row: with
+          // both Polymarket exchanges paired, one Kalshi market yields
+          // two pairs. Anything keying on it (React lists included) will
+          // collide and reuse the wrong row, so pairs carry their own
+          // identity as well.
+          pairId: `${row.kalshi_id}|${row.polymarket_id}`,
           id: row.kalshi_id,
           title: row.k_title,
           polyTitle: row.p_title,

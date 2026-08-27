@@ -308,7 +308,7 @@ export default function HouseEdge() {
           {Object.entries(CATEGORIES).map(([key, cat]) => (
             <button
               key={key}
-              onClick={() => setActiveCategory(key)}
+              onClick={() => { setActiveCategory(key); setVenue("all"); }}
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: `1px solid ${activeCategory === key ? T.kalshi : T.border}`,
@@ -338,15 +338,20 @@ export default function HouseEdge() {
           </select>
           {/* Only worth showing when both venues actually have pairs in
               this category — a filter offering one option is noise. */}
-          {venueCounts.us > 0 && venueCounts.global > 0 && (
+          {/* Rendered whenever a choice is meaningful OR one is already
+              in effect. Showing it only when both venues have pairs
+              stranded the user: pick "US only" on sports, switch to
+              politics, and the control vanished while the filter kept
+              applying — an empty tab with no way to undo it. */}
+          {(venue !== "all" || (venueCounts.us > 0 && venueCounts.global > 0)) && (
             <select
               value={venue}
               onChange={e => setVenue(e.target.value)}
               style={{ padding: "10px 14px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.text, background: T.surface, cursor: "pointer", outline: "none" }}
             >
               <option value="all">Both Polymarkets ({markets.length})</option>
-              <option value="us">Polymarket US only ({venueCounts.us})</option>
-              <option value="global">Polymarket global only ({venueCounts.global})</option>
+              <option value="us">Polymarket US only ({venueCounts.us || 0})</option>
+              <option value="global">Polymarket global only ({venueCounts.global || 0})</option>
             </select>
           )}
           <button
@@ -409,13 +414,32 @@ export default function HouseEdge() {
 
         {!loading && !error && !unsupported && !needsEmbed && sorted.length === 0 && (
           <div style={{ textAlign: "center", padding: "60px 0", color: T.muted, fontSize: 14 }}>
-            No overlapping {CATEGORIES[activeCategory].label.toLowerCase()} markets found right now.
+            {venue !== "all" && markets.length > 0 ? (
+              <>
+                No {venue === "us" ? "Polymarket US" : "Polymarket global"} matches in{" "}
+                {CATEGORIES[activeCategory].label.toLowerCase()} — {markets.length} on the other venue.{" "}
+                <button
+                  onClick={() => setVenue("all")}
+                  style={{ background: "none", border: "none", color: T.kalshi, cursor: "pointer", fontSize: 14, textDecoration: "underline", padding: 0 }}
+                >
+                  Show both
+                </button>
+              </>
+            ) : (
+              <>No overlapping {CATEGORIES[activeCategory].label.toLowerCase()} markets found right now.</>
+            )}
           </div>
         )}
 
         {!loading && !error && !unsupported && sorted.length > 0 && (
           <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))" }}>
-            {sorted.map(m => <MarketCard key={m.id} market={m} />)}
+            {/* pairId, not id: `id` is the Kalshi market, and one Kalshi
+                market now yields two pairs (one per Polymarket venue).
+                Keying on it gave both cards the same key, so React reused
+                stale children and the list only looked right after a
+                manual refresh — while the stat row, being plain numbers,
+                updated instantly. */}
+            {sorted.map(m => <MarketCard key={m.pairId || m.id} market={m} />)}
           </div>
         )}
 
@@ -423,7 +447,7 @@ export default function HouseEdge() {
         <div style={{ marginTop: 32, padding: "14px 18px", border: `1px solid ${T.border}`, borderRadius: 10, display: "flex", gap: 20, flexWrap: "wrap", fontSize: 11, color: T.muted }}>
           <span><span style={{ color: T.kalshi, fontWeight: 700 }}>■</span> Kalshi</span>
           <span><span style={{ color: T.poly, fontWeight: 700 }}>■</span> Polymarket</span>
-          <span><span style={{ color: T.arb, fontWeight: 700 }}>⚡</span> Arb = YES + NO cost &lt; $0.97 across platforms</span>
+          <span><span style={{ color: T.arb, fontWeight: 700 }}>⚡</span> Arb = both legs cost &lt; $1.00 including fees</span>
           <span>Auto-refreshes every 60s</span>
         </div>
       </div>
