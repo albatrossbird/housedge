@@ -218,10 +218,18 @@ function mergeByKalshiMarket(pairs) {
   }
 
   for (const card of byKalshi.values()) {
-    // Best-priced venue first, so the leg a reader is most likely to
-    // act on leads. Legs with no executable price sink rather than
-    // sorting as a zero-cost trade.
-    card.legs.sort((a, b) => (a.arb ? a.arb.cost : Infinity) - (b.arb ? b.arb.cost : Infinity));
+    // US first, then by cost.
+    //
+    // Sorting on cost alone put whichever venue happened to be cheaper
+    // on top, so the row order changed from card to card and the reader
+    // had to re-read the labels on every one. The venue they can
+    // actually trade is the one that should lead, every time — price
+    // decides only between legs they can equally act on. Legs with no
+    // executable price sink rather than sorting as a zero-cost trade.
+    card.legs.sort((a, b) => {
+      if (a.poly.usTradable !== b.poly.usTradable) return a.poly.usTradable ? -1 : 1;
+      return (a.arb ? a.arb.cost : Infinity) - (b.arb ? b.arb.cost : Infinity);
+    });
     card.trending = (card.kalshi.volume || 0) +
       Math.max(0, ...card.legs.map(l => l.poly.volume || 0)) > 5000;
   }
