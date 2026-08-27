@@ -38,6 +38,24 @@ function ageLabel(seconds) {
 // normal and two hours means a run was actually missed.
 const STALE_SECONDS = 2 * 3600;
 
+// Why a stored pair is not on screen, in the reader's words.
+//
+// A thin tab is honest work - economics is six verified pairs out of
+// 2,208 Kalshi markets, because a wrong pair renders a fake arbitrage
+// and precision beats recall. But "we found almost nothing" and "we
+// found things and hid them" look identical from the outside, and the
+// difference is the whole question of whether the tab can be trusted.
+function hiddenReason(hidden) {
+  if (!hidden || !hidden.total) return null;
+  const parts = [];
+  if (hidden.longShots) parts.push(`${hidden.longShots} trading under 5¢ or over 95¢`);
+  if (hidden.expired) parts.push(`${hidden.expired} already settled`);
+  if (hidden.missingPrice) parts.push(`${hidden.missingPrice} with no price on one side`);
+  if (!parts.length) return null;
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+
 function spread(m) { return Math.abs(m.kalshi.yes - m.poly.yes); }
 function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
 // The API now computes this from real books with both venues' taker
@@ -254,6 +272,7 @@ export default function HouseEdge() {
   const [fetchedAt, setFetchedAt] = useState(null);
   const [unsupported, setUnsupported] = useState(false);
   const [needsEmbed, setNeedsEmbed] = useState(false);
+  const [hidden, setHidden] = useState(null);
 
   const loadMarkets = useCallback(async (categoryKey) => {
     const cat = CATEGORIES[categoryKey];
@@ -270,9 +289,10 @@ export default function HouseEdge() {
     }
 
     try {
-      const { pairs, needsEmbed: ne } = await fetchMarkets(categoryKey);
+      const { pairs, needsEmbed: ne, hidden: h } = await fetchMarkets(categoryKey);
       setMarkets(pairs || []);
       setNeedsEmbed(!!ne);
+      setHidden(h || null);
       // Deliberately NOT `new Date()`. That is when this browser asked,
       // which is not a fact about the prices on screen and reads as
       // though it were. The age comes from the data itself, and the
@@ -490,6 +510,11 @@ export default function HouseEdge() {
                   Show both
                 </button>
               </>
+            ) : hidden && hidden.total > 0 ? (
+              <>
+                No {CATEGORIES[activeCategory].label.toLowerCase()} pairs are tradable right now —{" "}
+                {hiddenReason(hidden)}.
+              </>
             ) : (
               <>No overlapping {CATEGORIES[activeCategory].label.toLowerCase()} markets found right now.</>
             )}
@@ -508,12 +533,27 @@ export default function HouseEdge() {
           </div>
         )}
 
+        {/* A non-empty tab hides pairs too, and silently. Six shown
+            beside two suppressed long shots is a different picture from
+            six being everything there is, and only one of them explains
+            why the number is small. */}
+        {!loading && !error && sorted.length > 0 && hiddenReason(hidden) && (
+          <p style={{ marginTop: 14, fontSize: 11, color: T.muted, textAlign: "center" }}>
+            Not shown: {hiddenReason(hidden)}. Pairs are only listed once both sides
+            are confirmed to resolve on the same number.
+          </p>
+        )}
+
         {/* Legend */}
         <div style={{ marginTop: 32, padding: "14px 18px", border: `1px solid ${T.border}`, borderRadius: 10, display: "flex", gap: 20, flexWrap: "wrap", fontSize: 11, color: T.muted }}>
           <span><span style={{ color: T.kalshi, fontWeight: 700 }}>■</span> Kalshi</span>
           <span><span style={{ color: T.poly, fontWeight: 700 }}>■</span> Polymarket</span>
           <span><span style={{ color: T.arb, fontWeight: 700 }}>⚡</span> Arb = both legs cost &lt; $1.00 including fees</span>
-          <span>Auto-refreshes every 60s</span>
+          {/* The page re-polls every 60s; the PRICES behind it come from
+              a scheduled job that GitHub throttles to somewhere between
+              45 minutes and 3.5 hours. Saying only the first invites the
+              reader to assume the second. */}
+          <span>Page reloads every 60s · prices from the last scheduled venue read</span>
         </div>
       </div>
     </div>

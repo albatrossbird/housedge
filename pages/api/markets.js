@@ -388,6 +388,18 @@ export default async function handler(req, res) {
           ? { notice: "no book data - run supabase/migrations/0004_bid_ask_and_fees.sql" }
           : {}),
       },
+      // Why a pair is stored but not on screen, promoted out of
+      // ?debug=1 and into the normal response. A thin tab is honest
+      // work here - econ is 6 verified pairs out of 2,208 Kalshi
+      // markets because precision is the product - but a reader cannot
+      // tell "we found almost nothing" from "we found things and hid
+      // them", and the difference decides whether they trust the tab.
+      hidden: {
+        longShots: dropped.kalshiOutOfBand + dropped.polyOutOfBand,
+        expired: dropped.expired,
+        missingPrice: dropped.missingPrice,
+        total: data.length - shaped.length,
+      },
       ...(req.query.debug === "1"
         ? { debug: { rowsFromRpc: data.length, dropped, sampleDropped: sampleDropped.slice(0, 5) } }
         : {}),
