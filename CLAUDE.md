@@ -49,14 +49,22 @@ public, so Actions minutes are free and unmetered.
   `*/15` but **GitHub does not honour that**: measured gaps between
   scheduled runs on this repo were 45 minutes to 3.5 hours. High-frequency
   schedules on public repos are throttled hard, so treat stored prices as
-  up to a few hours old, not fifteen minutes.
+  up to a few hours old, not fifteen minutes. Kalshi rate-limits
+  datacenter IPs, so the per-series fetches run at bounded concurrency
+  with retry and `kalshiSeriesFailed` **names** the series — a throttled
+  one used to return `{ markets: [] }`, read as a series with nothing
+  open, and freeze its rows indefinitely while every counter reported
+  success.
 - `.github/workflows/discover-markets.yml` — `/api/embed` per category,
   daily, sequential with a pause. Categories: `mlb nba nhl soccer econ
   crypto politics`.
 
 Both fail the run loudly on non-JSON, an `error` field, or zero rows
-updated. The original stale-price bug survived for weeks precisely
-because a silent no-op looked like success.
+updated — **per venue**, since a combined check let `polyUpdated: 0`
+ride along on a healthy Kalshi count with a green tick on every run. The
+original stale-price bug survived for weeks precisely because a silent
+no-op looked like success, and three more variants of it were found in
+this one job.
 
 `lib/cronAuth.js` gates both endpoints behind an optional `CRON_SECRET`
 (permissive until the var is set on Vercel *and* as a repo secret).
@@ -503,6 +511,7 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - **`upsert()` with a partial column set fails on NOT NULL columns even when the row already exists.** `INSERT ... ON CONFLICT DO UPDATE` validates the attempted insert row *before* resolving the conflict, so sending `{id, embedding, updated_at}` into `markets` fails every row with `23502 null value in column "platform"`. Either send the full row, or use a plain `.update()`.
 - **Selects silently cap at 1000 rows.** Any unbounded `.select()` on `markets` needs an explicit `.limit()` and, where applicable, a `sport_tag` filter. This bit both `refresh.js` and `embed.js`'s matchonly query.
 - `supabase-js` flattens network-layer errors to a bare `"TypeError: fetch failed"` string. Where the real cause matters, the raw REST helpers in `embed.js`/`refresh.js` (`restFetch`, `upsertRows`) preserve `cause.code` and HTTP status/body.
+- **Never `select=*` from `markets` in a price path.** The refresh job's select-merge-upsert pulled the full row so the payload would carry every NOT NULL column, which dragged a ~20KB embedding per row through the select *and* back through the upsert to rewrite a few price fields. Postgres killed the 100-row chunk with `57014 canceling statement due to statement timeout` and `polyUpdated` came back 0. List the columns instead — all of them except `embedding`, because a partial payload still fails NOT NULL `platform` with 23502.
 - **A read that fails must not look like an empty table.** `fetchAllRows` did `if (error || !data || !data.length) break` and returned what it had, so a first-page failure returned `[]`. Selects carrying `embedding` are ~20KB a row, so a 1000-row page is ~20MB, and once crypto and politics passed ~4,000 Polymarket rows the first page stopped coming back — the category read as zero stored markets while the live site served pairs built from those rows. Paging now halves the page and retries before giving up.
 - **An error channel that cannot carry an error is worse than none.** `matchonly` declared `const kalshiReadError = null` and mapped it into `readErrors`, so the response reported `readErrors: []` because it was structurally incapable of anything else. Check that a diagnostic field *can* be non-empty before trusting it.
 - **PostgREST rejects a bulk insert whose objects have different keys** (`PGRST102`, "All object keys must match"). Kalshi and Polymarket rows are upserted together and legitimately diverge — only Kalshi has `no_bid`/`no_ask`/`series_slug`/`fee_multiplier`, only Polymarket has `fee_schedule`. `alignKeys()` fills the gaps with null. This was invisible until migration 0004 ran, because stripping the absent columns from both platforms happened to make the key sets match.
@@ -534,7 +543,8 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - Default `/markets?active=true&closed=false` only returns high-volume *featured* markets. Individual markets require `/events?tag_id=X` with `offset` pagination. Only numeric `tag_id` filters — `tag=`, `label=`, `search=` are silently ignored.
 - Polymarket publishes no fixed tag list; discover IDs by paging `/tags` and matching label/slug. Known: soccer `100350`, nba `745`, nhl `899`, mlb `100381`, federal reserve `129`, interest rates `131`, Macro Inflation `101249`, recession `100201`, GDP `370`.
 - The `?id=` batch filter needs the key repeated (`?id=1&id=2`), not comma-joined.
-- **`?id=` silently omits closed markets** unless `closed=true` is also passed, and a non-integer id 422s the *whole batch*. Both are why `/api/refresh` returns fewer Polymarket rows than it asked for; the omission is correct behaviour for us (a closed market should not display), the 422 was not, and is now filtered on.
+- **`?id=` silently omits closed markets** unless `closed=true` is also passed, and a non-integer id 422s the *whole batch*.
+- **`/markets` applies a default `limit` of 20 no matter how many `id=` values you pass**, and returns the truncated list with a 200. A 50-id batch came back with 20; two batches came back with 40, which was `polyFetched` exactly while 34 of 35 global Polymarket sports legs sat five hours stale. Always send `limit` explicitly, and compare asked-for against came-back — `polyShortfall` does. Both are why `/api/refresh` returns fewer Polymarket rows than it asked for; the omission is correct behaviour for us (a closed market should not display), the 422 was not, and is now filtered on.
 - The "event has ≤4 markets" heuristic separates single games from tournament futures for **sports only** — a Fed decision legitimately has more outcomes. `fetchPolymarkets()` skips that filter for non-sports tags.
 - `outcomePrices` doesn't always align index-for-index with `outcomes`. Still unfixed; mitigated only by the ≤15pt arb spread guard.
 
