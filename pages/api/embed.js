@@ -978,7 +978,14 @@ export default async function handler(req, res) {
   // and deadline gates, not the score, are what reject the near-misses.
   // Below 0.90 the "positive return in 2026" family starts pairing with
   // unrelated strike markets, which no current gate catches.
-  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.90 };
+  // Crypto drops to 0.88 now that strikePresenceCompatible exists. The
+  // floor sat at 0.90 to keep out Kalshi's "positive return in 2026"
+  // family, which carries no threshold and so passed every gate — that
+  // family is now rejected on claim asymmetry rather than on score.
+  // 0.88 is what the real matches need: the genuine Kalshi/Polymarket US
+  // overlap, "above $199,999.99" against "above $200,000 in 2026",
+  // scores 0.890 and was missing the cut by a hundredth.
+  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.88 };
   const THRESHOLD = parseFloat(
     req.query.threshold || CATEGORY_THRESHOLDS[sport] || "0.78"
   );
