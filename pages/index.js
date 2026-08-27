@@ -56,8 +56,33 @@ function hiddenReason(hidden) {
 }
 
 
-function spread(m) { return Math.abs(m.kalshi.yes - m.poly.yes); }
-function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
+// A card carries one Kalshi market and a leg per Polymarket venue.
+// Every derived figure reads the legs the venue filter is actually
+// showing, never all of them: with "US only" selected, a spread or an
+// arb badge computed from the .com leg would describe a trade the
+// reader cannot make.
+function legsOf(m) { return m.legs || []; }
+function widestSpread(m) {
+  const gaps = legsOf(m).map(l => Math.abs(m.kalshi.yes - l.poly.yes));
+  return gaps.length ? Math.max(...gaps) : 0;
+}
+// The leg a reader would act on: cheapest to own both sides. Legs with
+// no executable price sink rather than sorting as a zero-cost trade.
+function bestLeg(m) {
+  return legsOf(m).reduce((best, l) => {
+    if (!best) return l;
+    const c = l.arb ? l.arb.cost : Infinity;
+    const b = best.arb ? best.arb.cost : Infinity;
+    return c < b ? l : best;
+  }, null);
+}
+function cardVolume(m) {
+  return (m.kalshi.volume || 0) + Math.max(0, ...legsOf(m).map(l => l.poly.volume || 0));
+}
+function cardAge(m) {
+  const ages = legsOf(m).map(l => l.priceAgeSeconds).filter(a => a != null);
+  return ages.length ? Math.max(...ages) : null;
+}
 // The API now computes this from real books with both venues' taker
 // fees applied (see lib/fees.js), so an alert means the two legs
 // together cost less than the $1 they pay out — an actual trade rather
@@ -71,7 +96,7 @@ function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
 // calculation, so `profitable` already accounts for it. Keeping a second
 // copy here would be two places to update and one to forget.
 function arbAlert(m) {
-  return Boolean(m.arb && m.arb.profitable);
+  return legsOf(m).some(l => l.arb && l.arb.profitable);
 }
 
 // ── Categories (UI display only) ──────────────────────────────
@@ -93,65 +118,63 @@ async function fetchMarkets(category) {
 // ── Spread bar ─────────────────────────────────────────────────
 function SpreadBar({ market }) {
   const kPct = Math.round(market.kalshi.yes * 100);
-  const pPct = Math.round(market.poly.yes * 100);
-  const diff = Math.abs(kPct - pPct);
 
-  // How far the touch prices sit apart on each venue. This is the cost
-  // the midpoint hides, and the reason a wide mid gap is often no edge
+  // How far the touch prices sit apart on a venue. This is the cost the
+  // midpoint hides, and the reason a wide mid gap is often no edge
   // while a narrow one can be.
   const width = (bid, ask) =>
     (bid == null || ask == null) ? null : Math.round((ask - bid) * 1000) / 10;
   const kWide = width(market.kalshi.bid, market.kalshi.ask);
-  const pWide = width(market.poly.bid, market.poly.ask);
-  const widths = [kWide, pWide].filter(v => v != null);
+  const legWidths = legsOf(market).map(l => width(l.poly.bid, l.poly.ask));
+  const widths = [kWide, ...legWidths].filter(v => v != null);
   const widestBook = widths.length ? Math.max(...widths) : null;
+
+  const Row = ({ label, color, pct, right }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ width: 62, fontSize: 11, color, fontWeight: 600, letterSpacing: "0.03em" }}>{label}</span>
+      <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 99, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 99, transition: "width 0.6s ease" }} />
+      </div>
+      <span style={{ width: 32, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{pct}%</span>
+      {right}
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 52, fontSize: 11, color: T.kalshi, fontWeight: 600, letterSpacing: "0.03em" }}>KALSHI</span>
-        <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 99, overflow: "hidden" }}>
-          <div style={{ width: `${kPct}%`, height: "100%", background: T.kalshi, borderRadius: 99, transition: "width 0.6s ease" }} />
-        </div>
-        <span style={{ width: 32, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{kPct}%</span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 52, fontSize: 11, color: T.poly, fontWeight: 600, letterSpacing: "0.03em" }}>
-          {/* polymarket.com and polymarket.us are different exchanges
-              with different books, and a US account can only trade the
-              .us one — so this cannot say "POLY" for both. */}
-          {market.poly.usTradable ? "POLY US" : "POLY"}
-        </span>
-        <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 99, overflow: "hidden" }}>
-          <div style={{ width: `${pPct}%`, height: "100%", background: T.poly, borderRadius: 99, transition: "width 0.6s ease" }} />
-        </div>
-        <span style={{ width: 32, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{pPct}%</span>
-      </div>
+      <Row label="KALSHI" color={T.kalshi} pct={kPct} />
+      {/* One row per venue rather than one card per venue. The same
+          fixture used to render twice, a few cents apart, with nothing
+          saying the two cards were the same claim — and since a US
+          account cannot trade .com, "which one is this?" was the first
+          question the layout raised and the last one it answered. */}
+      {legsOf(market).map(l => (
+        <Row
+          key={l.pairId}
+          label={l.poly.usTradable ? "POLY US" : "POLY"}
+          color={T.poly}
+          pct={Math.round(l.poly.yes * 100)}
+        />
+      ))}
       {/* The bars are MIDPOINTS; the arb is computed from asks. Those
-          two disagree constantly, and the old line here made it worse by
-          putting a lightning bolt on any mid gap over 5 points — so a
-          card could advertise "7pt spread" while costing 131c to own
+          two disagree constantly, and an older line here made it worse
+          by putting a lightning bolt on any mid gap over 5 points — so
+          a card could advertise "7pt spread" while costing 131c to own
           both sides, and another could show 2pt and be a real edge.
-          What actually decides it is book width: DOGE's Polymarket book
-          was 0.08/0.49, so its 31% mid was unbuyable. Lightning is
-          reserved for ARB now, and the second number is the one that
-          explains the cost. */}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, fontSize: 10, letterSpacing: "0.04em" }}>
-        {diff > 0 && <span style={{ color: T.muted }}>{diff}pt mid gap</span>}
-        {widestBook != null && (
-          <span style={{ color: widestBook >= 5 ? T.arb : T.muted, fontWeight: widestBook >= 5 ? 700 : 400 }}>
-            {widestBook >= 5 ? `thin book · ${widestBook}pt wide` : `${widestBook}pt book`}
-          </span>
-        )}
-      </div>
+          What actually decides it is book width. */}
+      {widestBook != null && (
+        <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.03em", paddingLeft: 70 }}>
+          widest book {widestBook.toFixed(1)}pt
+        </span>
+      )}
     </div>
   );
 }
 
-// ── Market card ────────────────────────────────────────────────
 function MarketCard({ market }) {
-  const best = bestYes(market);
   const isArb = arbAlert(market);
+  const legs = legsOf(market);
+  const age = cardAge(market);
 
   return (
     <div style={{
@@ -164,79 +187,85 @@ function MarketCard({ market }) {
       <div>
         <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
           {market.trending && <span style={{ fontSize: 10, fontWeight: 600, color: T.yes, letterSpacing: "0.04em" }}>↑ TRENDING</span>}
-          {isArb && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: T.arb, letterSpacing: "0.04em" }}>
-              ⚡ ARB +{(market.arb.edge * 100).toFixed(1)}¢
-              {/* The edge per contract is only half the finding — the
-                  same Bitcoin strike family offered 7 contracts at one
-                  price and 710 at another. Without size, +0.9c reads
-                  identically whether it is worth six cents or fifteen
-                  dollars. `~` because Polymarket publishes no depth, so
-                  this is an upper bound set by the Kalshi leg. */}
-              {market.arb.maxContracts != null && (
-                <span style={{ fontWeight: 400, color: T.muted }}>
-                  {" "}· {market.arb.depthKnown ? "" : "≤"}{Math.floor(market.arb.maxContracts)} contracts
-                  {market.arb.edgeDollars != null && ` (~$${market.arb.edgeDollars.toFixed(2)})`}
-                </span>
-              )}
-            </span>
-          )}
-          {!isArb && market.arb && (
-            <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.04em" }}>
-              {(market.arb.cost * 100).toFixed(1)}¢ to own both sides
-            </span>
-          )}
-          {!market.arb && (
-            <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.04em" }}>no executable price</span>
-          )}
-          {market.similarity && (
-            <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.04em" }}>
-              {Math.round(market.similarity * 100)}% match
-            </span>
-          )}
           {/* Sits next to the arb badge on purpose. A flagged edge on a
               three-hour-old book is the one combination that costs a
               reader money, and it looked exactly like a fresh one. */}
-          {market.priceAgeSeconds != null && (
+          {age != null && (
             <span
-              title="When these two books were last read. Prices come from a scheduled job, not a live feed."
+              title="When these books were last read. Prices come from a scheduled job, not a live feed."
               style={{
                 fontSize: 10,
                 letterSpacing: "0.04em",
-                fontWeight: market.priceAgeSeconds > STALE_SECONDS ? 700 : 400,
-                color: market.priceAgeSeconds > STALE_SECONDS ? T.arb : T.muted,
+                fontWeight: age > STALE_SECONDS ? 700 : 400,
+                color: age > STALE_SECONDS ? T.arb : T.muted,
               }}
             >
-              {market.priceAgeSeconds > STALE_SECONDS && "⏳ "}{ageLabel(market.priceAgeSeconds)}
+              {age > STALE_SECONDS && "⏳ "}{ageLabel(age)}
             </span>
           )}
         </div>
         <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: T.text, lineHeight: 1.4 }}>{market.title}</p>
-        {market.polyTitle && (
-          <p style={{ margin: "4px 0 0", fontSize: 11, color: T.muted, lineHeight: 1.3 }}>
-            Poly: {market.polyTitle}
-          </p>
-        )}
       </div>
 
       <SpreadBar market={market} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", borderTop: `1px solid ${T.border}`, paddingTop: 12, fontSize: 11, color: T.muted, flexWrap: "wrap", gap: 8 }}>
-        <span>
-          Best YES:{" "}
-          <span style={{ color: best === "kalshi" ? T.kalshi : T.poly, fontWeight: 700 }}>
-            {best === "kalshi" ? "Kalshi" : "Polymarket"} {pct(Math.max(market.kalshi.yes, market.poly.yes))}
-          </span>
-        </span>
-        <span style={{ display: "flex", gap: 10 }}>
-          <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
-            style={{ color: T.kalshi, fontWeight: 600, textDecoration: "none" }}>Kalshi ↗</a>
-          <a href={market.poly.url} target="_blank" rel="noopener noreferrer"
-            style={{ color: T.poly, fontWeight: 600, textDecoration: "none" }}>Poly ↗</a>
-        </span>
+      {/* One block per venue. Each states its own cost, its own edge and
+          its own match quality, because polymarket.com and
+          polymarket.us are separate exchanges with separate books — a
+          single blended number would quote a reader an edge on a venue
+          they may not be able to trade. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${T.border}`, paddingTop: 12 }}>
+        {legs.map(l => {
+          const legArb = l.arb && l.arb.profitable;
+          return (
+            <div key={l.pairId} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T.poly, letterSpacing: "0.03em" }}>
+                  {l.poly.usTradable ? "Polymarket US" : "Polymarket global"}
+                  {!l.poly.usTradable && (
+                    <span style={{ fontWeight: 400, color: T.muted }}> · not US-tradable</span>
+                  )}
+                </span>
+                <span style={{ display: "flex", gap: 10, fontSize: 11 }}>
+                  {l.similarity != null && (
+                    <span style={{ color: T.muted }}>{Math.round(l.similarity * 100)}% match</span>
+                  )}
+                  <a href={l.poly.url} target="_blank" rel="noopener noreferrer"
+                    style={{ color: T.poly, fontWeight: 600, textDecoration: "none" }}>Open ↗</a>
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: legArb ? T.arb : T.muted, fontWeight: legArb ? 700 : 400 }}>
+                {/* null is "no executable price on at least one leg",
+                    which is a different answer from "no edge" and must
+                    never render as a zero. */}
+                {!l.arb ? (
+                  "no executable price"
+                ) : legArb ? (
+                  <>
+                    ⚡ ARB +{(l.arb.edge * 100).toFixed(1)}¢
+                    {l.arb.maxContracts != null && (
+                      <span style={{ fontWeight: 400, color: T.muted }}>
+                        {" "}· {l.arb.depthKnown ? "" : "≤"}{Math.floor(l.arb.maxContracts)} contracts
+                        {l.arb.edgeDollars != null && ` (~$${l.arb.edgeDollars.toFixed(2)})`}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  `${(l.arb.cost * 100).toFixed(1)}¢ to own both sides`
+                )}
+              </div>
+              {l.polyTitle && l.polyTitle !== market.title && (
+                <div style={{ fontSize: 10, color: T.muted, lineHeight: 1.3 }}>{l.polyTitle}</div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div style={{ fontSize: 11, color: T.muted }}>
-        Vol {fmt(market.kalshi.volume + market.poly.volume)}
+
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.muted, flexWrap: "wrap", gap: 8 }}>
+        <span>Vol {fmt(cardVolume(market))}</span>
+        <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
+          style={{ color: T.kalshi, fontWeight: 600, textDecoration: "none" }}>Kalshi ↗</a>
       </div>
     </div>
   );
@@ -313,26 +342,40 @@ export default function HouseEdge() {
     return () => clearInterval(interval);
   }, [activeCategory, loadMarkets]);
 
-  const venueOf = m => (m.poly.usTradable ? "us" : "global");
+  const venueOf = leg => (leg.poly.usTradable ? "us" : "global");
+  // Cards carrying at least one leg on that venue. A card with both is
+  // counted under both, which is the honest answer to "how many of
+  // these can I trade on Polymarket US?" now that one card can span
+  // two exchanges.
   const venueCounts = markets.reduce((acc, m) => {
-    acc[venueOf(m)] = (acc[venueOf(m)] || 0) + 1;
+    for (const v of new Set(legsOf(m).map(venueOf))) acc[v] = (acc[v] || 0) + 1;
     return acc;
   }, {});
 
-  const visible = venue === "all" ? markets : markets.filter(m => venueOf(m) === venue);
+  // Filters LEGS and drops cards left with none, rather than filtering
+  // whole cards. A game listed on both exchanges is one card; hiding it
+  // entirely under "US only" would hide a market the reader can
+  // actually trade, and showing it with its .com leg still attached
+  // would quote them a price they cannot take.
+  const visible = venue === "all"
+    ? markets
+    : markets
+        .map(m => ({ ...m, legs: legsOf(m).filter(l => venueOf(l) === venue) }))
+        .filter(m => m.legs.length > 0);
 
   const sorted = [...visible].sort((a, b) => {
     // The executable ranking, and the one that should be reachable
     // first: mid gap sorts by an appearance, this sorts by what the
     // trade costs. Unpriceable pairs sink rather than sorting as zero.
     if (sort === "cost") {
-      const ca = a.arb ? a.arb.cost : Infinity;
-      const cb = b.arb ? b.arb.cost : Infinity;
+      const la = bestLeg(a), lb = bestLeg(b);
+      const ca = la && la.arb ? la.arb.cost : Infinity;
+      const cb = lb && lb.arb ? lb.arb.cost : Infinity;
       return ca - cb;
     }
-    if (sort === "spread") return spread(b) - spread(a);
-    if (sort === "volume") return (b.kalshi.volume + b.poly.volume) - (a.kalshi.volume + a.poly.volume);
-    if (sort === "similarity") return (b.similarity || 0) - (a.similarity || 0);
+    if (sort === "spread") return widestSpread(b) - widestSpread(a);
+    if (sort === "volume") return cardVolume(b) - cardVolume(a);
+    if (sort === "similarity") return (bestLeg(b)?.similarity || 0) - (bestLeg(a)?.similarity || 0);
     return (b.trending ? 1 : 0) - (a.trending ? 1 : 0);
   });
 
@@ -340,10 +383,10 @@ export default function HouseEdge() {
   // The stalest leg among what is actually on screen. Reported rather
   // than an average, because the reader is about to act on the worst
   // one, not the typical one.
-  const oldestAge = visible.reduce(
-    (worst, m) => (m.priceAgeSeconds != null && (worst == null || m.priceAgeSeconds > worst) ? m.priceAgeSeconds : worst),
-    null
-  );
+  const oldestAge = visible.reduce((worst, m) => {
+    const a = cardAge(m);
+    return a != null && (worst == null || a > worst) ? a : worst;
+  }, null);
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -456,8 +499,8 @@ export default function HouseEdge() {
             {[
               { label: "Markets matched", value: visible.length },
               { label: "Arb signals", value: arbCount, color: T.arb },
-              { label: "Avg spread", value: visible.length ? `${Math.round(visible.reduce((s, m) => s + spread(m), 0) / visible.length * 100)}pt` : "—" },
-              { label: "Total volume", value: fmt(visible.reduce((s, m) => s + m.kalshi.volume + m.poly.volume, 0)) },
+              { label: "Avg spread", value: visible.length ? `${Math.round(visible.reduce((s, m) => s + widestSpread(m), 0) / visible.length * 100)}pt` : "—" },
+              { label: "Total volume", value: fmt(visible.reduce((s, m) => s + cardVolume(m), 0)) },
             ].map(({ label, value, color }) => (
               <div key={label}>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 2, letterSpacing: "0.04em" }}>{label}</div>
@@ -529,7 +572,7 @@ export default function HouseEdge() {
                 stale children and the list only looked right after a
                 manual refresh — while the stat row, being plain numbers,
                 updated instantly. */}
-            {sorted.map(m => <MarketCard key={m.pairId || m.id} market={m} />)}
+            {sorted.map(m => <MarketCard key={m.id} market={m} />)}
           </div>
         )}
 
