@@ -172,6 +172,58 @@ loud instead of silent.
 
 Both modes return `matchDiagnostics` with `threshold`, embedded counts, `acceptedPairs` (what was actually paired, post-gate, post-exclusivity), and `topScores` (best candidate per Kalshi row **regardless of threshold or gate**). `topScores` is what distinguishes "real candidates just under threshold" from "nothing close" from "gate correctly rejecting". Write routes return per-stage `writes` counts and real error strings. **Keep this** — nearly every bug this codebase has had was invisible until the relevant counter/error was surfaced in the response.
 
+## Polymarket US is a different exchange
+
+`polymarket.com` and `polymarket.us` are **separate venues**, not
+regions of one site: different market sets, different slugs, different
+books. A US account can only trade `.us`, so pricing a Kalshi leg
+against a `.com` book produces an edge the reader cannot take. Both are
+stored — `markets.platform` is `polymarket` or `polymarket_us` — and a
+game pairs against every venue that lists it.
+
+Same claim, same moment, to show the books genuinely differ:
+
+```
+Kalshi         Bitcoin above $199,999.99 by Dec 31 2026   0.03 / 0.04
+Polymarket US  Bitcoin above $200k by 12/31/2026          0.05
+```
+
+Public market data: **`gateway.polymarket.us/v1`, no API key**.
+(`api.polymarket.us` is the authenticated *trading* API and is not used.)
+
+- **Game markets are not returned by ANY list endpoint.** 1,200 events
+  paged from `/v1/events` contain zero `aec-` tickers, yet a direct
+  lookup of `aec-mlb-mil-nym-2026-08-27` returns a live book instantly.
+  I concluded from a listing sweep that `.us` had no per-game markets
+  and said so; it was wrong, and the same sweep will mislead anyone who
+  repeats it. **Games are reachable only by slug.**
+- Slugs are `aec-<league>-<away>-<home>-<yyyy-mm-dd>` using the **same
+  team codes and the same order as `.com`**, so a `.us` slug rebuilds
+  from a `.com` slug with no second alias table, and `polyOutcomeIndex`
+  carries over unchanged.
+- **`/v1/markets/<slug>/bbo` publishes `bidDepth`/`askDepth`.**
+  `polymarket.com` publishes no depth at all, so a US pair is the only
+  one that can report `depthKnown: true` instead of an upper bound taken
+  from the Kalshi leg alone.
+- **Fees differ per venue.** US prices its taker fee off
+  `feeCoefficient` (0.06 on the MLB game checked) against `.com`'s
+  `feeSchedule.rate` of 0.05. Read it per market; never assume the two
+  charge alike.
+- `outcomes`/`outcomePrices` are misaligned here too — a market with
+  `outcomes ["No","Yes"]` returned `["0.0400","0.97"]` where 0.04 is the
+  YES. Read `marketSides`, where each side carries its own price.
+- US lists games only ~2 days ahead. A 404 means *not listed yet*, not
+  an error; `fetchUsGameMarket` returns `notListed` so the two cannot be
+  confused.
+- **Reads must use `POLY_PLATFORMS`, never `.eq("platform",
+  "polymarket")`** — that filter excludes `polymarket_us` exactly, which
+  is how 30 successfully fetched US markets produced zero US pairs while
+  every counter looked healthy.
+- Testing from a sandbox: a 403 reading `Host not in allowlist:
+  gateway.polymarket.us` is the local egress proxy, **not** Polymarket
+  and not the code. curl is proxied differently — verify with curl, or
+  against the deployed route.
+
 ## Executable pricing (books + fees)
 
 The arb number is what the trade actually costs, not what the midpoints
