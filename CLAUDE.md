@@ -373,7 +373,7 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 |---|---|---|---|
 | sports (mlb) — global | 33 | 33 | exact join |
 | sports (mlb) — Polymarket US | 30 | 30 | exact join |
-| economics | 6 | 6 | 0.78 |
+| economics | 6 | 6 | 0.83 |
 | crypto | 23 | 14 | 0.88 |
 | politics | 14 | 5 | 0.94 |
 
@@ -405,6 +405,13 @@ globally greedy, so rejecting one candidate re-opens its counterparty to
 everything ranked below it. Round 3's wrong pair did not exist in round
 2's output — it appeared *because* the nominal-GDP pair was fixed. Re-run
 `matchonly&dry=1` and re-read after every gate change.
+
+Econ's floor moved 0.78 -> **0.83**. Every verified-correct pair scores
+0.835 or better, and three audit rounds found nothing but wrong pairs
+below 0.83 — each one a claim shape no gate yet read. It is defence in
+depth behind the gates, **not** a substitute: the worst pairs found here
+scored 0.924 (nominal vs real GDP) and 0.869 (zero rates vs any cut),
+well above any floor worth setting.
 
 Kalshi lists ~9 GDP threshold buckets per quarter where Polymarket lists
 one, and Polymarket's "interest rates" tag (131) is mostly ECB/Bank of

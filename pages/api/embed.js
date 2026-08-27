@@ -1014,7 +1014,16 @@ export default async function handler(req, res) {
   // 0.88 is what the real matches need: the genuine Kalshi/Polymarket US
   // overlap, "above $199,999.99" against "above $200,000 in 2026",
   // scores 0.890 and was missing the cut by a hundredth.
-  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.88 };
+  // Econ's 0.78 was set when the category was four hardcoded Kalshi
+  // series and one pair. Against the full 2,208-market catalogue every
+  // verified-correct pair scores 0.835 or better, and three audit
+  // rounds found nothing but wrong pairs below 0.83 - each one a claim
+  // shape no gate yet read (a bare index level, a regime label, a
+  // number-first bucket). The floor is defence in depth behind the
+  // gates, not a substitute: the worst pairs found here scored 0.924
+  // and 0.869, well above any floor worth setting. Revisit if a
+  // verified match ever turns up under it.
+  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.88, econ: 0.83 };
   const THRESHOLD = parseFloat(
     req.query.threshold || CATEGORY_THRESHOLDS[sport] || "0.78"
   );
