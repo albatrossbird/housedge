@@ -139,6 +139,26 @@ async function verifyKalshiDepth(pairs) {
   return { checked, corrected };
 }
 
+// Age of the stalest timestamp given, in seconds.
+//
+// The header used to read "Updated 3:42 PM" off the browser's fetch
+// clock, which answers a question nobody asked: when the page requested
+// the data, not when the venue was last observed. Those are hours apart
+// in normal operation - refresh-prices.yml asks GitHub for every 15
+// minutes and gets 45 minutes to 3.5 hours on a public repo - so a price
+// seen at noon rendered as if it were current.
+//
+// Returns null if no usable timestamp came back, so a site running ahead
+// of migration 0010 shows no age rather than a fabricated one.
+function ageSeconds(...timestamps) {
+  const now = Date.now();
+  const ages = timestamps
+    .map(t => (t ? Date.parse(t) : NaN))
+    .filter(ms => Number.isFinite(ms))
+    .map(ms => Math.max(0, Math.round((now - ms) / 1000)));
+  return ages.length ? Math.max(...ages) : null;
+}
+
 export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];
@@ -271,15 +291,23 @@ export default async function handler(req, res) {
           similarity: row.similarity,
           category: row.k_sport_tag,
           _gameDate: extractTickerDate(row.kalshi_id),
+          // How old the WORSE leg is. A pair is only as current as its
+          // stalest side, and the reader is comparing the two, so one
+          // fresh leg does not make the comparison fresh. Null when the
+          // migration adding these columns has not run - the client then
+          // says nothing rather than claiming an age it does not have.
+          priceAgeSeconds: ageSeconds(row.k_updated_at, row.p_updated_at),
           kalshi: {
             yes: row.k_yes_price, no: row.k_no_price, volume: row.k_volume || 0, url: kalshiUrl,
             bid: row.k_bid ?? null, ask: row.k_ask ?? null,
             noBid: row.k_no_bid ?? null, noAsk: row.k_no_ask ?? null,
+            ageSeconds: ageSeconds(row.k_updated_at),
           },
           poly: {
             yes: pYes, no: 1 - pYes, volume: row.p_volume || 0, url: polyUrl,
             bid: polyBook.bid ?? null, ask: polyBook.ask ?? null,
             venue: polyVenue,
+            ageSeconds: ageSeconds(row.p_updated_at),
             // A US account can trade polymarket.us and not
             // polymarket.com. The site should say which, rather than
             // leaving the reader to infer it from a hostname.
