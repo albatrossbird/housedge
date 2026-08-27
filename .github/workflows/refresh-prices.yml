@@ -58,9 +58,34 @@ jobs:
 
           K=$(jq -r '.kalshiUpdated // 0' response.json)
           P=$(jq -r '.polyUpdated // 0' response.json)
-          echo "kalshi updated: $K, polymarket updated: $P"
+          KF=$(jq -r '.kalshiFetched // 0' response.json)
+          PF=$(jq -r '.polyFetched // 0' response.json)
+          echo "kalshi updated: $K/$KF fetched, polymarket updated: $P/$PF fetched"
 
-          jq -r '(.errors // [])[:3][] | "::warning::" + .' response.json || true
+          jq -r '(.errors // [])[:3][] | "::error::" + .' response.json || true
+
+          # Per-venue, not combined. This was `$K -eq 0 && $P -eq 0`, so
+          # polyUpdated sat at 0 while kalshiUpdated carried the run --
+          # every global Polymarket price on the site frozen, and a
+          # green tick on every run saying so.
+          if [ "$K" -eq 0 ] && [ "$KF" -gt 0 ]; then
+            echo "::error::fetched $KF Kalshi markets and wrote none"
+            exit 1
+          fi
+          if [ "$P" -eq 0 ] && [ "$PF" -gt 0 ]; then
+            echo "::error::fetched $PF Polymarket markets and wrote none"
+            exit 1
+          fi
+
+          # A throttled Kalshi series returns no markets and used to be
+          # indistinguishable from a series with none open, so its rows
+          # just stopped updating. Named here so the next occurrence is
+          # loud.
+          FAILED=$(jq -r '(.kalshiSeriesFailed // []) | length' response.json)
+          if [ "$FAILED" -gt 0 ]; then
+            jq -r '(.kalshiSeriesFailed // [])[] | "::error::kalshi series failed: " + .' response.json
+            exit 1
+          fi
 
           if [ "$K" -eq 0 ] && [ "$P" -eq 0 ]; then
             echo "::error::refresh updated 0 rows on both venues"

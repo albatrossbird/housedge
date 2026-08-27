@@ -57,6 +57,73 @@ function seriesOf(ticker) {
 
 const CHUNK = 100;
 
+// Every column on `markets` EXCEPT `embedding`.
+//
+// This read was `select=*`, which drags a ~20KB JSON-encoded float
+// array per row through the select AND back through the upsert, since
+// the merged payload is the existing row plus the new prices. A
+// 100-row chunk is then ~2MB in and ~2MB out to rewrite a handful of
+// price fields, and Postgres killed it with 57014 "canceling statement
+// due to statement timeout". The counter was honest about it -
+// polyUpdated was 0 - but the run still returned 200 and every other
+// number looked healthy.
+//
+// Listed explicitly rather than excluded, because the upsert has to
+// carry every NOT NULL column: `markets.platform` is NOT NULL, and
+// PostgREST validates the attempted insert row BEFORE resolving the
+// conflict, so a partial payload fails every row with 23502.
+const REFRESH_COLUMNS = [
+  "id", "platform", "title", "yes_price", "no_price", "volume",
+  "sport_tag", "event_ticker", "side_label", "slug", "outcomes",
+  "outcome_prices", "close_time", "updated_at",
+  "bid", "ask", "no_bid", "no_ask", "bid_size", "ask_size",
+  "fee_multiplier", "fee_schedule", "series_slug",
+].join(",");
+
+// Kalshi rate-limits datacenter IPs, and this job fires one request per
+// series. Twenty-seven at once from a Vercel function draws 429s, and
+// the old code turned every one of them into an empty market list:
+// `r.ok ? r.json() : { markets: [] }` with a bare `.catch(() => [])`.
+// A throttled series then looked exactly like a series with no open
+// markets, so its rows simply never updated - indefinitely, and with
+// every counter in the response still reporting success. That is how
+// ten crypto markets sat 17 hours stale while the job claimed 274 rows
+// refreshed.
+const KALSHI_CONCURRENCY = 4;
+
+async function fetchKalshiSeries(series) {
+  const url = `https://api.elections.kalshi.com/trade-api/v2/markets` +
+    `?status=open&limit=200&series_ticker=${encodeURIComponent(series)}`;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) return { series, markets: (await r.json()).markets || [] };
+      // 429 and 5xx are worth another go; a 404 is a real answer.
+      if (r.status !== 429 && r.status < 500) {
+        return { series, markets: [], error: `HTTP ${r.status}` };
+      }
+      if (attempt === 2) return { series, markets: [], error: `HTTP ${r.status}` };
+    } catch (err) {
+      if (attempt === 2) return { series, markets: [], error: err.message };
+    }
+    await new Promise(res => setTimeout(res, 400 * Math.pow(2, attempt)));
+  }
+  return { series, markets: [], error: "exhausted retries" };
+}
+
+// Bounded concurrency, so the burst that triggers the throttling never
+// happens in the first place.
+async function fetchAllKalshiSeries(seriesList) {
+  const results = [];
+  for (let i = 0; i < seriesList.length; i += KALSHI_CONCURRENCY) {
+    results.push(...await Promise.all(
+      seriesList.slice(i, i + KALSHI_CONCURRENCY).map(fetchKalshiSeries)
+    ));
+  }
+  return results;
+}
+
 // Retries didn't change the outcome, which rules out plain transient
 // flakiness. Bypassing supabase-js with raw REST calls here so failures
 // carry the real underlying cause (err.cause / err.name) instead of the
@@ -109,7 +176,7 @@ async function applyUpdates(updates) {
     const idList = ids.map(id => encodeURIComponent(id)).join(",");
 
     const { data: existing, error: selectError } = await restFetch(
-      `markets?select=*&id=in.(${idList})`
+      `markets?select=${REFRESH_COLUMNS}&id=in.(${idList})`
     );
 
     if (selectError) {
@@ -173,15 +240,20 @@ export default async function handler(req, res) {
     const kalshiSeries = [...series];
 
     // Fetch fresh prices from Kalshi
-    const kalshiResults = await Promise.all(
-      kalshiSeries.map(s =>
-        fetch(`https://api.elections.kalshi.com/trade-api/v2/markets?status=open&limit=200&series_ticker=${s}`)
-          .then(r => r.ok ? r.json() : { markets: [] })
-          .then(d => d.markets || [])
-          .catch(() => [])
-      )
-    );
-    const kalshiMarkets = kalshiResults.flat();
+    const kalshiResults = await fetchAllKalshiSeries(kalshiSeries);
+    const kalshiMarkets = kalshiResults.flatMap(r => r.markets);
+    // Named, not counted. "3 series failed" does not tell you that
+    // every SOL and XRP market on the site is frozen; the series
+    // tickers do.
+    const kalshiSeriesFailed = kalshiResults
+      .filter(r => r.error)
+      .map(r => `${r.series}: ${r.error}`);
+    // A series that returns zero open markets is not necessarily an
+    // error - it may genuinely have none - but it is the shape a
+    // silently throttled fetch takes, so it is worth seeing.
+    const kalshiSeriesEmpty = kalshiResults
+      .filter(r => !r.error && r.markets.length === 0)
+      .map(r => r.series);
 
     const kalshiUpdates = kalshiMarkets
       .filter(m => m.ticker && !m.ticker.startsWith("KXMVE") && m.yes_ask_dollars)
@@ -307,6 +379,8 @@ export default async function handler(req, res) {
       polyUsErrors: usErrors.slice(0, 3),
       polyIdsInDb: polyIds.length,
       kalshiSeriesRefreshed: kalshiSeries.length,
+      kalshiSeriesFailed,
+      kalshiSeriesEmpty,
       pairsSeen: pairRows.length,
       errors: [...kalshiResult.errors, ...polyResult.errors].slice(0, 5),
       warnings: [...new Set([...(kalshiResult.warnings || []), ...(polyResult.warnings || [])])],
