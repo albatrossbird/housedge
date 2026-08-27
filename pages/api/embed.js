@@ -1110,11 +1110,22 @@ export default async function handler(req, res) {
     // beyond the first thousand looked new on every run — re-embedding
     // the entire catalogue each time (thousands of needless Voyage
     // calls) and growing the table without bound.
-    const existing = await fetchAllRows(() => supabase.from("markets").select("id"));
-    const existingIds = new Set((existing || []).map(r => r.id));
+    // "Already embedded", not "already stored". Keying off mere
+    // existence meant a row stored by one run and embedded by none
+    // stayed unembedded forever: the next run saw the id, skipped it,
+    // and the matcher — which reads only rows with an embedding — never
+    // saw it. That is exactly what happened to the 257 Polymarket US
+    // politics and econ markets, which were ingested and then invisible.
+    //
+    // Selecting on embedding IS NOT NULL makes the set mean what the
+    // filter below assumes, and re-embeds anything that lost or never
+    // got one. Sports rows are excluded regardless, so they do not churn.
+    const existing = await fetchAllRows(() => supabase
+      .from("markets").select("id").not("embedding", "is", null));
+    const embeddedIds = new Set((existing || []).map(r => r.id));
     const toEmbed = force
       ? allMarkets.filter(m => !SPORTS_TAGS.has(m.sport_tag))
-      : allMarkets.filter(m => !existingIds.has(m.id) && !SPORTS_TAGS.has(m.sport_tag));
+      : allMarkets.filter(m => !embeddedIds.has(m.id) && !SPORTS_TAGS.has(m.sport_tag));
 
     // Upsert all markets. Deliberately not touching `embedding` here -
     // omitting the key from the payload leaves it untouched for rows
