@@ -1192,12 +1192,23 @@ export default async function handler(req, res) {
       // matching once politics/crypto pushed these tables past 12k rows,
       // which showed up as a category matching in matchonly mode but
       // producing zero pairs in normal mode.
-      const kalshiDb = await fetchAllRows(() => supabase
+      // Scoped to the requested category. Unscoped, a run for one
+      // category matched every category: `sport=econ` returned 325
+      // "econ pairs" that were the aliens, Somaliland and Venezuela
+      // politics pairs. matchNonSportsMarkets only requires
+      // k.sport_tag === p.sport_tag, not that either equals the
+      // category asked for, so every embedded row in the table was in
+      // play. The pairs written were individually correct, which is why
+      // this hid — but newPairs meant nothing per category, the run did
+      // many times the work requested, and pair clearing (which IS
+      // scoped) no longer matched what the run wrote.
+      const scoped = q => (sport === "all" ? q : q.eq("sport_tag", sport));
+      const kalshiDb = await fetchAllRows(() => scoped(supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "kalshi").not("embedding", "is", null));
-      const polyDb = await fetchAllRows(() => supabase
+        .eq("platform", "kalshi").not("embedding", "is", null)));
+      const polyDb = await fetchAllRows(() => scoped(supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .in("platform", POLY_PLATFORMS).not("embedding", "is", null));
+        .in("platform", POLY_PLATFORMS).not("embedding", "is", null)));
 
       // Clear existing pairs for this sport before re-matching. Missing
       // this meant stale pairs (e.g. wrong-threshold matches from
