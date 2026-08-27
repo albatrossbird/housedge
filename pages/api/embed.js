@@ -1074,14 +1074,21 @@ export default async function handler(req, res) {
         // only ids and scores, so the ~20KB-a-row embeddings never cross
         // the wire. Falls back to the JS matcher when migration 0007 has
         // not been run.
-        const db = sportFilter ? await candidatesFromDb(sportFilter) : null;
+        // p_top_k is a RECALL knob, not a performance one: only each
+        // Kalshi row's k nearest Polymarket rows are ever candidates, so
+        // if the gate rejects all k, a valid k+1 is never seen. At k=10
+        // crypto found 21 pairs against the JavaScript matcher's 23.
+        // Exposed so it can be swept against the JS result rather than
+        // guessed at.
+        const topK = Math.min(Math.max(parseInt(req.query.topk || "10", 10) || 10, 1), 100);
+        const db = sportFilter ? await candidatesFromDb(sportFilter, topK) : null;
 
         if (db && db.rows) {
           const byId = new Map();
           for (const m of [...(kalshiDb || []), ...(polyDb || [])]) byId.set(String(m.id), m);
           const result = matchFromDbCandidates(db.rows, byId, THRESHOLD);
           newPairs = result.newPairs;
-          matchDiagnostics = { ...result.matchDiagnostics, dbCandidates: db.rows.length };
+          matchDiagnostics = { ...result.matchDiagnostics, dbCandidates: db.rows.length, topK };
         } else {
           const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
           newPairs = result.newPairs;
