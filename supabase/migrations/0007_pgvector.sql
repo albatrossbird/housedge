@@ -105,7 +105,7 @@ begin
 
   foreach cat in array array['econ', 'crypto', 'politics'] loop
     execute format(
-      'create index if not exists markets_vec_poly_%s on markets using hnsw (embedding_v vector_cosine_ops) where platform = ''polymarket'' and sport_tag = %L and embedding_v is not null',
+      'create index if not exists markets_vec_poly_%s on markets using hnsw (embedding_v vector_cosine_ops) where platform in (''polymarket'', ''polymarket_us'') and sport_tag = %L and embedding_v is not null',
       cat, cat);
   end loop;
 end $$;
@@ -134,7 +134,12 @@ as $$
   cross join lateral (
     select pm.id, pm.embedding_v
     from markets pm
-    where pm.platform = 'polymarket'
+    -- BOTH Polymarket exchanges. Filtering platform = 'polymarket'
+    -- excludes 'polymarket_us' exactly, which is how 30 fetched US
+    -- markets once produced zero pairs with every counter healthy. This
+    -- migration predates that venue; the app-side reads were fixed and
+    -- this would have quietly reintroduced the bug in SQL.
+    where pm.platform in ('polymarket', 'polymarket_us')
       and pm.sport_tag = p_sport_tag
       and pm.embedding_v is not null
     order by pm.embedding_v <=> k.embedding_v
