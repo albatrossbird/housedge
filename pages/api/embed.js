@@ -1081,7 +1081,30 @@ export default async function handler(req, res) {
         // Exposed so it can be swept against the JS result rather than
         // guessed at.
         const topK = Math.min(Math.max(parseInt(req.query.topk || "10", 10) || 10, 1), 100);
-        const db = sportFilter ? await candidatesFromDb(sportFilter, topK) : null;
+
+        // OFF BY DEFAULT — opt in with ?matcher=sql.
+        //
+        // match_candidates is CORRECT: at k=40 it reproduces the JS
+        // matcher's 23 crypto pairs exactly, same pairs and not merely
+        // the same count. It is also far slower, and the reason is this
+        // file's own paging: .range() on an RPC does not paginate a
+        // cached result, it RE-EXECUTES the function for every page. So
+        // crypto costs four full k-NN sweeps and takes 88s where the
+        // JavaScript matcher takes seconds; politics at k=40 would be 72
+        // sweeps and blows past even a 120s statement_timeout, leaving
+        // every run to wait out the timeout before falling back.
+        //
+        // Enabling it would trade a fast correct path for a slow one, so
+        // it stays off until the shape changes: push the score floor into
+        // the RPC so a category's candidates fit in a single page, and
+        // confirm with EXPLAIN that the HNSW indexes are actually being
+        // used — 323 index probes should be milliseconds, not 22s, which
+        // suggests they are not.
+        //
+        // The storage win from 0007 is independent and already banked:
+        // vector(1024) is ~4KB against ~20KB of JSON.
+        const useSql = req.query.matcher === "sql";
+        const db = (sportFilter && useSql) ? await candidatesFromDb(sportFilter, topK) : null;
 
         if (db && db.rows) {
           const byId = new Map();
