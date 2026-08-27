@@ -243,10 +243,30 @@ function cosineSimilarity(a, b) {
 // Returns null when the RPC is unavailable (0007 not run yet), so the
 // caller falls back to the JS path rather than failing.
 async function candidatesFromDb(sportTag, topK = 10) {
-  const { data, error } = await supabase.rpc("match_candidates", {
-    p_sport_tag: sportTag,
-    p_top_k: topK,
-  });
+  // PAGED. A set-returning RPC is capped at 1000 rows by PostgREST just
+  // like a table read, and crypto alone asks for 323 x 10 = 3,230
+  // candidates. Unpaged it returned exactly 1000 and produced 5 pairs
+  // where the JavaScript matcher finds 23 — a silent truncation dressed
+  // up as a faster matcher. econ "agreed" only because its single real
+  // pair happened to land inside the first 1000.
+  //
+  // This is the same server-side cap that has already truncated market
+  // reads, pair clearing and the embedding backfill in this codebase.
+  // Assume every read is capped until it is paged.
+  const rows = [];
+  const PAGE = 1000;
+  let error = null;
+
+  for (let from = 0; from < 200000; from += PAGE) {
+    const res = await supabase
+      .rpc("match_candidates", { p_sport_tag: sportTag, p_top_k: topK })
+      .range(from, from + PAGE - 1);
+
+    if (res.error) { error = res.error; break; }
+    const batch = res.data || [];
+    rows.push(...batch);
+    if (batch.length < PAGE) break;
+  }
 
   if (error) {
     // "function does not exist" is the expected pre-migration state, not
@@ -257,7 +277,7 @@ async function candidatesFromDb(sportTag, topK = 10) {
       ? null
       : { error: msg };
   }
-  return { rows: data || [] };
+  return { rows };
 }
 
 // ── Shared embedding-based matcher for non-sports markets ────────
