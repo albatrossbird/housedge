@@ -755,6 +755,11 @@ async function fetchKalshiMarkets(sportFilter = "all") {
   return attachKalshiSeriesMeta(results.flat());
 }
 
+// Both Polymarket exchanges. Reads that filter platform = 'polymarket'
+// silently exclude polymarket_us, which is how 30 successfully fetched
+// US game markets produced zero US pairs.
+const POLY_PLATFORMS = ["polymarket", POLY_US_PLATFORM];
+
 // ── Fetch Polymarket US game markets ───────────────────────────
 //
 // Games are not returned by any Polymarket US list endpoint — 1,200
@@ -995,8 +1000,8 @@ export default async function handler(req, res) {
       const buildPoly = () => {
         let q = supabase
           .from("markets")
-          .select("id, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
-          .eq("platform", "polymarket");
+          .select("id, platform, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
+          .in("platform", POLY_PLATFORMS);
         if (sportFilter) q = q.eq("sport_tag", sportFilter);
         return q;
       };
@@ -1157,8 +1162,8 @@ export default async function handler(req, res) {
         .from("markets").select("id, title, sport_tag, side_label, close_time")
         .eq("platform", "kalshi").eq("sport_tag", sport));
       const polyDb = await fetchAllRows(() => supabase
-        .from("markets").select("id, title, sport_tag, side_label, outcomes, outcome_prices, slug")
-        .eq("platform", "polymarket").eq("sport_tag", sport));
+        .from("markets").select("id, platform, title, sport_tag, side_label, outcomes, outcome_prices, slug")
+        .in("platform", POLY_PLATFORMS).eq("sport_tag", sport));
 
       // Clear existing pairs for this sport before re-matching
       const kalshiIds = (kalshiDb || []).map(m => m.id);
@@ -1180,7 +1185,7 @@ export default async function handler(req, res) {
         .eq("platform", "kalshi").not("embedding", "is", null));
       const polyDb = await fetchAllRows(() => supabase
         .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "polymarket").not("embedding", "is", null));
+        .in("platform", POLY_PLATFORMS).not("embedding", "is", null));
 
       // Clear existing pairs for this sport before re-matching. Missing
       // this meant stale pairs (e.g. wrong-threshold matches from
