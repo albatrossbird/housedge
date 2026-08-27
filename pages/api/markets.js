@@ -150,12 +150,25 @@ async function verifyKalshiDepth(pairs) {
 //
 // Returns null if no usable timestamp came back, so a site running ahead
 // of migration 0010 shows no age rather than a fabricated one.
-function ageSeconds(...timestamps) {
-  const now = Date.now();
-  const ages = timestamps
-    .map(t => (t ? Date.parse(t) : NaN))
-    .filter(ms => Number.isFinite(ms))
-    .map(ms => Math.max(0, Math.round((now - ms) / 1000)));
+function ageSeconds(...stamps) {
+  const nowSec = Date.now() / 1000;
+  const ages = stamps
+    .map(t => {
+      if (t == null || t === "") return NaN;
+      // markets.updated_at is a bigint of epoch SECONDS, written as
+      // Math.floor(Date.now() / 1000) by every write path. Date.parse
+      // on that returns NaN, so the whole feature reported null while
+      // looking like it worked. Milliseconds and ISO strings are
+      // handled too: this value is read from a hand-run migration and
+      // one wrong guess about its units is a silently wrong age on the
+      // number a reader acts on.
+      const n = Number(t);
+      if (Number.isFinite(n)) return n > 1e11 ? n / 1000 : n;
+      const parsed = Date.parse(t);
+      return Number.isFinite(parsed) ? parsed / 1000 : NaN;
+    })
+    .filter(sec => Number.isFinite(sec) && sec > 0)
+    .map(sec => Math.max(0, Math.round(nowSec - sec)));
   return ages.length ? Math.max(...ages) : null;
 }
 

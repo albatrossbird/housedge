@@ -14,6 +14,13 @@
 -- price. Price age was the one number presented as fresher than it is,
 -- and it is the number a reader would act on.
 --
+-- markets.updated_at is a BIGINT of epoch SECONDS
+-- (Math.floor(Date.now() / 1000) in every write path), not a
+-- timestamptz. Declaring it as one fails at create time with 42P13,
+-- "returns bigint instead of timestamp with time zone at column 20" --
+-- which is the good outcome, since the alternative is a silent type
+-- coercion. prune.js already reads it as Number(m.updated_at).
+--
 -- Idempotent.
 
 drop function if exists get_pairs(text[]);
@@ -25,11 +32,11 @@ returns table (
   k_sport_tag text, k_event_ticker text, k_side_label text, k_close_time text,
   k_bid numeric, k_ask numeric, k_no_bid numeric, k_no_ask numeric,
   k_fee_multiplier numeric, k_series_slug text,
-  k_bid_size numeric, k_ask_size numeric, k_updated_at timestamptz,
+  k_bid_size numeric, k_ask_size numeric, k_updated_at bigint,
   p_title text, p_yes_price float, p_no_price float, p_volume float,
   p_slug text, p_side_label text, p_outcomes text, p_outcome_prices text,
   p_platform text, p_bid_size numeric, p_ask_size numeric,
-  p_bid numeric, p_ask numeric, p_fee_schedule jsonb, p_updated_at timestamptz
+  p_bid numeric, p_ask numeric, p_fee_schedule jsonb, p_updated_at bigint
 ) as $$
   select p.kalshi_id, p.polymarket_id, p.similarity,
     k.title, k.yes_price, k.no_price, k.volume, k.sport_tag, k.event_ticker,
