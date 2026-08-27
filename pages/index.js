@@ -18,6 +18,26 @@ const fmt = (v) =>
   v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` :
   v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K` : `$${v}`;
 
+// How stale a price is, in words. Deliberately coarse: the underlying
+// number is only accurate to the last cron run, so "2h ago" is honest
+// where "2h 14m ago" implies a precision the data does not have.
+function ageLabel(seconds) {
+  if (seconds == null) return null;
+  if (seconds < 90) return "just now";
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(seconds / 3600);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
+// Past this the price is old enough that a reader should be told
+// loudly rather than in grey 10px text. Sized to the observed cron
+// reality: refresh-prices.yml asks for every 15 minutes and GitHub
+// delivers 45 minutes to 3.5 hours on a public repo, so 45 minutes is
+// normal and two hours means a run was actually missed.
+const STALE_SECONDS = 2 * 3600;
+
 function spread(m) { return Math.abs(m.kalshi.yes - m.poly.yes); }
 function bestYes(m) { return m.kalshi.yes >= m.poly.yes ? "kalshi" : "poly"; }
 // The API now computes this from real books with both venues' taker
@@ -156,6 +176,22 @@ function MarketCard({ market }) {
               {Math.round(market.similarity * 100)}% match
             </span>
           )}
+          {/* Sits next to the arb badge on purpose. A flagged edge on a
+              three-hour-old book is the one combination that costs a
+              reader money, and it looked exactly like a fresh one. */}
+          {market.priceAgeSeconds != null && (
+            <span
+              title="When these two books were last read. Prices come from a scheduled job, not a live feed."
+              style={{
+                fontSize: 10,
+                letterSpacing: "0.04em",
+                fontWeight: market.priceAgeSeconds > STALE_SECONDS ? 700 : 400,
+                color: market.priceAgeSeconds > STALE_SECONDS ? T.arb : T.muted,
+              }}
+            >
+              {market.priceAgeSeconds > STALE_SECONDS && "⏳ "}{ageLabel(market.priceAgeSeconds)}
+            </span>
+          )}
         </div>
         <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: T.text, lineHeight: 1.4 }}>{market.title}</p>
         {market.polyTitle && (
@@ -215,7 +251,7 @@ export default function HouseEdge() {
   const [markets, setMarkets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [fetchedAt, setFetchedAt] = useState(null);
   const [unsupported, setUnsupported] = useState(false);
   const [needsEmbed, setNeedsEmbed] = useState(false);
 
@@ -237,7 +273,13 @@ export default function HouseEdge() {
       const { pairs, needsEmbed: ne } = await fetchMarkets(categoryKey);
       setMarkets(pairs || []);
       setNeedsEmbed(!!ne);
-      setLastUpdated(new Date());
+      // Deliberately NOT `new Date()`. That is when this browser asked,
+      // which is not a fact about the prices on screen and reads as
+      // though it were. The age comes from the data itself, and the
+      // stalest leg in the category is the one worth reporting: a reader
+      // scanning the list should see the worst case, not an average that
+      // hides it.
+      setFetchedAt(new Date());
     } catch (err) {
       setError(err.message);
     } finally {
@@ -275,6 +317,13 @@ export default function HouseEdge() {
   });
 
   const arbCount = visible.filter(arbAlert).length;
+  // The stalest leg among what is actually on screen. Reported rather
+  // than an average, because the reader is about to act on the worst
+  // one, not the typical one.
+  const oldestAge = visible.reduce(
+    (worst, m) => (m.priceAgeSeconds != null && (worst == null || m.priceAgeSeconds > worst) ? m.priceAgeSeconds : worst),
+    null
+  );
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -288,11 +337,27 @@ export default function HouseEdge() {
             <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>Kalshi vs Polymarket</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {lastUpdated && (
-              <span style={{ fontSize: 10, color: T.muted }}>
-                Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            {oldestAge != null ? (
+              <span
+                title={`Stalest leg on this tab. Prices come from a scheduled job, not live feeds.${
+                  fetchedAt ? ` Page last checked ${fetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` : ""
+                }`}
+                style={{
+                  fontSize: 10,
+                  fontWeight: oldestAge > STALE_SECONDS ? 700 : 500,
+                  color: oldestAge > STALE_SECONDS ? T.arb : T.muted,
+                  background: oldestAge > STALE_SECONDS ? `${T.arb}18` : "transparent",
+                  padding: oldestAge > STALE_SECONDS ? "3px 8px" : 0,
+                  borderRadius: 99,
+                }}
+              >
+                Prices {ageLabel(oldestAge)}
               </span>
-            )}
+            ) : fetchedAt ? (
+              <span style={{ fontSize: 10, color: T.muted }}>
+                Checked {fetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            ) : null}
             {arbCount > 0 && (
               <span style={{ background: `${T.arb}18`, color: T.arb, fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 99 }}>
                 ⚡ {arbCount} arb {arbCount === 1 ? "signal" : "signals"}
