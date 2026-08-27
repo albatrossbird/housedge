@@ -118,6 +118,8 @@ The fix is embeddings for candidate generation + a **hard signature gate** befor
 - `extractUsdStrike(title)` → `{unit: "usd", op, value}`. Crypto is the same bucket problem with `$` where econ has `%`: "XRP above $6.50" vs "XRP reach $6.00" scored 0.917. Handles `$100k`/`$129,999.99` notation, normalises Kalshi's cent-below convention (`above $99,999.99` **is** the $100,000 market), and reads direction from both vocabularies — `above/reach/hit` vs `below/dip to/drop to` — because "XRP above $2.00" and "XRP dip to $2.00" are the same strike and opposite bets at 0.919. Strikes compare **exactly, in cents**: `NUMERIC_EPS` is an absolute margin sized for percentages and called `$0.02` and `$0.06` the same market. `"hit $50,000 before $100,000"` is a race between two strikes, not a threshold, and gets its own unit so nothing can pair with it.
 - `extractDeadline(title)` / `deadlinesCompatible(a, b)` — the numeric gate is inert on politics and crypto titles that carry no number at all, so deadlines are what separate "Tempo launch a token **before Jan 1, 2027**" from "**by December 31, 2027**" (0.962, a full year apart). Tolerance is 3 days, small but non-zero: "before Jan 1, 2027", "before 2027" and "end of 2026" name the same boundary while parsing a day apart. `by <year>` reads as the *start* of that year (Kalshi's own `side_label` confirms it — "by 2027" is labelled "Before 2027"); `in <year>` reads as the whole year.
 - `hasUnresolvedDeadline(title)` — Polymarket routinely drops the year ("by June 30?"). A stated cutoff we can see but cannot resolve is **not** a missing signature, so it is rejected against a side that does state its year. Two vague titles still fall through.
+- `strikePresenceCompatible(a, b, titleA, titleB)` — a market that names a strike and one that does not are not the same claim. This is what finally killed the "positive return in 2026" family, which carries no threshold, deadline or unit and so passed every other gate. **The guard matters more than the rule**: absence of a *parsed* claim is not absence of a claim, so it only rejects when the bare title states no value at all (years excluded). A first version of this returned the side already known to be null and therefore always rejected — it cost a labeled case, and only the eval caught it.
+- `rankingCompatible(a, b)` — a superlative on exactly one side (best, worst, highest, lowest, top, most, all-time high). "Positive return in 2026" against "best performance in 2026" scored 0.896: one asks whether an asset clears zero, the other whether it beats every other. Neither states a strike, so claim asymmetry cannot separate them.
 - `scalarSignaturesCompatible(a, b, sportTag)` combines them. **Reject only when both sides have an extractable signature and it disagrees** — anything unrecognized falls through to embedding score alone, so the extractors don't need to understand every phrasing to be useful. The deadline rules above are the deliberate exception: absence of a *resolvable* year, where a year is clearly being stated, is itself information.
 
 Matching is **globally greedy**: build all gate-passing `(kalshi, poly, score)` candidates, sort by score descending, then assign. Assigning per-Kalshi-row in DB order (the old way) meant whichever row was processed first claimed a contested Polymarket market, not the best-scoring one.
@@ -311,9 +313,10 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Stored pairs | Shown on site | Floor |
 |---|---|---|---|
-| sports (mlb) | 40 | 40 | exact join |
+| sports (mlb) — global | 33 | 33 | exact join |
+| sports (mlb) — Polymarket US | 30 | 30 | exact join |
 | economics | 1 | 1 | 0.78 |
-| crypto | 17 | 11 | 0.90 |
+| crypto | 23 | 14 | 0.88 |
 | politics | 14 | 5 | 0.94 |
 
 "Shown" is lower than "stored" because `markets.js` drops prices outside
@@ -322,7 +325,14 @@ Venezuela set, pardon markets) trading under a nickel.
 
 Economics: **1 verified-correct pair** out of 163 Kalshi econ markets. That is the genuine overlap, not a bug — the full uncapped `topScores` list was audited and every other Kalshi CPI/Fed-rate/GDP row's best candidate is a legitimately different market (wrong threshold, wrong country, or hike-count-vs-rate-level). Kalshi lists ~9 GDP threshold buckets per quarter where Polymarket lists one. Adding Polymarket's "interest rates" tag (131) produced 16 candidates, 15 of them ECB/Bank of England — all correctly filtered out.
 
-Crypto's floor sits at 0.90, not 0.94, because Kalshi phrases every
+Crypto's floor is 0.88. It sat at 0.90 only because the "positive
+return" family had no gate; with `strikePresenceCompatible` and
+`rankingCompatible` rejecting that family on claim shape rather than on
+score, the floor moved to what real matches need — the genuine
+Kalshi/Polymarket US overlap ("above $199,999.99" vs "above $200,000 in
+2026") scores **0.890** and was missing the cut by a hundredth.
+
+The historical reason it could not be 0.94: Kalshi phrases every
 strike as "<COIN> trimmed mean be above $X" against Polymarket's "Will
 <Coin> reach $X" — real matches land at 0.91–0.93, and 0.94 admitted
 nothing at all. The strike and deadline gates do the rejecting instead
@@ -447,7 +457,7 @@ $$ LANGUAGE sql SECURITY DEFINER;
 2. **Polymarket publishes no depth.** Gamma exposes aggregate liquidity but no size at the touch, so any leg on that venue reports `depthKnown: false` and `maxContracts` is an upper bound set by the Kalshi leg alone. Closing this means the CLOB API (`clob.polymarket.com/book`), which is a per-market call on a different host.
 3. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
 5. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
-6. **No gate for "positive return"-style claims** — a Kalshi multi-outcome market like "Which of these cryptocurrencies will have a positive return in 2026?" has no threshold, no deadline of its own, and no unit, so every gate falls through and it pairs with any strike market on the same coin. This is the only thing holding crypto's floor at 0.90 instead of ~0.88.
+6. **Kalshi and Polymarket US barely overlap outside sports.** Not a bug — a measured fact, and the reason ingesting 307 US non-sports markets produced one pair. Politics matches **zero** even at threshold 0.80: Kalshi lists departures, visits and pardons; Polymarket US lists election winners. Crypto matches exactly one (Bitcoin $200k), and `markets.js` hides it as a long shot under the 0.05 price band. Re-test before assuming this changed.
 7. Polymarket's `outcomes`/`outcomePrices` alignment is still unverified for non-sports markets. Sports no longer depends on it (the index comes from the identifiers), but crypto/politics/econ still read `outcomePrices[0]`.
 
 **Fixed since the last revision of this file:** automated refresh (both
