@@ -291,6 +291,12 @@ export default async function handler(req, res) {
     //
     // Numeric-only: Gamma's ?id= rejects a non-integer with a 422 that
     // fails the whole batch, and stored ids are text.
+    // Asked-for vs came-back, per batch. Not an error on its own -
+    // Gamma omits closed markets by design, and paired polymarket_us
+    // ids are not Gamma ids at all (those refresh through
+    // fetchUsBbo) - but a shortfall is what a silent truncation looks
+    // like, so it has to be visible rather than inferred from a total.
+    const polyShortfall = [];
     const polyIds = [...new Set(
       pairRows.map(r => String(r.polymarket_id)).filter(id => /^\d+$/.test(id))
     )];
@@ -303,11 +309,28 @@ export default async function handler(req, res) {
       // Gamma API needs `id` repeated per value — a comma-joined list is
       // silently rejected, same as the tag=/label=/search= params.
       const idsParam = batch.map(id => `id=${encodeURIComponent(id)}`).join("&");
+      // `limit` is REQUIRED, and its absence is not an error.
+      //
+      // Gamma applies a default limit of 20 to /markets no matter how
+      // many `id=` values you pass, and returns the truncated list with
+      // a 200. Asking for 50 ids got 20 back; two batches got 40, which
+      // is exactly the polyFetched count this job reported while 34 of
+      // 35 global Polymarket sports legs sat five hours stale. The same
+      // 50 ids with &limit=100 return all of them.
+      //
+      // This is the third variant of one bug in this file: a request
+      // that quietly returns less than it was asked for, and a counter
+      // that reports the short answer as a whole one.
       try {
-        const r = await fetch(`https://gamma-api.polymarket.com/markets?${idsParam}`);
+        const r = await fetch(
+          `https://gamma-api.polymarket.com/markets?${idsParam}&limit=${batch.length}`
+        );
         if (r.ok) {
           const data = await r.json();
           const markets = Array.isArray(data) ? data : data.markets || [];
+          if (markets.length < batch.length) {
+            polyShortfall.push(`asked ${batch.length}, got ${markets.length}`);
+          }
           for (const m of markets) {
             try {
               const prices = JSON.parse(m.outcomePrices || "[]");
@@ -379,6 +402,7 @@ export default async function handler(req, res) {
       polyUsErrors: usErrors.slice(0, 3),
       polyIdsInDb: polyIds.length,
       kalshiSeriesRefreshed: kalshiSeries.length,
+      polyShortfall,
       kalshiSeriesFailed,
       kalshiSeriesEmpty,
       pairsSeen: pairRows.length,
