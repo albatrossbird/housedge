@@ -118,9 +118,38 @@ The fix is embeddings for candidate generation + a **hard signature gate** befor
 - `extractUsdStrike(title)` → `{unit: "usd", op, value}`. Crypto is the same bucket problem with `$` where econ has `%`: "XRP above $6.50" vs "XRP reach $6.00" scored 0.917. Handles `$100k`/`$129,999.99` notation, normalises Kalshi's cent-below convention (`above $99,999.99` **is** the $100,000 market), and reads direction from both vocabularies — `above/reach/hit` vs `below/dip to/drop to` — because "XRP above $2.00" and "XRP dip to $2.00" are the same strike and opposite bets at 0.919. Strikes compare **exactly, in cents**: `NUMERIC_EPS` is an absolute margin sized for percentages and called `$0.02` and `$0.06` the same market. `"hit $50,000 before $100,000"` is a race between two strikes, not a threshold, and gets its own unit so nothing can pair with it.
 - `extractDeadline(title)` / `deadlinesCompatible(a, b)` — the numeric gate is inert on politics and crypto titles that carry no number at all, so deadlines are what separate "Tempo launch a token **before Jan 1, 2027**" from "**by December 31, 2027**" (0.962, a full year apart). Tolerance is 3 days, small but non-zero: "before Jan 1, 2027", "before 2027" and "end of 2026" name the same boundary while parsing a day apart. `by <year>` reads as the *start* of that year (Kalshi's own `side_label` confirms it — "by 2027" is labelled "Before 2027"); `in <year>` reads as the whole year.
 - `hasUnresolvedDeadline(title)` — Polymarket routinely drops the year ("by June 30?"). A stated cutoff we can see but cannot resolve is **not** a missing signature, so it is rejected against a side that does state its year. Two vague titles still fall through.
-- `strikePresenceCompatible(a, b, titleA, titleB)` — a market that names a strike and one that does not are not the same claim. This is what finally killed the "positive return in 2026" family, which carries no threshold, deadline or unit and so passed every other gate. **The guard matters more than the rule**: absence of a *parsed* claim is not absence of a claim, so it only rejects when the bare title states no value at all (years excluded). A first version of this returned the side already known to be null and therefore always rejected — it cost a labeled case, and only the eval caught it.
+- `strikePresenceCompatible(a, b, titleA, titleB)` — a market that names a strike and one that does not are not the same claim. This is what finally killed the "positive return in 2026" family, which carries no threshold, deadline or unit and so passed every other gate. **The guard matters more than the rule**: absence of a *parsed* claim is not absence of a claim, so it only rejects when the bare title states no value at all (years, **quarters and calendar dates** excluded — stripping only years left "Q3" and "December 31" reading as stated thresholds, which waved six GDP thresholds through against one strikeless "US GDP Growth in Q3 2026?"). A first version of this returned the side already known to be null and therefore always rejected — it cost a labeled case, and only the eval caught it.
 - `rankingCompatible(a, b)` — a superlative on exactly one side (best, worst, highest, lowest, top, most, all-time high). "Positive return in 2026" against "best performance in 2026" scored 0.896: one asks whether an asset clears zero, the other whether it beats every other. Neither states a strike, so claim asymmetry cannot separate them.
-- `scalarSignaturesCompatible(a, b, sportTag)` combines them. **Reject only when both sides have an extractable signature and it disagrees** — anything unrecognized falls through to embedding score alone, so the extractors don't need to understand every phrasing to be useful. The deadline rules above are the deliberate exception: absence of a *resolvable* year, where a year is clearly being stated, is itself information.
+- - `econMetrics(title)` / metric sets — what the market actually
+  measures (gdp, gdp_nominal, inflation, fed_rate, regime,
+  unemployment, recession, net_worth, debt, equities, tariff). Every
+  other gate reads a number, a period or a deadline, so two econ
+  markets stating none of those are separated by nothing:
+  "State of the economy — Soft landing" against "Fed Rate Hike in
+  2026?" scored 0.794. Compared as sets, rejecting only on
+  **disjointness**, so a title naming both metrics or naming none
+  blocks nothing. `gdp_nominal` drops the generic `gdp` tag, because
+  "current-dollar gross domestic product" matches both patterns and
+  the sets would otherwise still intersect — nominal ran ~2 points
+  above real through 2026, which is exactly the gap that renders as
+  free money.
+- **Direction on counted changes.** "Exactly 1 cut" and "1 Fed rate
+  hike" share unit `count` and value 1 and are opposite bets. `dir` is
+  a separate field, not part of the unit, so a title whose direction
+  cannot be read still compares on unit and value.
+- **Kalshi's bucket labels put the number first** — `6.1% or Above`,
+  `0.0% or Below`, `2.6% to 3.0%`. Every comparator-first pattern
+  missed them and they parsed to nothing at all. Ranges compare with
+  one tick of slack on the **low** edge only: Kalshi labels a bucket by
+  its first included value where Polymarket writes the boundary, so
+  1.1–1.5 and 1.0–1.5 are the same bucket while 2.6–3.0 and 2.0–2.5
+  are not.
+- **Thresholds spelled out in words** — "hit zero", "negative growth".
+  Teaching the extractor one side of such a pair without the other
+  turns a correct match into an asymmetry rejection, which is how
+  `0.0% or Below` ↔ `Negative GDP growth` nearly died.
+
+`scalarSignaturesCompatible(a, b, sportTag)` combines them. **Reject only when both sides have an extractable signature and it disagrees** — anything unrecognized falls through to embedding score alone, so the extractors don't need to understand every phrasing to be useful. The deadline rules above are the deliberate exception: absence of a *resolvable* year, where a year is clearly being stated, is itself information.
 
 Matching is **globally greedy**: build all gate-passing `(kalshi, poly, score)` candidates, sort by score descending, then assign. Assigning per-Kalshi-row in DB order (the old way) meant whichever row was processed first claimed a contested Polymarket market, not the best-scoring one.
 
@@ -295,6 +324,35 @@ old  min(0.53, 0.545) + min(0.47, 0.455) = 0.9850  -> flagged ARB
 new  0.5388 + 0.4724                     = 1.0112  -> -1.1c, not a trade
 ```
 
+### What the card must admit
+
+The arb number is only as good as what the reader knows about it, so
+every uncertainty in the calculation has a surface in the UI. This is
+not decoration — each one exists because its absence misled someone.
+
+- **Price age** (`0010`, `priceAgeSeconds`). The header used to read
+  "Updated 3:42 PM" off the **browser's fetch clock**, which is not a
+  fact about the prices on screen: `refresh-prices.yml` asks GitHub for
+  every 15 minutes and gets 45 minutes to 3.5 hours, so a book read at
+  noon rendered as current. A pair reports the **staler** of its two
+  legs — it is only as current as its worse side — the header reports
+  the stalest leg on the tab, and both go amber past two hours, which
+  is long enough that a run was actually missed rather than merely
+  late. Cards carry their own age next to the arb badge: a flagged edge
+  on a three-hour-old book is the one combination that costs money, and
+  it looked exactly like a fresh one.
+- **`depthKnown: false`** and the `≤` prefix — Polymarket publishes no
+  size, so `maxContracts` is an upper bound set by the Kalshi leg.
+- **`arb: null`** renders as "no executable price", never as zero edge.
+- **`hidden`** — pairs stored but not shown (long shots outside
+  0.05–0.95, settled fixtures, missing price). Economics is 6 pairs out
+  of 2,208 Kalshi markets and that is the product working, but "we
+  found almost nothing" and "we found things and hid them" look
+  identical from outside. It was counted all along and reported only
+  behind `?debug=1`, where no reader would see it.
+- The legend says prices come from a scheduled read, not that the page
+  "auto-refreshes every 60s" — true of the page, not of the numbers.
+
 `supabase/migrations/0004` adds `bid`/`ask`/`no_bid`/`no_ask`,
 `bid_size`/`ask_size`, `fee_multiplier`/`fee_schedule`, and rebuilds
 `get_pairs`. **`no_bid`/`no_ask` are Kalshi-only on purpose**: a Kalshi
@@ -315,7 +373,7 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 |---|---|---|---|
 | sports (mlb) — global | 33 | 33 | exact join |
 | sports (mlb) — Polymarket US | 30 | 30 | exact join |
-| economics | 1 | 1 | 0.78 |
+| economics | 6 | 6 | 0.78 |
 | crypto | 23 | 14 | 0.88 |
 | politics | 14 | 5 | 0.94 |
 
@@ -323,7 +381,34 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 0.05–0.95, and the extra politics pairs are long shots (the seven-person
 Venezuela set, pardon markets) trading under a nickel.
 
-Economics: **1 verified-correct pair** out of 163 Kalshi econ markets. That is the genuine overlap, not a bug — the full uncapped `topScores` list was audited and every other Kalshi CPI/Fed-rate/GDP row's best candidate is a legitimately different market (wrong threshold, wrong country, or hike-count-vs-rate-level). Kalshi lists ~9 GDP threshold buckets per quarter where Polymarket lists one. Adding Polymarket's "interest rates" tag (131) produced 16 candidates, 15 of them ECB/Bank of England — all correctly filtered out.
+Economics: **6 verified-correct pairs** out of 2,208 Kalshi econ markets
+— five annual/quarterly real-GDP thresholds and the negative-growth
+market. Each was read by hand against Kalshi's `rules_primary`, not its
+title.
+
+It was 1 pair out of 163 until `KALSHI_CATEGORIES` gained `econ` and
+started fetching the whole Economics category instead of four hardcoded
+series. **"No overlap" was a claim about a truncated input, and it was
+wrong** — the same mistake as the `.us` listing sweep. Before concluding
+a venue does not list something, check what the fetch actually asked
+for.
+
+Widening it produced 26 pairs, of which roughly 6 were right, and
+getting from there to 6 correct took three audit rounds. The gates that
+came out of it: direction on counted changes, calendar coordinates
+excluded from `hasUnparsedValue`, bare `X% to Y%` spans, number-first
+bucket labels (`6.1% or Above`), spelled-out thresholds (`hit zero`,
+`negative growth`), nominal-vs-real GDP, and econ metric sets.
+
+**An audit is only valid against the run it was read from.** Matching is
+globally greedy, so rejecting one candidate re-opens its counterparty to
+everything ranked below it. Round 3's wrong pair did not exist in round
+2's output — it appeared *because* the nominal-GDP pair was fixed. Re-run
+`matchonly&dry=1` and re-read after every gate change.
+
+Kalshi lists ~9 GDP threshold buckets per quarter where Polymarket lists
+one, and Polymarket's "interest rates" tag (131) is mostly ECB/Bank of
+England — both correctly filtered.
 
 Crypto's floor is 0.88. It sat at 0.90 only because the "positive
 return" family had no gate; with `strikePresenceCompatible` and
