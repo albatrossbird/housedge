@@ -208,6 +208,10 @@ function Skeleton() {
 export default function HouseEdge() {
   const [activeCategory, setActiveCategory] = useState("sports");
   const [sort, setSort] = useState("trending");
+  // Which Polymarket to compare against. They are different exchanges
+  // and a US account can only trade the .us one, so this is not cosmetic
+  // — it decides whether a card in front of you is actionable.
+  const [venue, setVenue] = useState("all");
   const [markets, setMarkets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -247,7 +251,15 @@ export default function HouseEdge() {
     return () => clearInterval(interval);
   }, [activeCategory, loadMarkets]);
 
-  const sorted = [...markets].sort((a, b) => {
+  const venueOf = m => (m.poly.usTradable ? "us" : "global");
+  const venueCounts = markets.reduce((acc, m) => {
+    acc[venueOf(m)] = (acc[venueOf(m)] || 0) + 1;
+    return acc;
+  }, {});
+
+  const visible = venue === "all" ? markets : markets.filter(m => venueOf(m) === venue);
+
+  const sorted = [...visible].sort((a, b) => {
     // The executable ranking, and the one that should be reachable
     // first: mid gap sorts by an appearance, this sorts by what the
     // trade costs. Unpriceable pairs sink rather than sorting as zero.
@@ -262,7 +274,7 @@ export default function HouseEdge() {
     return (b.trending ? 1 : 0) - (a.trending ? 1 : 0);
   });
 
-  const arbCount = markets.filter(arbAlert).length;
+  const arbCount = visible.filter(arbAlert).length;
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -324,6 +336,19 @@ export default function HouseEdge() {
             <option value="volume">Sort: Most volume</option>
             <option value="similarity">Sort: Best match</option>
           </select>
+          {/* Only worth showing when both venues actually have pairs in
+              this category — a filter offering one option is noise. */}
+          {venueCounts.us > 0 && venueCounts.global > 0 && (
+            <select
+              value={venue}
+              onChange={e => setVenue(e.target.value)}
+              style={{ padding: "10px 14px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.text, background: T.surface, cursor: "pointer", outline: "none" }}
+            >
+              <option value="all">Both Polymarkets ({markets.length})</option>
+              <option value="us">Polymarket US only ({venueCounts.us})</option>
+              <option value="global">Polymarket global only ({venueCounts.global})</option>
+            </select>
+          )}
           <button
             onClick={() => loadMarkets(activeCategory)}
             style={{ padding: "10px 16px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.muted, background: T.surface, cursor: "pointer" }}
@@ -333,13 +358,16 @@ export default function HouseEdge() {
         </div>
 
         {/* Stats bar */}
-        {!loading && markets.length > 0 && (
+        {/* Stats describe what is on screen. Leaving them on the full
+            set would report a spread and a volume for pairs the venue
+            filter is hiding. */}
+        {!loading && visible.length > 0 && (
           <div style={{ display: "flex", gap: 24, marginBottom: 24, padding: "14px 18px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, flexWrap: "wrap" }}>
             {[
-              { label: "Markets matched", value: markets.length },
+              { label: "Markets matched", value: visible.length },
               { label: "Arb signals", value: arbCount, color: T.arb },
-              { label: "Avg spread", value: markets.length ? `${Math.round(markets.reduce((s, m) => s + spread(m), 0) / markets.length * 100)}pt` : "—" },
-              { label: "Total volume", value: fmt(markets.reduce((s, m) => s + m.kalshi.volume + m.poly.volume, 0)) },
+              { label: "Avg spread", value: visible.length ? `${Math.round(visible.reduce((s, m) => s + spread(m), 0) / visible.length * 100)}pt` : "—" },
+              { label: "Total volume", value: fmt(visible.reduce((s, m) => s + m.kalshi.volume + m.poly.volume, 0)) },
             ].map(({ label, value, color }) => (
               <div key={label}>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 2, letterSpacing: "0.04em" }}>{label}</div>
