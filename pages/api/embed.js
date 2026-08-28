@@ -1069,20 +1069,7 @@ export default async function handler(req, res) {
       };
       const polyDb = await fetchAllRows(buildPoly, { errors: readErrors });
 
-      // Clear existing pairs for this sport
       let clearResult = { cleared: 0, errors: [] };
-      if (dryRun) {
-        // skip: dry runs must leave the pairs table exactly as they found it
-      } else if (sportFilter) {
-        const kalshiIds = (kalshiDb || []).map(m => m.id);
-        if (kalshiIds.length > 0) {
-          clearResult = await clearPairsForKalshiIds(kalshiIds);
-        }
-      } else if (force) {
-        const { error } = await supabase.from("pairs").delete().neq("id", 0);
-        if (error) clearResult.errors.push(`clearPairs(all): ${error.message}`);
-      }
-
       let newPairs = [];
       let matchDiagnostics = null;
 
@@ -1142,6 +1129,22 @@ export default async function handler(req, res) {
             ...(db && db.error ? { rpcError: db.error } : {}),
           };
         }
+      }
+
+      // Clear immediately before the write, never before the match.
+      // Matching politics takes over two minutes; clearing first left
+      // the live tab with no pairs for that whole window, and
+      // permanently if the run died in it.
+      if (dryRun) {
+        // skip: dry runs must leave the pairs table exactly as they found it
+      } else if (sportFilter) {
+        const kalshiIds = (kalshiDb || []).map(m => m.id);
+        if (kalshiIds.length > 0) {
+          clearResult = await clearPairsForKalshiIds(kalshiIds);
+        }
+      } else if (force) {
+        const { error } = await supabase.from("pairs").delete().neq("id", 0);
+        if (error) clearResult.errors.push(`clearPairs(all): ${error.message}`);
       }
 
       const pairsUpsert = (newPairs.length > 0 && !dryRun)
@@ -1307,15 +1310,16 @@ export default async function handler(req, res) {
         .from("markets").select("id, platform, title, sport_tag, side_label, outcomes, outcome_prices, slug")
         .in("platform", POLY_PLATFORMS).eq("sport_tag", sport));
 
-      // Clear existing pairs for this sport before re-matching
+      // MATCH FIRST, then clear. See the note in the non-sports branch:
+      // clearing before the expensive stage is what empties a live tab.
+      const sportResult = matchSportsMarkets(kalshiDb || [], polyDb || [], sport);
+      newPairs = sportResult.newPairs;
+      matchDiagnostics = sportResult.matchDiagnostics;
+
       const kalshiIds = (kalshiDb || []).map(m => m.id);
       if (kalshiIds.length > 0) {
         clearErrors.push(...(await clearPairsForKalshiIds(kalshiIds)).errors);
       }
-
-      const sportResult = matchSportsMarkets(kalshiDb || [], polyDb || [], sport);
-      newPairs = sportResult.newPairs;
-      matchDiagnostics = sportResult.matchDiagnostics;
     } else {
       // Embedding matching for non-sports
       // Explicit limits: the implicit 1000-row cap silently truncated
@@ -1340,23 +1344,33 @@ export default async function handler(req, res) {
         .from("markets").select("id, title, sport_tag, embedding")
         .in("platform", POLY_PLATFORMS).not("embedding", "is", null)));
 
-      // Clear existing pairs for this sport before re-matching. Missing
-      // this meant stale pairs (e.g. wrong-threshold matches from
-      // before the numeric-signature gate existed) never got replaced -
-      // upsert only overwrites a row when both kalshi_id AND
-      // polymarket_id match, so a kalshi row matching a *different*
-      // Polymarket market this run just adds a second row instead of
-      // replacing the old wrong one.
+      // MATCH FIRST, then clear.
+      //
+      // Clearing first left the category with NO pairs for the whole
+      // duration of matching, which for politics is over two minutes -
+      // and if the run dies in that window, permanently. That is not
+      // hypothetical: a politics run killed mid-match left the live
+      // Politics tab showing nothing at all, and Vercel's 300s ceiling
+      // would have done the same thing on the next daily run.
+      //
+      // The clear itself is still necessary - upsert only overwrites a
+      // row when both kalshi_id AND polymarket_id match, so a Kalshi
+      // market that now matches a DIFFERENT Polymarket market just adds
+      // a second row and the stale wrong one survives. But it belongs
+      // immediately before the write, not before the work: a failure
+      // during matching now leaves the previous pairs standing, which
+      // is the outcome a reader wants when the alternative is an empty
+      // tab.
+      const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
+      newPairs = result.newPairs;
+      matchDiagnostics = result.matchDiagnostics;
+
       const kalshiIdsForSport = (kalshiDb || [])
         .filter(m => sport === "all" || m.sport_tag === sport)
         .map(m => m.id);
       if (kalshiIdsForSport.length > 0) {
         clearErrors.push(...(await clearPairsForKalshiIds(kalshiIdsForSport)).errors);
       }
-
-      const result = matchNonSportsMarkets(kalshiDb, polyDb, THRESHOLD);
-      newPairs = result.newPairs;
-      matchDiagnostics = result.matchDiagnostics;
     }
 
     const pairsUpsert = newPairs.length > 0
