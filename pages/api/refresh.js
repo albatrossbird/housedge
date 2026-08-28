@@ -312,7 +312,11 @@ export default async function handler(req, res) {
       }));
 
     const fetchedIds = new Set(kalshiUpdates.map(u => String(u.id)));
-    const kalshiPairedMissed = [...pairedKalshiIds].filter(id => !fetchedIds.has(id)).length;
+    // Named, not counted - the same reason kalshiSeriesFailed names its
+    // series. "9 paired markets missed" does not tell you which prices
+    // on the site are frozen, or what they have in common.
+    const kalshiPairedMissedIds = [...pairedKalshiIds].filter(id => !fetchedIds.has(id));
+    const kalshiPairedMissed = kalshiPairedMissedIds.length;
 
     // Fetch fresh prices from Polymarket for pairs already in DB.
     //
@@ -445,6 +449,7 @@ export default async function handler(req, res) {
       // value above zero is a real stale-price bug, and the counter
       // above is noise without it.
       kalshiPairedMissed,
+      kalshiPairedMissedIds: kalshiPairedMissedIds.slice(0, 20),
       polyUpdated: polyResult.updated,
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,
