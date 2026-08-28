@@ -1209,11 +1209,23 @@ export default async function handler(req, res) {
     // filter below assumes, and re-embeds anything that lost or never
     // got one. Sports rows are excluded regardless, so they do not churn.
     const existing = await fetchAllRows(() => supabase
-      .from("markets").select("id").not("embedding", "is", null));
-    const embeddedIds = new Set((existing || []).map(r => r.id));
+      .from("markets").select("id, title").not("embedding", "is", null));
+    const embeddedTitles = new Map((existing || []).map(r => [r.id, r.title]));
+    // An embedding belongs to a TITLE, so a row whose title changed has
+    // a stale one. Keying only on id meant a corrected title kept the
+    // vector built from the wrong text: when polymarket.us titles gained
+    // their side labels, every affected row would have gone on matching
+    // as the strikeless parent it used to be, and the fix would have
+    // looked like it had not worked.
+    //
+    // The comparison is what makes that self-correcting rather than
+    // something to remember to pass ?force=1 for -- which on politics
+    // means re-embedding ~11k rows to fix a few thousand.
+    const needsEmbedding = m =>
+      !embeddedTitles.has(m.id) || embeddedTitles.get(m.id) !== m.title;
     const toEmbed = force
       ? allMarkets.filter(m => !SPORTS_TAGS.has(m.sport_tag))
-      : allMarkets.filter(m => !embeddedIds.has(m.id) && !SPORTS_TAGS.has(m.sport_tag));
+      : allMarkets.filter(m => needsEmbedding(m) && !SPORTS_TAGS.has(m.sport_tag));
 
     // Upsert all markets. Deliberately not touching `embedding` here -
     // omitting the key from the payload leaves it untouched for rows
