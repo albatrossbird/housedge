@@ -800,6 +800,10 @@ async function fetchKalshiMarkets(sportFilter = "all") {
 // Both Polymarket exchanges. Reads that filter platform = 'polymarket'
 // silently exclude polymarket_us, which is how 30 successfully fetched
 // US game markets produced zero US pairs.
+// Titles embedded per invocation. Sized so a run stays well inside
+// Vercel's 300s ceiling with the fetch and match stages alongside it.
+const EMBED_BATCH_LIMIT = 1200;
+
 const POLY_PLATFORMS = ["polymarket", POLY_US_PLATFORM];
 
 // ── Fetch Polymarket US game markets ───────────────────────────
@@ -1223,9 +1227,24 @@ export default async function handler(req, res) {
     // means re-embedding ~11k rows to fix a few thousand.
     const needsEmbedding = m =>
       !embeddedTitles.has(m.id) || embeddedTitles.get(m.id) !== m.title;
-    const toEmbed = force
+    const eligible = force
       ? allMarkets.filter(m => !SPORTS_TAGS.has(m.sport_tag))
       : allMarkets.filter(m => needsEmbedding(m) && !SPORTS_TAGS.has(m.sport_tag));
+
+    // Cap the work per invocation. Vercel kills a function at 300s, and
+    // reading polymarket.us side labels changed the title of roughly
+    // 5,000 politics markets at once - every one of them needing a new
+    // vector. The whole run died, which meant the category could not be
+    // rebuilt at all rather than being rebuilt slowly.
+    //
+    // Embedded rows drop out of `needsEmbedding` next time, so repeated
+    // calls converge and `embedRemaining` says how many are left.
+    // Matching still runs on whatever IS embedded: a row without a
+    // vector is simply not a candidate yet, which is a smaller and much
+    // more visible failure than a 300s timeout.
+    const embedLimit = Math.max(1, parseInt(req.query.embedLimit, 10) || EMBED_BATCH_LIMIT);
+    const toEmbed = eligible.slice(0, embedLimit);
+    const embedRemaining = eligible.length - toEmbed.length;
 
     // Upsert all markets. Deliberately not touching `embedding` here -
     // omitting the key from the payload leaves it untouched for rows
@@ -1349,6 +1368,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       embedded,
+      embedRemaining,
       newPairs:    newPairs.length,
       totalKalshi: kalshiRaw.length,
       totalPoly:   polyRaw.length,
