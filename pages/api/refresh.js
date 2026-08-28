@@ -167,6 +167,7 @@ async function restFetch(path, options = {}) {
 // call per row.
 async function applyUpdates(updates) {
   let updated = 0;
+  let skipped = 0;   // fetched, but no such row in `markets`
   const errors = [];
   const warnings = [];
 
@@ -185,9 +186,9 @@ async function applyUpdates(updates) {
     }
 
     const existingById = new Map((existing || []).map(row => [row.id, row]));
-    const merged = chunk
-      .filter(u => existingById.has(u.id)) // never insert rows /api/embed hasn't created
-      .map(u => ({ ...existingById.get(u.id), ...u }));
+    const kept = chunk.filter(u => existingById.has(u.id)); // never insert rows /api/embed hasn't created
+    skipped += chunk.length - kept.length;
+    const merged = kept.map(u => ({ ...existingById.get(u.id), ...u }));
 
     if (merged.length === 0) continue;
 
@@ -211,7 +212,7 @@ async function applyUpdates(updates) {
     else updated += merged.length;
   }
 
-  return { updated, errors, warnings: [...new Set(warnings)] };
+  return { updated, skipped, errors, warnings: [...new Set(warnings)] };
 }
 
 export default async function handler(req, res) {
@@ -289,6 +290,8 @@ export default async function handler(req, res) {
       .filter(r => !r.error && r.markets.length === 0)
       .map(r => r.series);
 
+    const pairedKalshiIds = new Set(pairRows.map(r => String(r.kalshi_id)));
+
     const kalshiUpdates = kalshiMarkets
       .filter(m => m.ticker && !m.ticker.startsWith("KXMVE") && m.yes_ask_dollars)
       .map(m => ({
@@ -307,6 +310,9 @@ export default async function handler(req, res) {
         ask_size:   num(m.yes_ask_size_fp),
         updated_at: Math.floor(Date.now() / 1000),
       }));
+
+    const fetchedIds = new Set(kalshiUpdates.map(u => String(u.id)));
+    const kalshiPairedMissed = [...pairedKalshiIds].filter(id => !fetchedIds.has(id)).length;
 
     // Fetch fresh prices from Polymarket for pairs already in DB.
     //
@@ -428,6 +434,17 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       kalshiUpdated: kalshiResult.updated,
+      // Fetched from a series but absent from `markets`. Expected and
+      // large: the job polls whole series, and a series carries every
+      // strike and period Kalshi lists while we store only the ones
+      // discovery kept. 539 written out of 959 fetched looked like a
+      // fourth silent drop until this said otherwise.
+      kalshiNotStored: kalshiResult.skipped,
+      // The number that would actually matter: paired Kalshi markets -
+      // the ones the site renders - that this run did NOT refresh. Any
+      // value above zero is a real stale-price bug, and the counter
+      // above is noise without it.
+      kalshiPairedMissed,
       polyUpdated: polyResult.updated,
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,

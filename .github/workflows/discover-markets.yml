@@ -39,13 +39,50 @@ jobs:
           set -uo pipefail
           FAILED=0
 
+          # TWO STAGES PER CATEGORY, not one call.
+          #
+          # Politics cannot do fetch + embed + match inside Vercel's 300s
+          # ceiling: matching that category alone takes over two minutes,
+          # and the combined run returned no body at all, so the category
+          # could not be rebuilt. Fetching and matching read different
+          # things -- the venues, then Supabase -- so they split cleanly
+          # across two invocations.
+          #
+          # The fetch stage is also re-runnable on its own: embedding is
+          # capped per call and `embedRemaining` says what is left, so a
+          # category with thousands of changed titles converges over
+          # repeated runs instead of dying.
           for CAT in $CATEGORIES; do
             echo "::group::$CAT"
 
             if ! curl -sS --max-time 280 \
                 ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
-                "https://housedge.vercel.app/api/embed?sport=$CAT" -o "resp-$CAT.json"; then
-              echo "::error::$CAT: curl failed"
+                "https://housedge.vercel.app/api/embed?fetchonly=1&sport=$CAT" -o "fetch-$CAT.json"; then
+              echo "::error::$CAT: fetch stage curl failed"
+              FAILED=1
+              echo "::endgroup::"
+              continue
+            fi
+
+            if ! jq -e . "fetch-$CAT.json" >/dev/null 2>&1; then
+              echo "::error::$CAT: fetch stage response was not valid JSON"
+              FAILED=1
+              echo "::endgroup::"
+              continue
+            fi
+
+            jq -r '"'"$CAT"' fetch: embedded=\(.embedded) remaining=\(.embedRemaining) marketsUpserted=\(.writes.marketsUpserted // "n/a")"' "fetch-$CAT.json"
+            REMAINING=$(jq -r '.embedRemaining // 0' "fetch-$CAT.json")
+            if [ "$REMAINING" -gt 0 ]; then
+              echo "::warning::$CAT: $REMAINING titles still need embedding; next run continues"
+            fi
+
+            sleep 10
+
+            if ! curl -sS --max-time 280 \
+                ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+                "https://housedge.vercel.app/api/embed?matchonly=1&sport=$CAT" -o "resp-$CAT.json"; then
+              echo "::error::$CAT: match stage curl failed"
               FAILED=1
               echo "::endgroup::"
               continue
@@ -60,7 +97,7 @@ jobs:
               echo "::error::$CAT: $(jq -r '.error' "resp-$CAT.json")"
               FAILED=1
             else
-              jq -r '"'"$CAT"': newPairs=\(.newPairs) totalPairs=\(.totalPairs) marketsUpserted=\(.writes.marketsUpserted // "n/a") embeddingUpserted=\(.writes.embeddingUpserted // "n/a")"' "resp-$CAT.json"
+              jq -r '"'"$CAT"' match: newPairs=\(.newPairs) totalPairs=\(.totalPairs)"' "resp-$CAT.json"
 
               # Write errors are what silently produced empty results for
               # most of this project's history — surface, never swallow.
