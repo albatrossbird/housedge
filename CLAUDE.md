@@ -175,6 +175,22 @@ The fix is embeddings for candidate generation + a **hard signature gate** befor
   the sets would otherwise still intersect — nominal ran ~2 points
   above real through 2026, which is exactly the gap that renders as
   free money.
+- **Touch vs terminal.** Kalshi runs both shapes on the same coin,
+  strike and date: `KXBTCMAX150` resolves if the price is above the
+  strike at ANY POINT before the date; `KXBTCY` resolves on the average
+  of the sixty seconds before 12 AM EST, AT that moment. A touch market
+  is always at least as likely to resolve Yes, so pairing the two
+  manufactures an edge. Read from the VERB — "reach", "hit", "above … by"
+  describe a window whatever date follows — because Kalshi states a
+  window's end as a moment ("above $6.00 by 11:59 PM ET **on** Dec 31,
+  2026") and letting the moment decide called five correct XRP pairs
+  terminal.
+- **A missing year does not make the month unreadable.** Polymarket US
+  drops years constantly ("Elon Musk Net Worth on August 31?").
+  Rejecting every bare date would have killed four correct December
+  pairs along with the August one; comparing month and day separates
+  them. The comparison is circular over the year so Dec 31 and Jan 1
+  read as one day apart.
 - **Direction on counted changes.** "Exactly 1 cut" and "1 Fed rate
   hike" share unit `count` and value 1 and are opposite bets. `dir` is
   a separate field, not part of the unit, so a title whose direction
@@ -441,13 +457,17 @@ of failing outright.
 Every pair below was read and confirmed by hand; the counts are small on
 purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
-| Category | Stored pairs | Shown on site | Floor |
-|---|---|---|---|
-| sports (mlb) — global | 33 | 33 | exact join |
-| sports (mlb) — Polymarket US | 30 | 30 | exact join |
-| economics | 6 | 6 | 0.83 |
-| crypto | 23 | 14 | 0.88 |
-| politics | 14 | 5 | 0.94 |
+| Category | Cards | Stored pairs | US-tradable cards | Floor |
+|---|---|---|---|---|
+| sports (mlb) | 39 | 75 | 36 | exact join |
+| economics | 18 | 18 | 14 | 0.83 |
+| crypto | 17 | 18 | 4 | 0.88 |
+| politics | 4 | 4 | 0 | 0.94 |
+
+"Cards" is what the site renders — one per Kalshi market, with a leg per
+Polymarket venue. "US-tradable" counts cards carrying a `polymarket_us`
+leg, which is what a US account can actually act on and what the venue
+filter defaults to.
 
 "Shown" is lower than "stored" because `markets.js` drops prices outside
 0.05–0.95, and the extra politics pairs are long shots (the seven-person
@@ -623,7 +643,11 @@ $$ LANGUAGE sql SECURITY DEFINER;
 2. **Polymarket publishes no depth.** Gamma exposes aggregate liquidity but no size at the touch, so any leg on that venue reports `depthKnown: false` and `maxContracts` is an upper bound set by the Kalshi leg alone. Closing this means the CLOB API (`clob.polymarket.com/book`), which is a per-market call on a different host.
 3. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
 5. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
-6. **Kalshi and Polymarket US barely overlap outside sports.** Not a bug — a measured fact, and the reason ingesting 307 US non-sports markets produced one pair. Politics matches **zero** even at threshold 0.80: Kalshi lists departures, visits and pardons; Polymarket US lists election winners. Crypto matches exactly one (Bitcoin $200k), and `markets.js` hides it as a long shot under the 0.05 price band. Re-test before assuming this changed.
+6. **Polymarket US non-sports titles come from `titleShort`, not `question`.** Every market in a templated family shares ONE question — all six GDP strikes are "US GDP Growth in Q3 2026?", every candidate in a race is the same "Who will win…?" — and the distinguishing text ("Above 2.5%", "$200,000", "Jon Ossoff (D)") lives in `titleShort`. 5,866 of 5,877 non-sports US markets share a question with a sibling, so reading only `question` stored the catalogue as **1,073 distinct titles instead of 5,877**.
+
+   This was recorded here for a long time as a measured fact about venue overlap ("crypto matches exactly one, politics matches zero"). It was this bug. Reading `titleShort` took econ from 0 US-tradable pairs to 14 and crypto from 1 to 4. **The lesson is the same one the `.us` listing sweep and the truncated Kalshi econ fetch taught: before concluding a venue does not list something, check what the fetch actually kept.**
+
+   Politics really does match zero, and that claim is now worth something: the full 5,640-market US politics catalogue is ingested with correct titles and embedded, and everything down to threshold 0.80 was read by hand. The near-misses are all 0.86–0.89 and all wrong — Kalshi's "next person to leave the Trump Cabinet" is an exclusive race against Polymarket's "announced out in 2026", which is not, so someone leaving *second* resolves NO on one and YES on the other.
 7. Polymarket's `outcomes`/`outcomePrices` alignment is still unverified for non-sports markets. Sports no longer depends on it (the index comes from the identifiers), but crypto/politics/econ still read `outcomePrices[0]`.
 
 **Fixed since the last revision of this file:** automated refresh (both
