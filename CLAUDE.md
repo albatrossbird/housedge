@@ -55,9 +55,18 @@ public, so Actions minutes are free and unmetered.
   one used to return `{ markets: [] }`, read as a series with nothing
   open, and freeze its rows indefinitely while every counter reported
   success.
-- `.github/workflows/discover-markets.yml` — `/api/embed` per category,
-  daily, sequential with a pause. Categories: `mlb nba nhl soccer econ
-  crypto politics`.
+- `.github/workflows/discover-markets.yml` — **two stages per category**,
+  daily, sequential with a pause: `?fetchonly=1` then `?matchonly=1`.
+  Categories: `mlb nba nhl soccer econ crypto politics`.
+
+  Politics cannot do fetch + embed + match inside Vercel's 300s ceiling —
+  matching that category alone takes over two minutes and the combined
+  run returned **no body at all**, so the category could not be rebuilt.
+  The two halves read different things (the venues, then Supabase), so
+  they split cleanly. The fetch stage is re-runnable on its own:
+  embedding is capped per call and `embedRemaining` reports what is
+  left, so a category with thousands of changed titles converges over
+  repeated runs instead of dying.
 
 Both fail the run loudly on non-JSON, an `error` field, or zero rows
 updated — **per venue**, since a combined check let `polyUpdated: 0`
@@ -140,6 +149,14 @@ unpaired non-sports rows — see known bug 1.
 deletes and rewrites the category's pairs by default, so "just looking"
 at a lower threshold publishes whatever it produces — that is how 71
 wrong crypto pairs once reached production.
+
+**`kalshiNotStored` is expected to be large; `kalshiPairedMissed` is
+not.** The job polls whole Kalshi *series*, and a series carries every
+strike and period Kalshi lists while `markets` holds only what discovery
+kept — 539 written out of 959 fetched is that, not a drop.
+`kalshiPairedMissed` counts paired markets (the ones the site renders)
+that a run did not refresh, and anything above zero there is a real
+stale-price bug.
 
 `/api/refresh` scopes itself to markets that appear in `pairs`: it derives
 the Kalshi series to poll from the paired tickers (`<SERIES>-<event>-<outcome>`)

@@ -979,6 +979,15 @@ async function clearPairsForKalshiIds(kalshiIds) {
 export default async function handler(req, res) {
   const force     = req.query.force     === "1";
   const matchOnly = req.query.matchonly === "1";
+  // Fetch, store and embed, then stop before matching.
+  //
+  // A politics discovery run cannot fit fetch + embed + match inside
+  // Vercel's 300s ceiling: matching that category alone takes over two
+  // minutes, and the run returned no body at all. Splitting the two
+  // halves across invocations is what makes the category rebuildable -
+  // `?fetchonly=1` then `?matchonly=1`, which is exactly what
+  // discover-markets.yml now does.
+  const fetchOnly = req.query.fetchonly === "1";
   // Inspect a threshold/gate change without touching the pairs table.
   // Iterating on thresholds against the live table once wrote 71 wrong
   // crypto pairs to production before they could be reviewed; matchonly
@@ -1293,6 +1302,29 @@ export default async function handler(req, res) {
     let newPairs = [];
     let matchDiagnostics = null;
     const isSport = sport !== "all" && SPORTS_TAGS.has(sport);
+
+    if (fetchOnly) {
+      // Stop here. The markets and their embeddings are stored, which is
+      // the half that needs the venues; matching reads only Supabase and
+      // runs in its own invocation.
+      return res.status(200).json({
+        mode: "fetch-only",
+        sport,
+        embedded,
+        embedRemaining,
+        totalKalshi: kalshiRaw.length,
+        totalPoly: polyRaw.length,
+        totalPolyUs: usGames.markets.length,
+        writes: {
+          marketsUpserted: marketsUpsert.count,
+          marketsErrors: marketsUpsert.errors,
+          embeddingUpserted: embeddingUpsert.count,
+          embeddingErrors: embeddingUpsert.errors,
+        },
+        ...(usGames.diagnostics ? { polyUsDiagnostics: usGames.diagnostics } : {}),
+        next: `/api/embed?matchonly=1&sport=${encodeURIComponent(sport)}`,
+      });
+    }
 
     if (isSport) {
       // Structured team matching for sports
