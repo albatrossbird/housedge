@@ -312,10 +312,30 @@ export default async function handler(req, res) {
       }));
 
     const fetchedIds = new Set(kalshiUpdates.map(u => String(u.id)));
-    // Named, not counted - the same reason kalshiSeriesFailed names its
-    // series. "9 paired markets missed" does not tell you which prices
-    // on the site are frozen, or what they have in common.
-    const kalshiPairedMissedIds = [...pairedKalshiIds].filter(id => !fetchedIds.has(id));
+    const polledSeries = new Set(kalshiSeries);
+
+    // Split, because the raw "paired but not refreshed" number can only
+    // ever be non-zero and would teach you to ignore it.
+    //
+    // A market Kalshi's open-series poll did not return is not open:
+    // settled games and finalized long shots. Its first run reported 9,
+    // and all 9 were exactly that - seven MLB fixtures played the day
+    // before, plus an XRP and a ZEC market both `status: finalized`.
+    // Benign, and permanent until /api/prune removes them.
+    //
+    // A market whose SERIES was never polled is the real bug: it means
+    // the series could not be derived from the paired ticker, so those
+    // prices freeze forever with nothing to say so. That is the shape of
+    // the hand-maintained KALSHI_SERIES bug this job was rewritten to
+    // remove, and it is the number worth alarming on.
+    const missedIds = [...pairedKalshiIds].filter(id => !fetchedIds.has(id));
+    const kalshiPairedMissedIds = missedIds.filter(id => {
+      const series = seriesOf(id);
+      return series && polledSeries.has(series);
+    });
+    const kalshiSeriesUnpolled = [...new Set(
+      missedIds.map(id => seriesOf(id)).filter(sr => !sr || !polledSeries.has(sr))
+    )];
     const kalshiPairedMissed = kalshiPairedMissedIds.length;
 
     // Fetch fresh prices from Polymarket for pairs already in DB.
@@ -444,12 +464,15 @@ export default async function handler(req, res) {
       // discovery kept. 539 written out of 959 fetched looked like a
       // fourth silent drop until this said otherwise.
       kalshiNotStored: kalshiResult.skipped,
-      // The number that would actually matter: paired Kalshi markets -
-      // the ones the site renders - that this run did NOT refresh. Any
-      // value above zero is a real stale-price bug, and the counter
-      // above is noise without it.
+      // Paired markets whose series WAS polled and which Kalshi still
+      // did not return: settled fixtures and finalized long shots.
+      // Expected to be non-zero, and named so the reason stays checkable.
       kalshiPairedMissed,
       kalshiPairedMissedIds: kalshiPairedMissedIds.slice(0, 20),
+      // Series a paired ticker points at that this job never polls.
+      // THIS is the alarm: those prices freeze with nothing to say so.
+      // Must be empty.
+      kalshiSeriesUnpolled,
       polyUpdated: polyResult.updated,
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,

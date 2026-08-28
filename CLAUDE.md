@@ -150,13 +150,22 @@ deletes and rewrites the category's pairs by default, so "just looking"
 at a lower threshold publishes whatever it produces — that is how 71
 wrong crypto pairs once reached production.
 
-**`kalshiNotStored` is expected to be large; `kalshiPairedMissed` is
-not.** The job polls whole Kalshi *series*, and a series carries every
-strike and period Kalshi lists while `markets` holds only what discovery
-kept — 539 written out of 959 fetched is that, not a drop.
-`kalshiPairedMissed` counts paired markets (the ones the site renders)
-that a run did not refresh, and anything above zero there is a real
-stale-price bug.
+**Three counters, and only one of them is an alarm.** The job polls
+whole Kalshi *series*, and a series carries every strike and period
+Kalshi lists while `markets` holds only what discovery kept — so
+`kalshiNotStored` (418 of 995 fetched) is expected and large, not a
+drop. `kalshiPairedMissed` names paired markets whose series was polled
+and which Kalshi still did not return: settled fixtures and finalized
+long shots, also expected — its first run reported 9, all of them MLB
+games played the day before plus two `status: finalized` crypto
+markets. **`kalshiSeriesUnpolled` is the one that must stay empty**: a
+series a paired ticker points at that the job never polls means those
+prices freeze forever with nothing to say so, which is exactly the
+hand-maintained `KALSHI_SERIES` bug this job was rewritten to remove.
+
+A counter that can only ever be non-zero teaches you to ignore it, which
+is why the first version of this — a single "paired but not refreshed"
+number — was worse than useless.
 
 `/api/refresh` scopes itself to markets that appear in `pairs`: it derives
 the Kalshi series to poll from the paired tickers (`<SERIES>-<event>-<outcome>`)
