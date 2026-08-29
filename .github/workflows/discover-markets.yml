@@ -79,6 +79,23 @@ jobs:
 
             sleep 10
 
+            # Non-sports matching now runs in match-markets.yml, on a
+            # runner with no 300s ceiling. Politics does not fit here any
+            # more (12,210 x 5,458 comparisons), and keeping the call
+            # would fail this job every day for a category another
+            # workflow is already handling. Sports still matches here:
+            # it is an exact join, not a similarity sweep, and it is
+            # fast.
+            case " mlb nba nhl soccer " in
+              *" $CAT "*) ;;
+              *)
+                echo "$CAT: fetch done — matching runs in match-markets.yml"
+                echo "::endgroup::"
+                sleep 20
+                continue
+                ;;
+            esac
+
             if ! curl -sS --max-time 280 \
                 ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
                 "https://housedge.vercel.app/api/embed?matchonly=1&sport=$CAT" -o "resp-$CAT.json"; then

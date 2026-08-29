@@ -55,6 +55,26 @@ public, so Actions minutes are free and unmetered.
   one used to return `{ markets: [] }`, read as a series with nothing
   open, and freeze its rows indefinitely while every counter reported
   success.
+- `.github/workflows/match-markets.yml` — **non-sports matching, off
+  Vercel**. Politics stopped fitting the 300s ceiling once Kalshi's
+  Elections category landed: 12,210 Kalshi rows against 5,458
+  Polymarket ones is 66M cosine similarities on 1024-dimension vectors,
+  and the JS matcher and the pgvector one both returned **no body at
+  all** after 4m40s. A GitHub runner has no such ceiling.
+
+  `lib/matcher.js` is imported by both the route and
+  `scripts/match-category.mjs`, so the two cannot drift — the same
+  reason `matchNonSportsMarkets` was already shared between `matchonly`
+  and normal mode. Needs `SUPABASE_URL` and `SUPABASE_ANON_KEY` as
+  **repository secrets** (the repo is public).
+
+  **A blocking index was tried first and rejected on measurement**:
+  scoring only pairs that share a content word lost **55 of 208
+  known-correct pairs**, because Kalshi says "SOL" where Polymarket says
+  "Solana" and "**real GDP**" where it says "US GDP Growth". Those
+  vocabularies not lining up is the whole reason this project matches on
+  embeddings, so blocking cannot be made safe here. Don't retry it.
+
 - `.github/workflows/discover-markets.yml` — **two stages per category**,
   daily, sequential with a pause: `?fetchonly=1` then `?matchonly=1`.
   Categories: `mlb nba nhl soccer econ crypto politics`.

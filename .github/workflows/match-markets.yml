@@ -1,0 +1,71 @@
+name: Match markets
+
+# Matching, moved off Vercel.
+#
+# /api/embed?matchonly=1 still works and is still what the discovery
+# workflow calls for the small categories. Politics no longer fits:
+# adding Kalshi's Elections category took it to 12,210 Kalshi rows
+# against 5,458 Polymarket ones, and 66M cosine similarities on
+# 1024-dimension vectors do not finish inside Vercel's 300s ceiling.
+# Both the JS matcher and the pgvector one returned no body at all
+# after 4m40s.
+#
+# A GitHub runner has no such ceiling, and runs the SAME matcher -
+# lib/matcher.js is imported by both, so the two cannot drift.
+
+on:
+  schedule:
+    - cron: "40 9 * * *"    # UTC, after discover-markets has fetched
+  workflow_dispatch:
+    inputs:
+      categories:
+        description: "Space-separated categories to match"
+        default: "politics econ crypto"
+        required: false
+      dry:
+        description: "Match and print, write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: match-markets
+  cancel-in-progress: false
+
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Match each category
+        env:
+          # The repo is PUBLIC. These must come from repository secrets
+          # and never be inlined.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          CATEGORIES: ${{ github.event.inputs.categories || 'politics econ crypto' }}
+          DRY: ${{ github.event.inputs.dry }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_KEY:-}" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_ANON_KEY repository secrets are not set"
+            exit 1
+          fi
+
+          FLAG=""
+          [ "${DRY:-false}" = "true" ] && FLAG="--dry"
+
+          FAILED=0
+          for CAT in $CATEGORIES; do
+            echo "::group::$CAT"
+            if ! node scripts/match-category.mjs "$CAT" $FLAG; then
+              echo "::error::$CAT: matching failed"
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $FAILED
