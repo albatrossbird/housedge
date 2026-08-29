@@ -14,13 +14,6 @@ const T = {
 };
 
 const pct = (v) => `${Math.round(v * 100)}%`;
-// "Vol $589.05" and "Vol $22.69" were rendering raw floats to the cent
-// next to "$11K" — cents on a volume figure imply a precision nobody
-// needs and read as a formatting bug beside their neighbours.
-const fmt = (v) =>
-  v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` :
-  v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K` : `$${Math.round(v)}`;
-
 // How stale a price is, in words. Deliberately coarse: the underlying
 // number is only accurate to the last cron run, so "2h ago" is honest
 // where "2h 14m ago" implies a precision the data does not have.
@@ -85,9 +78,24 @@ function bestLeg(m) {
     return c < b ? l : best;
   }, null);
 }
-function cardVolume(m) {
-  return (m.kalshi.volume || 0) + Math.max(0, ...legsOf(m).map(l => l.poly.volume || 0));
+// Volume is THREE different quantities across these venues, and the old
+// code added them:
+//
+//   Kalshi          contracts traded   (volume_fp)
+//   polymarket.com  US dollars         (volumeNum)
+//   polymarket.us   not published at all
+//
+// So "Total volume $59K" was contracts plus dollars plus a zero we
+// invented, and no reader could reconcile it with either exchange. Each
+// is now reported in its own unit, and never summed across venues.
+function kalshiContracts(m) { return m.kalshi.volume || 0; }
+function polyDollars(m) {
+  const known = legsOf(m).map(l => l.poly.volume).filter(v => v != null);
+  return known.length ? Math.max(...known) : null;
 }
+const compact = n =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` :
+  n >= 1_000 ? `${(n / 1_000).toFixed(0)}K` : `${Math.round(n)}`;
 function cardAge(m) {
   const ages = legsOf(m).map(l => l.priceAgeSeconds).filter(a => a != null);
   return ages.length ? Math.max(...ages) : null;
@@ -317,14 +325,23 @@ function MarketCard({ market }) {
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.muted, flexWrap: "wrap", gap: 8 }}>
-        {/* A cost figure on a market nobody has traded is not a quote you
-            can take, and "Vol $0" beside "104.9c to own both sides" reads
-            as a number rather than a warning. Six of the eighteen
-            economics cards are in this state. */}
+        {/* Per venue, in that venue's own unit. A cost figure on a market
+            nobody has traded is not a quote anyone can take, so zero
+            still earns a warning — but only where the venue actually
+            reports zero. polymarket.us publishes no volume at all, and
+            saying "no trades yet" about it was asserting something we
+            do not know. */}
         <span>
-          {cardVolume(market) > 0
-            ? `Vol ${fmt(cardVolume(market))}`
-            : "No trades yet — prices are quotes, not fills"}
+          {(() => {
+            const k = kalshiContracts(market);
+            const p = polyDollars(market);
+            const bits = [];
+            if (k > 0) bits.push(`Kalshi ${compact(k)} contracts`);
+            if (p != null && p > 0) bits.push(`Polymarket $${compact(p)}`);
+            if (bits.length) return bits.join(" · ");
+            if (k === 0) return "No trades on Kalshi yet — prices are quotes, not fills";
+            return "Volume not published";
+          })()}
         </span>
         <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
           style={{ color: T.kalshi, fontWeight: 700, letterSpacing: "0.03em", textDecoration: "none" }}>Kalshi ↗</a>
@@ -458,7 +475,7 @@ export default function HouseEdge() {
       return ca - cb;
     }
     if (sort === "spread") return widestSpread(b) - widestSpread(a);
-    if (sort === "volume") return cardVolume(b) - cardVolume(a);
+    if (sort === "volume") return kalshiContracts(b) - kalshiContracts(a);
     if (sort === "similarity") return (bestLeg(b)?.similarity || 0) - (bestLeg(a)?.similarity || 0);
     return (b.trending ? 1 : 0) - (a.trending ? 1 : 0);
   });
@@ -631,7 +648,7 @@ export default function HouseEdge() {
               { label: "Markets matched", value: visible.length },
               { label: "Arb signals", value: arbCount, color: T.arb },
               { label: "Avg spread", value: visible.length ? `${Math.round(visible.reduce((s, m) => s + widestSpread(m), 0) / visible.length * 100)}pt` : "—" },
-              { label: "Total volume", value: fmt(visible.reduce((s, m) => s + cardVolume(m), 0)) },
+              { label: "Kalshi contracts", value: `${compact(visible.reduce((s, m) => s + kalshiContracts(m), 0))}` },
             ].map(({ label, value, color }) => (
               <div key={label}>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 2, letterSpacing: "0.04em" }}>{label}</div>

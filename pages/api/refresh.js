@@ -298,7 +298,8 @@ export default async function handler(req, res) {
         id:         m.ticker,
         yes_price:  parseFloat(m.yes_ask_dollars),
         no_price:   1 - parseFloat(m.yes_ask_dollars),
-        volume:     parseFloat(m.volume_24h_fp || 0),
+        // Total, matching embed.js — 24h understated it ~60x.
+        volume:     parseFloat(m.volume_fp || m.volume_24h_fp || 0),
         // The books this job has been discarding all along: it already
         // fetched them on every poll and kept only the ask, stored as
         // though it were a mid.
