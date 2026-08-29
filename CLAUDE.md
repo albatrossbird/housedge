@@ -466,6 +466,22 @@ not decoration — each one exists because its absence misled someone.
   behind `?debug=1`, where no reader would see it.
 - The legend says prices come from a scheduled read, not that the page
   "auto-refreshes every 60s" — true of the page, not of the numbers.
+- **"No trades yet"** replaces `Vol $0`. A cost figure on a market nobody
+  has traded is not a quote anyone can take, and `$0` beside "104.9¢ to
+  own both sides" reads as a number rather than a warning. Six of
+  eighteen economics cards are in that state.
+
+And what it must NOT repeat. `cleanTitle()` in `markets.js` strips
+Kalshi's raw markdown (`**real GDP**` reached the card verbatim) and
+drops a trailing side label only when the question already states that
+exact value with its unit. The rule is deliberately narrow because the
+failure modes are asymmetric: a label left on is noise, a label wrongly
+removed loses which side the price belongs to — a looser first version
+turned "Miami vs Washington (Aug 29) — Miami" into a card that no longer
+said which team was at 51%. For the same reason the match score and the
+Polymarket title now render only when similarity < 1: on a sports pair,
+which joins on the game identifier, they were "100% match" and a
+paragraph restating the card title, on every card.
 
 `supabase/migrations/0004` adds `bid`/`ask`/`no_bid`/`no_ask`,
 `bid_size`/`ask_size`, `fee_multiplier`/`fee_schedule`, and rebuilds

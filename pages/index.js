@@ -14,9 +14,12 @@ const T = {
 };
 
 const pct = (v) => `${Math.round(v * 100)}%`;
+// "Vol $589.05" and "Vol $22.69" were rendering raw floats to the cent
+// next to "$11K" — cents on a volume figure imply a precision nobody
+// needs and read as a formatting bug beside their neighbours.
 const fmt = (v) =>
   v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` :
-  v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K` : `$${v}`;
+  v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K` : `$${Math.round(v)}`;
 
 // How stale a price is, in words. Deliberately coarse: the underlying
 // number is only accurate to the last cron run, so "2h ago" is honest
@@ -258,7 +261,12 @@ function MarketCard({ market }) {
                   )}
                 </span>
                 <span style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                  {l.similarity != null && (
+                  {/* Only when it is not a certainty. Sports pairs join on
+                      the game identifier, so every one of them scored
+                      "100% match" — the same badge on all 25 cards, saying
+                      nothing. A similarity below 1 is a real caveat and
+                      still shown. */}
+                  {l.similarity != null && l.similarity < 0.999 && (
                     <span style={{ color: T.muted }}>{Math.round(l.similarity * 100)}% match</span>
                   )}
                   <a href={l.poly.url} target="_blank" rel="noopener noreferrer"
@@ -285,7 +293,15 @@ function MarketCard({ market }) {
                   `${(l.arb.cost * 100).toFixed(1)}¢ to own both sides`
                 )}
               </div>
-              {l.polyTitle && l.polyTitle !== market.title && (
+              {/* Shown exactly when the pairing was a JUDGEMENT rather than
+                  a join. Sports matches on the game identifier, so this
+                  line was a paragraph of boilerplate restating the card
+                  title on all 25 cards ("Who will win in the upcoming
+                  baseball event Miami Marlins vs Washington Nationals
+                  scheduled for..."). On econ and crypto the same line is
+                  the only way to check WHAT the Kalshi market was matched
+                  against, which is the thing most worth checking. */}
+              {l.polyTitle && l.polyTitle !== market.title && l.similarity < 0.999 && (
                 <div style={{ fontSize: 10, color: T.muted, lineHeight: 1.3 }}>{l.polyTitle}</div>
               )}
             </div>
@@ -294,7 +310,15 @@ function MarketCard({ market }) {
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.muted, flexWrap: "wrap", gap: 8 }}>
-        <span>Vol {fmt(cardVolume(market))}</span>
+        {/* A cost figure on a market nobody has traded is not a quote you
+            can take, and "Vol $0" beside "104.9c to own both sides" reads
+            as a number rather than a warning. Six of the eighteen
+            economics cards are in this state. */}
+        <span>
+          {cardVolume(market) > 0
+            ? `Vol ${fmt(cardVolume(market))}`
+            : "No trades yet — prices are quotes, not fills"}
+        </span>
         <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
           style={{ color: T.kalshi, fontWeight: 600, textDecoration: "none" }}>Kalshi ↗</a>
       </div>
