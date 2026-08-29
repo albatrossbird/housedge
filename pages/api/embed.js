@@ -14,6 +14,9 @@ import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
 import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
 import { fetchUsGameMarket, fetchPolymarketUs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
+// Matching lives in lib/ so this route and scripts/match-category.mjs
+// cannot drift — see the note at the top of that file.
+import { matchNonSportsMarkets, assignGreedy, cosineSimilarity } from "../../lib/matcher.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
 
 const supabase = createClient(
@@ -212,16 +215,6 @@ async function embedTitles(titles) {
   return allEmbeddings;
 }
 
-// ── Cosine similarity ──────────────────────────────────────────
-function cosineSimilarity(a, b) {
-  let dot = 0, magA = 0, magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot  += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
-}
 
 // Numeric/period/region signature extraction now lives in
 // lib/v2/claims.js so the v2 schema layer uses the exact same parsers —
@@ -280,67 +273,6 @@ async function candidatesFromDb(sportTag, topK = 10) {
   return { rows };
 }
 
-// ── Shared embedding-based matcher for non-sports markets ────────
-// Used by both matchonly and normal mode so they can't drift apart -
-// they duplicated this logic separately for a while this session and
-// it caused real bugs (a diagnostic added to one branch and forgotten
-// in the other).
-// Exclusivity and ordering, shared by both matchers.
-//
-// Greedy by globally descending score, not by Kalshi row order: when
-// several Kalshi rows compete for the same Polymarket market, the
-// best-scoring candidate should win it rather than whichever row
-// happened to be processed first.
-function assignGreedy(candidates, topScores, threshold, counts = {}) {
-  candidates.sort((a, b) => b.score - a.score);
-
-  // A Kalshi market may pair once PER POLYMARKET VENUE, not once
-  // overall. polymarket.com and polymarket.us are different exchanges
-  // and a US account can only trade the .us one, so letting a single
-  // .com match consume the Kalshi row hides the only pair the reader
-  // could actually take. That is why 307 ingested and embedded US
-  // non-sports markets produced zero pairs: they were not rejected by
-  // threshold or by the gate, they simply lost the exclusivity race to
-  // a .com candidate that scored higher.
-  //
-  // The sports join was already one pair per (game, venue); this makes
-  // the embedding path agree.
-  const usedKalshi = new Set();
-  const usedPoly = new Set();
-  const venueOf = pm => (pm.platform === POLY_US_PLATFORM ? POLY_US_PLATFORM : "polymarket");
-  const newPairs = [];
-  const acceptedPairs = [];
-
-  for (const c of candidates) {
-    const kalshiSlot = `${c.km.id}|${venueOf(c.pm)}`;
-    if (usedKalshi.has(kalshiSlot) || usedPoly.has(c.pm.id)) continue;
-    newPairs.push({
-      kalshi_id:     c.km.id,
-      polymarket_id: c.pm.id,
-      similarity:    c.score,
-      created_at:    Math.floor(Date.now() / 1000),
-    });
-    acceptedPairs.push({ score: c.score, kalshi: c.km.title, poly: c.pm.title });
-    usedKalshi.add(kalshiSlot);
-    usedPoly.add(c.pm.id);
-  }
-
-  topScores.sort((a, b) => b.score - a.score);
-  acceptedPairs.sort((a, b) => b.score - a.score);
-
-  return {
-    newPairs,
-    matchDiagnostics: {
-      threshold,
-      ...counts,
-      acceptedPairs: acceptedPairs.slice(0, 100),
-      // Uncapped rather than top-10: the head of the list is dominated
-      // by one cluster (e.g. GDP buckets), which hides whether other
-      // families have real candidates further down.
-      topScores,
-    },
-  };
-}
 
 // Same policy as the JS matcher — gate, then globally-greedy assignment
 // — over candidates the database produced. Deliberately shares the
@@ -372,47 +304,6 @@ function matchFromDbCandidates(rows, byId, threshold) {
   return assignGreedy(candidates, topScores, threshold, { matcher: "pgvector" });
 }
 
-function matchNonSportsMarkets(kalshiDb, polyDb, threshold) {
-  const polyEmbedded = (polyDb || [])
-    .filter(m => m.embedding)
-    .map(m => ({ ...m, _vec: JSON.parse(m.embedding) }));
-
-  const topScores = [];
-  const candidates = [];
-
-  for (const km of (kalshiDb || [])) {
-    if (!km.embedding) continue;
-    const kVec = JSON.parse(km.embedding);
-    let rowBestScore = 0;
-    let rowBestPm = null;
-
-    for (const pm of polyEmbedded) {
-      if (km.sport_tag !== pm.sport_tag) continue;
-      const score = cosineSimilarity(kVec, pm._vec);
-      if (score > rowBestScore) {
-        rowBestScore = score;
-        rowBestPm = pm;
-      }
-      if (score >= threshold && scalarSignaturesCompatible(km.title, pm.title, km.sport_tag)) {
-        candidates.push({ km, pm, score });
-      }
-    }
-
-    if (rowBestPm) {
-      topScores.push({ score: rowBestScore, kalshi: km.title, poly: rowBestPm.title });
-    }
-  }
-
-  // Greedy by globally descending score, not by Kalshi row order - so
-  // when several Kalshi rows compete for the same Polymarket market,
-  // the actual best-scoring candidate wins it instead of whichever
-  // Kalshi row happened to be processed first.
-  return assignGreedy(candidates, topScores, threshold, {
-    kalshiEmbeddedCount: (kalshiDb || []).filter(m => m.embedding).length,
-    polyEmbeddedCount: polyEmbedded.length,
-    matcher: "js",
-  });
-}
 // A Polymarket event carries several markets per game (moneyline, NRFI,
 // ── Sports matching: join on the game, don't parse the title ───
 //
