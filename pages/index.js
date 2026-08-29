@@ -254,12 +254,21 @@ function MarketCard({ market }) {
           return (
             <div key={l.pairId} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: T.poly, letterSpacing: "0.03em" }}>
-                  {l.poly.usTradable ? "Polymarket US" : "Polymarket global"}
+                {/* The venue name IS the link, on both venues. Kalshi's
+                    link read "Kalshi ↗" while Polymarket's read "Open ↗",
+                    so two links doing the same job were labelled
+                    differently and neither said it went to the same kind
+                    of place. Naming the destination is also one word
+                    shorter than naming it and then saying "Open". */}
+                <a
+                  href={l.poly.url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 11, fontWeight: 700, color: T.poly, letterSpacing: "0.03em", textDecoration: "none" }}
+                >
+                  {l.poly.usTradable ? "Polymarket US" : "polymarket.com"} ↗
                   {!l.poly.usTradable && (
-                    <span style={{ fontWeight: 400, color: T.muted }}> · not US-tradable</span>
+                    <span style={{ fontWeight: 400, color: T.muted }}> · can't trade from the US</span>
                   )}
-                </span>
+                </a>
                 <span style={{ display: "flex", gap: 10, fontSize: 11 }}>
                   {/* Only when it is not a certainty. Sports pairs join on
                       the game identifier, so every one of them scored
@@ -269,8 +278,6 @@ function MarketCard({ market }) {
                   {l.similarity != null && l.similarity < 0.999 && (
                     <span style={{ color: T.muted }}>{Math.round(l.similarity * 100)}% match</span>
                   )}
-                  <a href={l.poly.url} target="_blank" rel="noopener noreferrer"
-                    style={{ color: T.poly, fontWeight: 600, textDecoration: "none" }}>Open ↗</a>
                 </span>
               </div>
               <div style={{ fontSize: 11, color: legArb ? T.arb : T.muted, fontWeight: legArb ? 700 : 400 }}>
@@ -320,7 +327,7 @@ function MarketCard({ market }) {
             : "No trades yet — prices are quotes, not fills"}
         </span>
         <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
-          style={{ color: T.kalshi, fontWeight: 600, textDecoration: "none" }}>Kalshi ↗</a>
+          style={{ color: T.kalshi, fontWeight: 700, letterSpacing: "0.03em", textDecoration: "none" }}>Kalshi ↗</a>
       </div>
     </div>
   );
@@ -605,6 +612,14 @@ export default function HouseEdge() {
             {refreshing ? "↻ Reading books…" : "↻ Refresh prices"}
           </button>
         </div>
+
+        {/* The fact the venue filter exists for, stated once. Without it
+            the control asks the reader to choose between two things the
+            page never names. */}
+        <p style={{ margin: "-8px 0 20px", fontSize: 11, color: T.muted, lineHeight: 1.5 }}>
+          Polymarket US and polymarket.com are <strong>separate exchanges</strong> with
+          different books and different prices. A US account can only trade Polymarket US.
+        </p>
 
         {/* Stats bar */}
         {/* Stats describe what is on screen. Leaving them on the full

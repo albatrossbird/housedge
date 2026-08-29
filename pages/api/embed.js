@@ -743,14 +743,42 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
 // venues do not overlap" (which is what I concluded and said), but that
 // we were barely looking. Polymarket US alone lists Fed decisions,
 // GDP growth, unemployment and payrolls, all of which Kalshi carries.
-const KALSHI_CATEGORIES = { politics: "Politics", crypto: "Crypto", econ: "Economics" };
+// A category here can map to SEVERAL Kalshi categories.
+//
+// Politics was "Politics" alone, and Kalshi files its races under a
+// separate "Elections" category — 1,616 series including 218 Senate and
+// 132 Governor ones. Polymarket US politics is overwhelmingly election
+// winners (1,040 of its open events), so the one shape most likely to
+// overlap was the one shape we never fetched:
+//
+//   Kalshi   SENATEMI  "Will Republicans win the Senate race in
+//                       Michigan? — Mike Rogers"
+//   Poly US  "Michigan Senate Election Winner — Mike Rogers (R)"
+//
+// This is the fourth time a "these venues do not overlap" conclusion in
+// this project turned out to rest on a truncated fetch, after the .us
+// listing sweep, the four-hardcoded-series econ fetch and the
+// titleShort collapse. Check what the fetch asked for before believing
+// what it did not return.
+const KALSHI_CATEGORIES = {
+  politics: ["Politics", "Elections"],
+  crypto: ["Crypto"],
+  econ: ["Economics", "Financials"],
+};
 
 async function fetchKalshiMarkets(sportFilter = "all") {
   // politics/crypto come from category enumeration, not the fixed
   // series list — see fetchKalshiByCategory for why.
   if (KALSHI_CATEGORIES[sportFilter]) {
-    const res = await fetchKalshiByCategory(KALSHI_CATEGORIES[sportFilter], sportFilter);
-    return res.markets;
+    const cats = KALSHI_CATEGORIES[sportFilter];
+    const results = await Promise.all(
+      cats.map(c => fetchKalshiByCategory(c, sportFilter))
+    );
+    // Dedupe: a series listed under two categories would otherwise be
+    // fetched twice and upserted twice.
+    const byId = new Map();
+    for (const r of results) for (const m of r.markets) byId.set(m.id, m);
+    return [...byId.values()];
   }
 
   const series = sportFilter === "all"
@@ -1003,14 +1031,24 @@ export default async function handler(req, res) {
   // do not distinguish "buy Greenland" from "visit Greenland", "nuclear
   // deal" from "declare war", or "receive a pardon" from "charged".
   //
-  // An audit of politics at 0.78 found ~7 correct pairs out of 30. At
-  // 0.94 only the genuinely-duplicate cluster survives (the Venezuela
-  // head-of-state set, 0.947-0.963) and every audited false positive is
-  // excluded.
+  // Politics sat at 0.94 for exactly that reason, and the comment below
+  // called it "a blunt instrument standing in for a missing gate". The
+  // gate now exists: politicalActs() and properNames() in
+  // lib/v2/claims.js reject same-person-different-act ("Newsom ARRESTED"
+  // vs "Newsom ANNOUNCES a run", 0.882) and different-person-same-act
+  // ("pardon Matt Borges" vs "pardon Antoine Massey", 0.871), and
+  // "next"/"first" now count as superlatives so an exclusive race no
+  // longer pairs with an independent claim.
   //
-  // This is a blunt instrument standing in for a missing gate, not a
-  // fix: it buys precision by discarding real matches that happen to be
-  // worded differently. The real fix is a claim gate that understands
+  // So the floor comes down to 0.86, where 95 candidates become 68 after
+  // the gates and 65 of those read correct by hand - against 14 pairs at
+  // 0.94. The three survivors that are wrong are arity and direction
+  // problems ("Kim Jong-Un visits the US" vs "Trump visits North Korea")
+  // that no regex here can see.
+  //
+  // The old note, kept because it is still the right principle: a floor
+  // buys precision by discarding real matches that happen to be worded
+  // differently. The real fix is a claim gate that understands
   // predicates and deadlines — see docs/architecture-v2.md.
   // Per-category similarity floors. Politics titles are near-verbatim
   // across venues when they match at all, so 0.94 is where the noise
@@ -1036,7 +1074,7 @@ export default async function handler(req, res) {
   // gates, not a substitute: the worst pairs found here scored 0.924
   // and 0.869, well above any floor worth setting. Revisit if a
   // verified match ever turns up under it.
-  const CATEGORY_THRESHOLDS = { politics: 0.94, crypto: 0.88, econ: 0.83 };
+  const CATEGORY_THRESHOLDS = { politics: 0.86, crypto: 0.88, econ: 0.83 };
   const THRESHOLD = parseFloat(
     req.query.threshold || CATEGORY_THRESHOLDS[sport] || "0.78"
   );
