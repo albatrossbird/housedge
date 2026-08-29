@@ -1084,7 +1084,7 @@ export default async function handler(req, res) {
   // gates, not a substitute: the worst pairs found here scored 0.924
   // and 0.869, well above any floor worth setting. Revisit if a
   // verified match ever turns up under it.
-  const CATEGORY_THRESHOLDS = { politics: 0.86, crypto: 0.88, econ: 0.83 };
+  const CATEGORY_THRESHOLDS = { politics: 0.86, crypto: 0.88, econ: 0.81 };
   const THRESHOLD = parseFloat(
     req.query.threshold || CATEGORY_THRESHOLDS[sport] || "0.78"
   );
