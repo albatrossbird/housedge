@@ -703,7 +703,12 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
                           (m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
           yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
-          volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
+          // TOTAL volume, not 24h. The other order understated every
+          // Kalshi market by roughly sixty times: across KXFED's 98
+          // markets, volume_24h_fp sums to 72k against volume_fp's
+          // 4.29M. A market with 10,260 contracts traded and 6 of them
+          // today rendered as "6".
+          volume:         parseFloat(m.volume_fp || m.volume_24h_fp || 0),
           // The real books. yes_price above is the ask, which is what
           // v1 has always stored as though it were a mid.
           bid:            num(m.yes_bid_dollars),
@@ -801,7 +806,12 @@ async function fetchKalshiMarkets(sportFilter = "all") {
                           (m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
           yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
           no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
-          volume:         parseFloat(m.volume_24h_fp || m.volume_fp || 0),
+          // TOTAL volume, not 24h. The other order understated every
+          // Kalshi market by roughly sixty times: across KXFED's 98
+          // markets, volume_24h_fp sums to 72k against volume_fp's
+          // 4.29M. A market with 10,260 contracts traded and 6 of them
+          // today rendered as "6".
+          volume:         parseFloat(m.volume_fp || m.volume_24h_fp || 0),
           // The real books. yes_price above is the ask, which is what
           // v1 has always stored as though it were a mid.
           bid:            num(m.yes_bid_dollars),

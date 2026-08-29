@@ -466,7 +466,18 @@ not decoration — each one exists because its absence misled someone.
   behind `?debug=1`, where no reader would see it.
 - The legend says prices come from a scheduled read, not that the page
   "auto-refreshes every 60s" — true of the page, not of the numbers.
-- **"No trades yet"** replaces `Vol $0`. A cost figure on a market nobody
+- **Volume is three different quantities and is never summed.** Kalshi
+  reports CONTRACTS (`volume_fp`), polymarket.com reports US DOLLARS
+  (`volumeNum`), and polymarket.us publishes no volume field on a market
+  at all. Adding them produced a "Total volume" that reconciled with
+  neither exchange. Kalshi's is also the TOTAL, not `volume_24h_fp`:
+  across KXFED's 98 markets the 24h figure sums to 72k against the
+  total's 4.29M, so every market read about sixty times too small.
+  polymarket.us volume is `null`, not `0` — a fabricated zero read as
+  "nobody has traded this", which is a claim about the market rather
+  than about our data.
+- **"No trades yet"** replaces `Vol $0`, and only where the venue
+  actually reports zero. A cost figure on a market nobody
   has traded is not a quote anyone can take, and `$0` beside "104.9¢ to
   own both sides" reads as a number rather than a warning. Six of
   eighteen economics cards are in that state.
