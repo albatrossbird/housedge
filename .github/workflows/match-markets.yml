@@ -62,10 +62,21 @@ jobs:
           FAILED=0
           for CAT in $CATEGORIES; do
             echo "::group::$CAT"
-            if ! node scripts/match-category.mjs "$CAT" $FLAG; then
+            if ! node scripts/match-category.mjs "$CAT" $FLAG --out=match-output; then
               echo "::error::$CAT: matching failed"
               FAILED=1
             fi
             echo "::endgroup::"
           done
           exit $FAILED
+
+      # The pair list is the only thing that can be audited. Uploaded on
+      # failure too: a run that died partway still says what it accepted
+      # before it did.
+      - name: Upload pair list
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pairs
+          path: match-output/
+          if-no-files-found: warn
