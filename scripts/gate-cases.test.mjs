@@ -56,9 +56,22 @@ const REJECT_POL = [
   ["Will Donald Trump endorse J.D. Vance in the 2028 presidential election before Mar 1, 2028? — J.D. Vance", "Will JD Vance win the 2028 US Presidential Election?"],
   ["Will Latvia First win the 2026 Latvia parliamentary elections? — Latvia First", "Will Party L win the most seats in the 2026 Latvian parliamentary election?"],
   ["Will the Democratic party win the House in 2028? — Democratic party", "Will Party D win the 2028 US Presidential Election?"],
+  // Bands, both venues slicing the same quantity and neither the same way.
+  ["Will the Republican Party win 198-202 seats  in the 120th Congress? — 198-202", "Will the Republican Party hold between 195 and 199 House seats after the 2026 midterm elections?"],
+  ["Will the Republican Party win 233-237 seats  in the 120th Congress? — 233-237", "Will the Republican Party hold 230 or more House seats after the 2026 midterm elections?"],
+  ["Will the total 2026 U.S. House turnout be between 115 and 119.99 million? — 115 to 119.99 million", "2026 Midterms: House Turnout — 110-115 Million"],
+  ["Will Democrats win exactly 49 seats in the 2026 U.S. House of Representatives elections in California? — 49", "How Many House Seats Will The Democrats Win In California? — 49+"],
+  ["Will exactly 3 governors lose re-election in 2026? — Exactly 3", "Will the Republican Party hold exactly 30 or 31 governorships after the 2026 elections?"],
+  ["Will the difference between the number of Republican governors and the number of Democratic governors be 4? — 4", "Will the Republican Party hold exactly 26 or 27 governorships after the 2026 elections?"],
+  ["Will Greens win the next election to the German Bundestag? — Greens", "Will Grüne win the most seats in the 2026 Berlin state elections?"],
 ];
 
 const ACCEPT_POL = [
+  // The same convention, correctly aligned: Kalshi closes a band one
+  // tick below the boundary Polymarket writes.
+  ["Will the total 2026 U.S. House turnout be between 100 and 104.99 million? — 100 to 104.99 million", "2026 Midterms: House Turnout — 100-105 Million"],
+  ["Will the total 2026 U.S. House turnout be between 105 and 109.99 million? — 105 to 109.99 million", "2026 Midterms: House Turnout — 105-110 Million"],
+  ["Will the Republican party hold exactly 56 Senate seats in the 120th Congress? — 56", "Will the Republican Party hold exactly 56 Senate seats after the 2026 midterm elections?"],
   ["Will Romeu Zema qualify for the runoff in the 2026 Brazilian presidential election? — Romeu Zema", "Will Romeu Zema qualify for Brazil's presidential runoff?"],
   ["Will Republicans win the Senate race in South Dakota? — Republican party", "Will the Republicans win the South Dakota Senate race in 2026?"],
   ["Will Republican win the House race for LA-03? — Republican party", "Will the Republican Party win the LA-03 House seat?"],
