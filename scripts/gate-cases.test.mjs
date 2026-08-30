@@ -13,6 +13,7 @@ const REJECT = [
   ["Will Tesla Inc. report Above 1.7 million total deliveries in 2026?", "Tesla Q3 Total Deliveries? — Above 500k", "econ"],
   ["Will Tesla Inc. report Above 1.5 million total deliveries in 2026?", "Tesla Q3 Total Deliveries? — Above 450k", "econ"],
   ["Will Tesla Inc. report Above 1.9 million total deliveries in 2026?", "Tesla Q3 Total Deliveries? — Above 490k", "econ"],
+  ["Will Musk have a net worth more than 1500 billion dollars before Dec 31, 2026?", "What Will Elon's Net Worth Hit By December 31? — $2T", "econ"],
 ];
 
 // Every pair verified correct in this file's audit history.
@@ -42,9 +43,23 @@ const REJECT_POL = [
   ["Will Bezalel Smotrich be the next Prime Minister of Israel? — Bezalel Smotrich", "Will Moshe Feiglin be the next Prime Minister of Israel?"],
   // A placeholder is not a person.
   ["Will Democratic win the House race for NC-1? — Don Davis", "Will Candidate Q win the Alaska Senate race in 2026?"],
+
+  // Found in the second dry run, after the greedy assignment re-opened
+  // counterparties that the first round's rejections had freed.
+  ["Will Tim Scott be the nominee for the Vice Presidency for the Republican party? — Tim Scott", "Will Tim Scott win the 2028 Republican presidential nomination?"],
+  ["Will Elon Musk be the nominee for the Vice Presidency for the Republican party? — Elon Musk", "Will Elon Musk rejoin the Trump Administration in 2026?"],
+  ["Will the Democratic party win the Attorney General race in Wisconsin? — Democratic party", "Will the Democrats win the Wisconsin governor race in 2026?"],
+  ["Will Democrats win more than 2 seats in the 2026 U.S. House of Representatives elections in Utah? — 2", "Will the Democratic Party win the UT-02 House seat?"],
+  ["Who will win the Texas House of Representatives? — Democratic", "How Many House Seats Will The Democrats Win In Texas?"],
+  ["Will Democrats win Iowa? — Iowa", "How Many House Seats Will The Democrats Win In Iowa?"],
+  ["Will Andy Beshear and JD Vance be the 2028 Democratic and Republican nominees? — Andy Beshear and JD Vance", "Will Andy Beshear win the 2028 US Presidential Election?"],
+  ["Will Donald Trump endorse J.D. Vance in the 2028 presidential election before Mar 1, 2028? — J.D. Vance", "Will JD Vance win the 2028 US Presidential Election?"],
+  ["Will Latvia First win the 2026 Latvia parliamentary elections? — Latvia First", "Will Party L win the most seats in the 2026 Latvian parliamentary election?"],
+  ["Will the Democratic party win the House in 2028? — Democratic party", "Will Party D win the 2028 US Presidential Election?"],
 ];
 
 const ACCEPT_POL = [
+  ["Will Romeu Zema qualify for the runoff in the 2026 Brazilian presidential election? — Romeu Zema", "Will Romeu Zema qualify for Brazil's presidential runoff?"],
   ["Will Republicans win the Senate race in South Dakota? — Republican party", "Will the Republicans win the South Dakota Senate race in 2026?"],
   ["Will Republican win the House race for LA-03? — Republican party", "Will the Republican Party win the LA-03 House seat?"],
   ["Will Pete Buttigieg be the Democratic Presidential nominee in 2028? — Pete Buttigieg", "Will Pete Buttigieg win the 2028 Democratic presidential nomination?"],
@@ -77,6 +92,9 @@ const ACCEPT = [
   ["Will Bitcoin be above $100000 by October 1, 2026 at 12:00AM ET?", "Will Bitcoin hit $100k by September 30, 2026?", "crypto"],
   ["Will SOL trimmed mean be below $40.00 by 11:59 PM ET on Dec 31, 2026?", "Will Solana dip to $40 by December 31, 2026?", "crypto"],
   ["Will Elon Musk's net worth for December 31, 2026 be above $700 billion?", "Elon Musk Net Worth on December 31? — Above $700 B", "econ"],
+  ["When will OpenAI IPO? — Before Oct 1, 2026", "OpenAI IPO Officially Confirmed By — September 30, 2026", "econ"],
+  ["Will the Federal Reserve Cut rates by 25bps at their September 2026 meeting?", "Fed Decision in September — 25 bps Decrease", "econ"],
+  ["Will Musk have a net worth more than 1500 billion dollars before Dec 31, 2026?", "What Will Elon's Net Worth Hit By December 31? — $1.5T", "econ"],
   ["Will Marine Le Pen win the 2027 French presidential election?", "Will Marine Le Pen win the 2027 French presidential election?", "politics"],
   ["Will Trump recognize Somaliland? — Before 2027", "Will Trump recognize Somaliland before 2027?", "politics"],
   ["Will the U.S. confirm that aliens exist before 2027? — Before 2027", "Will the US confirm that aliens exist before 2027?", "politics"],
