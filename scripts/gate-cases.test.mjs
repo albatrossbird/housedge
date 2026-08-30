@@ -64,9 +64,21 @@ const REJECT_POL = [
   ["Will exactly 3 governors lose re-election in 2026? — Exactly 3", "Will the Republican Party hold exactly 30 or 31 governorships after the 2026 elections?"],
   ["Will the difference between the number of Republican governors and the number of Democratic governors be 4? — 4", "Will the Republican Party hold exactly 26 or 27 governorships after the 2026 elections?"],
   ["Will Greens win the next election to the German Bundestag? — Greens", "Will Grüne win the most seats in the 2026 Berlin state elections?"],
+  // Third round: winning a chamber is not winning the popular vote,
+  // and "more than 12" is 13 or more.
+  ["Will Democrats win the House in 2026? — Democratic Party", "2026 Midterms: House Popular Vote Winner? — Democratic Party"],
+  ["Will Republicans win the 2026 U.S. House of Representatives national popular vote? — Republicans win", "Will the Republican Party hold below 190 House seats after the 2026 midterm elections?"],
+  ["Will Democrats win more than 12 seats in the 2026 U.S. House of Representatives elections in Pennsylvania? — Above 12", "How Many House Seats Will The Democrats Win In Pennsylvania? — 12+"],
 ];
 
 const ACCEPT_POL = [
+  // Kalshi labels a district market with its CANDIDATE where Polymarket
+  // names the PARTY. Same claim, two levels of description — and the
+  // surnames here are the ones an internal capital breaks.
+  ["Will Democratic win the House race for GA-06? — Lucy McBath", "Will the Democratic Party win the GA-06 House seat?"],
+  ["Will Democratic win the House race for CT-03? — Rosa DeLauro", "Will the Democratic Party win the CT-03 House seat?"],
+  ["Will Republican win the House race for IL-16? — Darin LaHood", "Will the Republican Party win the IL-16 House seat?"],
+  ["Will the total 2026 U.S. House turnout be between 110 and 114.99 million? — 110 to 114.99 million", "2026 Midterms: House Turnout — 110-115 Million"],
   // The same convention, correctly aligned: Kalshi closes a band one
   // tick below the boundary Polymarket writes.
   ["Will the total 2026 U.S. House turnout be between 100 and 104.99 million? — 100 to 104.99 million", "2026 Midterms: House Turnout — 100-105 Million"],
