@@ -4,8 +4,8 @@
 // can drift.
 import fs from "node:fs";
 
-const src = fs.readFileSync(new URL("../pages/api/markets.js", import.meta.url), "utf8");
-const body = src.slice(src.indexOf("const REDUNDANT_SIDE"), src.indexOf("export default async function handler"));
+const src = fs.readFileSync(new URL("../lib/titles.js", import.meta.url), "utf8");
+const body = src.slice(src.indexOf("const REDUNDANT_SIDE")).replace("export function cleanTitle", "function cleanTitle");
 const cleanTitle = new Function(`${body}; return cleanTitle;`)();
 
 const cases = [
