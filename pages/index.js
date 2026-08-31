@@ -343,6 +343,18 @@ function MarketCard({ market }) {
           single blended number would quote a reader an edge on a venue
           they may not be able to trade. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${T.border}`, paddingTop: 12 }}>
+        {/* Kalshi's link belongs WITH the other venue links, not in the
+            footer opposite them. One was top-left of this block and the
+            other bottom-right of the card, so two links doing the same
+            job sat diagonally apart and neither lined up with anything.
+            Every venue link is now the same size, weight and left edge,
+            in the same order as the bars above. */}
+        <a
+          href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: 11, fontWeight: 700, color: T.kalshi, letterSpacing: "0.03em", textDecoration: "none" }}
+        >
+          Kalshi ↗
+        </a>
         {legs.map(l => {
           const legArb = l.arb && l.arb.profitable;
           return (
@@ -410,7 +422,7 @@ function MarketCard({ market }) {
         })}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.muted, flexWrap: "wrap", gap: 8 }}>
+      <div style={{ display: "flex", fontSize: 11, color: T.muted, flexWrap: "wrap", gap: 8 }}>
         {/* Per venue, in that venue's own unit. A cost figure on a market
             nobody has traded is not a quote anyone can take, so zero
             still earns a warning — but only where the venue actually
@@ -429,8 +441,6 @@ function MarketCard({ market }) {
             return "Volume not published";
           })()}
         </span>
-        <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
-          style={{ color: T.kalshi, fontWeight: 700, letterSpacing: "0.03em", textDecoration: "none" }}>Kalshi ↗</a>
       </div>
 
       {/* Collapsed by default. The grid is for scanning; this is for the
