@@ -560,7 +560,18 @@ const KALSHI_SERIES = [
 // So: get the category's series tickers from /series, then paginate all
 // open /events and keep the ones whose series_ticker is in that set.
 // One pass covers any category and replaces per-series fan-out.
-async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
+// What the last category sweep did, so a truncated one is visible.
+//
+// This paginates ALL open Kalshi events and keeps the ones whose series
+// belongs to the category, so the page cap is a cap on the WHOLE
+// exchange, not on the category. Hit it and the tail of the catalogue
+// is silently dropped — which is a category losing markets with every
+// counter still reporting success, the exact shape of failure this
+// project keeps rediscovering. Module-scoped is fine: a serverless
+// invocation handles one request.
+export const kalshiSweep = [];
+
+async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 60) {
   const sres = await fetch(
     `https://api.elections.kalshi.com/trade-api/v2/series?category=${encodeURIComponent(kalshiCategory)}`
   );
@@ -574,6 +585,7 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
   const out = [];
   let cursor = null;
   let pages = 0;
+  let eventsSeen = 0;
 
   while (pages < maxPages) {
     const url = new URL("https://api.elections.kalshi.com/trade-api/v2/events");
@@ -588,6 +600,7 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
     pages++;
 
     for (const ev of d.events || []) {
+      eventsSeen++;
       if (!tickers.has(ev.series_ticker)) continue;
       for (const m of ev.markets || []) {
         if (!m.ticker || m.ticker.startsWith("KXMVE") || !m.title) continue;
@@ -635,6 +648,18 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
   }
 
   await attachKalshiSeriesMeta(out);
+  kalshiSweep.push({
+    category: kalshiCategory,
+    pages,
+    maxPages,
+    // The alarm. Cursor exhausted means the sweep saw everything;
+    // stopping on the page cap means it did not, and anything past that
+    // point keeps whatever it already had in the database.
+    truncated: pages >= maxPages,
+    seriesInCategory: tickers.size,
+    eventsSeen,
+    marketsKept: out.length,
+  });
   return { markets: out, pages, seriesInCategory: tickers.size };
 }
 
@@ -675,6 +700,7 @@ async function fetchKalshiMarkets(sportFilter = "all") {
   // politics/crypto come from category enumeration, not the fixed
   // series list — see fetchKalshiByCategory for why.
   if (KALSHI_CATEGORIES[sportFilter]) {
+    kalshiSweep.length = 0;
     const cats = KALSHI_CATEGORIES[sportFilter];
     const results = await Promise.all(
       cats.map(c => fetchKalshiByCategory(c, sportFilter))
@@ -1272,6 +1298,7 @@ export default async function handler(req, res) {
         sport,
         embedded,
         embedRemaining,
+        kalshiSweep: [...kalshiSweep],
         totalKalshi: kalshiRaw.length,
         totalPoly: polyRaw.length,
         totalPolyUs: usGames.markets.length,

@@ -72,6 +72,15 @@ jobs:
             fi
 
             jq -r '"'"$CAT"' fetch: embedded=\(.embedded) remaining=\(.embedRemaining) marketsUpserted=\(.writes.marketsUpserted // "n/a")"' "fetch-$CAT.json"
+
+            # The category sweep paginates ALL open Kalshi events and keeps
+            # the ones in the category, so its page cap is a cap on the
+            # whole exchange. Hitting it drops the tail of the catalogue
+            # while every other counter still reports success — which is
+            # how six KXGDP markets kept a null resolution through a run
+            # that reported 7,101 markets upserted.
+            jq -r '(.kalshiSweep // [])[] | select(.truncated) | "::error::" + .category + ": Kalshi sweep TRUNCATED at " + (.pages|tostring) + " pages (" + (.eventsSeen|tostring) + " events seen) — the tail of the catalogue was not fetched"' "fetch-$CAT.json" || true
+            jq -r '(.kalshiSweep // [])[] | "  sweep \(.category): pages=\(.pages)/\(.maxPages) events=\(.eventsSeen) kept=\(.marketsKept) truncated=\(.truncated)"' "fetch-$CAT.json" || true
             REMAINING=$(jq -r '.embedRemaining // 0' "fetch-$CAT.json")
             if [ "$REMAINING" -gt 0 ]; then
               echo "::warning::$CAT: $REMAINING titles still need embedding; next run continues"
