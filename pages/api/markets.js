@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
 import { bestArb, complementBook } from "../../lib/fees.js";
+import { cleanTitle } from "../../lib/titles.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -254,37 +255,6 @@ function mergeByKalshiMarket(pairs) {
 //
 // So: only a bare comparator-and-value label, and only when that exact
 // value (with its unit) is already in the question.
-const REDUNDANT_SIDE =
-  /^(?:above|below|over|under|more than|less than|greater than|at least|at most)\s+(\$?\s*-?[\d,]+(?:\.\d+)?)\s*(%|k|m|bn|billion|trillion|million)?\.?$/i;
-
-function cleanTitle(raw) {
-  const t = String(raw || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
-
-  const parts = t.split(/\s+[\u2014\u2013-]\s+/);
-  if (parts.length < 2) return t;
-
-  const side = parts[parts.length - 1].trim();
-  const question = parts.slice(0, -1).join(" \u2014 ").trim();
-
-  const m = side.match(REDUNDANT_SIDE);
-  if (!m) return t;
-
-  const number = m[1].replace(/[$\s,]/g, "");
-  const unit = (m[2] || "").toLowerCase();
-  if (!number) return t;
-
-  // Whole-number match, so "2.0" cannot be satisfied by "2026".
-  const esc = number.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const statesNumber = new RegExp(`(?<![\\d.])${esc}(?![\\d])`).test(question.replace(/,/g, ""));
-  if (!statesNumber) return t;
-
-  // A unit on the label must also appear, or "700" alone could match a
-  // question about a different quantity entirely.
-  if (unit && !new RegExp(unit === "%" ? "%" : `\\b${unit}\\b`, "i").test(question)) return t;
-
-  return question;
-}
-
 export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];

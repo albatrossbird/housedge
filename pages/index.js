@@ -353,7 +353,7 @@ function MarketCard({ market }) {
 // ── Loading skeleton ───────────────────────────────────────────
 function Skeleton() {
   return (
-    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))" }}>
+    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fill, minmax(min(380px, 100%), 1fr))" }}>
       {[1,2,3,4,5,6].map(i => (
         <div key={i} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "18px 20px", height: 180 }}>
           <div style={{ height: 12, width: "60%", background: T.border, borderRadius: 6, marginBottom: 12 }} />
@@ -502,8 +502,8 @@ export default function HouseEdge() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Nav */}
-      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 24px", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", height: 56, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <span style={{ fontSize: 18, fontWeight: 800, color: T.text, letterSpacing: "-0.03em" }}>
               hous<span style={{ color: T.kalshi }}>edge</span>
@@ -541,7 +541,7 @@ export default function HouseEdge() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 24px" }}>
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px clamp(12px, 4vw, 24px)" }}>
         {/* Category tabs */}
         <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
           {Object.entries(CATEGORIES).map(([key, cat]) => (
@@ -584,7 +584,7 @@ export default function HouseEdge() {
               the filter kept applying — an empty tab with no way out.
               A segmented control also states the current venue at a
               glance, which a dropdown only does once you read it. */}
-          <div style={{ display: "flex", border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden", background: T.surface }}>
+          <div style={{ display: "flex", border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden", background: T.surface, flexShrink: 0 }}>
             {[
               { key: "us",     label: "US",     n: venueCounts.us || 0 },
               { key: "global", label: "Global", n: venueCounts.global || 0 },
@@ -734,7 +734,7 @@ export default function HouseEdge() {
         )}
 
         {!loading && !error && !unsupported && sorted.length > 0 && (
-          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))" }}>
+          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fill, minmax(min(380px, 100%), 1fr))" }}>
             {/* pairId, not id: `id` is the Kalshi market, and one Kalshi
                 market now yields two pairs (one per Polymarket venue).
                 Keying on it gave both cards the same key, so React reused
