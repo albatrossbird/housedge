@@ -64,9 +64,28 @@ function relevance(title, q) {
   const needle = q.toLowerCase().trim();
   if (!needle) return 0;
   if (t === needle) return 100;
-  if (t.startsWith(needle)) return 80;
-  if (new RegExp(`(^|[^a-z0-9])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(t)) return 60;
-  return 30;
+  if (new RegExp(`(^|[^a-z0-9])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(t)) return 50;
+  if (t.startsWith(needle)) return 45;
+  return 20;
+}
+
+// A market with no price, or one sitting at 0 or 1, is settled or was
+// never quoted. It is still a real answer to "does this market exist",
+// so it is ranked last rather than hidden — searching for a market and
+// being told nothing at all is worse than being told it is done.
+function isLive(row) {
+  const y = row.yes_price;
+  return typeof y === "number" && y > 0 && y < 1;
+}
+
+// Comparison is what the site is for, so a claim quoted on two venues
+// outranks one quoted on a single venue even when the single one
+// matches the words slightly better. Without this, searching "bitcoin"
+// put four settled "Bitcoin all time high by <past date>?" markets
+// above every matched pair, purely because their titles start with the
+// word.
+function score({ relevance: rel, kind, live }) {
+  return rel + (kind === "matched" ? 40 : 0) + (live ? 20 : -40);
 }
 
 async function chunkedIn(column, values, select) {
@@ -175,6 +194,7 @@ export default async function handler(req, res) {
           .map(p => ({ ...shape(byId.get(p.polymarket_id)), similarity: p.similarity }))
           .sort((a, b) => (a.platform === "polymarket_us" ? -1 : 1) - (b.platform === "polymarket_us" ? -1 : 1)),
         relevance: Math.max(relevance(k.title, q), ...ps.map(p => relevance(byId.get(p.polymarket_id).title, q))),
+        live: isLive(k) || ps.some(p => isLive(byId.get(p.polymarket_id))),
       });
     }
 
@@ -186,16 +206,12 @@ export default async function handler(req, res) {
         market: shape(row),
         counterparts: [],
         relevance: relevance(row.title, q),
+        live: isLive(row),
       });
     }
 
-    // Relevance first. Within equal relevance, a matched claim is more
-    // useful than a lone one, because comparing is what the site is for.
-    results.sort((a, b) =>
-      b.relevance - a.relevance ||
-      (b.kind === "matched") - (a.kind === "matched") ||
-      String(a.market.title).localeCompare(String(b.market.title))
-    );
+    for (const r of results) r.score = score(r);
+    results.sort((a, b) => b.score - a.score || String(a.market.title).localeCompare(String(b.market.title)));
 
     const trimmed = results.slice(0, limit);
     return res.status(200).json({
@@ -205,6 +221,7 @@ export default async function handler(req, res) {
         total: results.length,
         matched: results.filter(r => r.kind === "matched").length,
         unmatched: results.filter(r => r.kind === "unmatched").length,
+        settled: results.filter(r => !r.live).length,
         returned: trimmed.length,
       },
       // Search is DISCOVERY, not execution pricing. The arb figures live

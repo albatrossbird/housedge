@@ -367,6 +367,81 @@ function Skeleton() {
 }
 
 // ── Main app ───────────────────────────────────────────────────
+function priceCell(v) {
+  return v == null ? "—" : `${Math.round(v * 100)}%`;
+}
+
+// Volume is three different quantities and is never summed or compared
+// across venues: Kalshi reports CONTRACTS, polymarket.com US DOLLARS,
+// and polymarket.us publishes nothing. A bare number would invite the
+// reader to compare them.
+function volumeLabel(vol) {
+  if (!vol || vol.value == null) return null;
+  const n = vol.value >= 1e6 ? `${(vol.value / 1e6).toFixed(1)}M`
+          : vol.value >= 1e3 ? `${(vol.value / 1e3).toFixed(0)}K`
+          : String(Math.round(vol.value));
+  return vol.unit === "usd" ? `$${n}` : `${n} contracts`;
+}
+
+function VenueLine({ m, similarity }) {
+  const isK = m.platform === "kalshi";
+  const color = isK ? T.kalshi : T.poly;
+  const vol = volumeLabel(m.volume);
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "3px 0" }}>
+      <a href={m.url} target="_blank" rel="noopener noreferrer"
+         style={{ color, fontSize: 12, fontWeight: 700, textDecoration: "none", minWidth: 104 }}>
+        {m.venue} ↗
+      </a>
+      <span style={{ fontSize: 14, fontWeight: 700, color: T.text, minWidth: 44 }}>{priceCell(m.yes)}</span>
+      {vol && <span style={{ fontSize: 11, color: T.muted }}>{vol}</span>}
+      {similarity != null && similarity < 1 && (
+        <span style={{ fontSize: 11, color: T.muted }}>{Math.round(similarity * 100)}% match</span>
+      )}
+    </div>
+  );
+}
+
+function SearchResult({ r }) {
+  const matched = r.kind === "matched";
+  return (
+    <div style={{
+      border: `1px solid ${matched ? `${T.poly}44` : T.border}`,
+      borderRadius: 10, background: T.surface, padding: 14,
+      opacity: r.live ? 1 : 0.62,
+    }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 8 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase",
+          color: matched ? T.poly : T.muted,
+          background: matched ? `${T.poly}14` : "transparent",
+          padding: matched ? "2px 7px" : 0, borderRadius: 99,
+        }}>
+          {matched ? `On ${r.counterparts.length + 1} venues` : `Only on ${r.market.venue}`}
+        </span>
+        {r.category && <span style={{ fontSize: 10, color: T.muted }}>{r.category}</span>}
+        {/* A settled market is still a real answer to "does this exist".
+            Saying so beats hiding it and beats showing 0% unexplained. */}
+        {!r.live && <span style={{ fontSize: 10, color: T.muted }}>settled / not quoted</span>}
+      </div>
+
+      <div style={{ fontSize: 14, fontWeight: 600, color: T.text, lineHeight: 1.35, marginBottom: 8 }}>
+        {r.market.title}
+      </div>
+
+      <VenueLine m={r.market} />
+      {r.counterparts.map(c => (
+        <div key={c.id}>
+          <VenueLine m={c} similarity={c.similarity} />
+          {c.title !== r.market.title && (
+            <div style={{ fontSize: 11, color: T.muted, marginLeft: 112, marginTop: -2, marginBottom: 2 }}>{c.title}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function HouseEdge() {
   const [activeCategory, setActiveCategory] = useState("sports");
   const [sort, setSort] = useState("trending");
@@ -387,6 +462,9 @@ export default function HouseEdge() {
   const [needsEmbed, setNeedsEmbed] = useState(false);
   const [hidden, setHidden] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchData, setSearchData] = useState(null);
+  const [searching, setSearching] = useState(false);
 
   const loadMarkets = useCallback(async (categoryKey) => {
     const cat = CATEGORIES[categoryKey];
@@ -499,6 +577,31 @@ export default function HouseEdge() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oldestAge, loading, activeCategory]);
 
+  // Debounced, and every in-flight response is checked against the
+  // query that is current when it lands. Without that, a slow response
+  // for "bit" arrives after a fast one for "bitcoin" and overwrites it —
+  // the results then disagree with the box the reader is looking at.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setSearchData(null); setSearching(false); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const j = await r.json();
+        setQuery(cur => {
+          if (cur.trim() === q) { setSearchData(j.error ? { error: j.error } : j); setSearching(false); }
+          return cur;
+        });
+      } catch (e) {
+        setQuery(cur => { if (cur.trim() === q) { setSearchData({ error: String(e) }); setSearching(false); } return cur; });
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const searchMode = query.trim().length >= 2;
+
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Nav */}
@@ -542,6 +645,80 @@ export default function HouseEdge() {
       </div>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px clamp(12px, 4vw, 24px)" }}>
+        {/* Search comes FIRST, above the tabs.
+            The tabs answer "what did you find"; the box answers "what
+            about this one", which is the question a reader actually
+            arrives with. It searches the whole catalogue — ~23,000
+            markets against the ~1,000 that are paired — so a market
+            with no counterpart still comes back, and saying so is the
+            answer rather than a failure. */}
+        <div style={{ position: "relative", marginBottom: 18 }}>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === "Escape") setQuery(""); }}
+            placeholder="Search every market on Kalshi and Polymarket…"
+            aria-label="Search markets"
+            style={{
+              width: "100%", boxSizing: "border-box",
+              padding: "12px 40px 12px 14px",
+              fontSize: 15, color: T.text, background: T.surface,
+              border: `1px solid ${searchMode ? T.poly : T.border}`,
+              borderRadius: 10, outline: "none",
+              fontFamily: "inherit",
+            }}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              style={{
+                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                border: "none", background: "transparent", color: T.muted,
+                fontSize: 18, cursor: "pointer", padding: "4px 10px", lineHeight: 1,
+              }}
+            >×</button>
+          )}
+        </div>
+
+        {searchMode && (
+          <div style={{ marginBottom: 28 }}>
+            {searching && !searchData && (
+              <div style={{ color: T.muted, fontSize: 13, padding: "20px 0" }}>Searching…</div>
+            )}
+            {searchData && searchData.error && (
+              <div style={{ color: T.arb, fontSize: 13, padding: "20px 0" }}>Search failed: {searchData.error}</div>
+            )}
+            {searchData && !searchData.error && (
+              <>
+                <div style={{ fontSize: 12, color: T.muted, marginBottom: 12 }}>
+                  {searchData.counts.total === 0 ? (
+                    <>No markets matching “{searchData.query}”.</>
+                  ) : (
+                    <>
+                      <strong style={{ color: T.text }}>{searchData.counts.total}</strong>{" "}
+                      {searchData.counts.total === 1 ? "market" : "markets"} ·{" "}
+                      <strong style={{ color: T.poly }}>{searchData.counts.matched}</strong> quoted on more
+                      than one venue
+                      {searchData.counts.returned < searchData.counts.total && <> · showing {searchData.counts.returned}</>}
+                    </>
+                  )}
+                </div>
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))" }}>
+                  {searchData.results.map(r => <SearchResult key={`${r.kind}:${r.market.id}`} r={r} />)}
+                </div>
+                {searchData.counts.total > 0 && (
+                  <p style={{ marginTop: 14, fontSize: 11, color: T.muted }}>
+                    Prices are the last quotes we read. Cost to own both sides, fees and any
+                    arbitrage are worked out on the category tabs, where the books are priced
+                    properly — a midpoint gap is not an edge.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Category tabs */}
         <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
           {Object.entries(CATEGORIES).map(([key, cat]) => (
@@ -550,7 +727,7 @@ export default function HouseEdge() {
               /* The venue choice survives a category switch. Resetting it
                  silently re-showed .com markets the reader had just
                  chosen to hide. */
-              onClick={() => setActiveCategory(key)}
+              onClick={() => { setActiveCategory(key); setQuery(""); }}
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: `1px solid ${activeCategory === key ? T.kalshi : T.border}`,
@@ -565,6 +742,11 @@ export default function HouseEdge() {
           ))}
         </div>
 
+        {/* The browse view. Search replaces it rather than pushing it
+            down the page: results and an unrelated grid of pairs on
+            screen together is two answers to one question. */}
+        {!searchMode && (
+        <>
         {/* Sort controls */}
         <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
           <select
@@ -754,6 +936,8 @@ export default function HouseEdge() {
             Not shown: {hiddenReason(hidden)}. Pairs are only listed once both sides
             are confirmed to resolve on the same number.
           </p>
+        )}
+        </>
         )}
 
         {/* Legend */}
