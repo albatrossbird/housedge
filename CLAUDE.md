@@ -532,10 +532,10 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Cards | Stored pairs | US-tradable cards | Floor |
 |---|---|---|---|---|
-| sports (mlb) | 39 | 75 | 36 | exact join |
-| economics | 18 | 18 | 14 | 0.83 |
-| crypto | 17 | 18 | 4 | 0.88 |
-| politics | 4 | 4 | 0 | 0.94 |
+| sports (mlb) | 29 | 53 | 24 | exact join |
+| economics | 25 | 34 | 21 | 0.81 |
+| crypto | 16 | 27 | 4 | 0.88 |
+| politics | 394 | 905 | 51 | 0.86 |
 
 "Cards" is what the site renders — one per Kalshi market, with a leg per
 Polymarket venue. "US-tradable" counts cards carrying a `polymarket_us`
@@ -545,6 +545,28 @@ filter defaults to.
 "Shown" is lower than "stored" because `markets.js` drops prices outside
 0.05–0.95, and the extra politics pairs are long shots (the seven-person
 Venezuela set, pardon markets) trading under a nickel.
+
+**Politics went from 4 pairs to 905, and the gates are why.** Kalshi's
+Elections category is 12,331 embedded rows against Polymarket's 11,367,
+and the first run off Vercel accepted 1,234 pairs of which roughly 84%
+were wrong. Four audit rounds took it to 905 with two known-wrong. What
+the rounds cost is recorded in `scripts/gate-cases.test.mjs` — 48
+rejections against 43 pairs verified by hand — and every gate there
+exists because a real run produced a real wrong pair.
+
+**Read the whole accepted list before publishing, never the log tail.**
+`scripts/match-category.mjs --out=` writes every pair as TSV and the
+workflow uploads it; the log prints 40 and `acceptedPairs` caps at 100.
+A thousand pairs is only auditable collapsed into templated families —
+a systematically wrong family is one entry with 419 members, and
+invisible spread across 419 rows.
+
+**84 politics legs price as profitable, and that is not 84 findings.**
+80 of them are polymarket.com only, which a US account cannot trade,
+and of the 5 that are US-tradable NONE has ten contracts behind it. The
+largest edge on the tab is a quarter of a cent. The count looks alarming
+and the substance is thin, which is exactly what "an edge without a size
+is not a finding" means at scale.
 
 Economics: **6 verified-correct pairs** out of 2,208 Kalshi econ markets
 — five annual/quarterly real-GDP thresholds and the negative-growth

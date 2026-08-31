@@ -7,15 +7,25 @@
 // at the top of lib/matcher.js. The matching itself is the SAME code
 // the /api/embed route runs; only where it runs has changed.
 //
-//   node scripts/match-category.mjs politics [--dry] [--threshold=0.86]
+//   node scripts/match-category.mjs politics [--dry] [--threshold=0.86] [--out=dir]
+//
+// --out writes EVERY accepted pair as a TSV. The log prints the top 40
+// and matchDiagnostics.acceptedPairs is capped at 100, neither of which
+// is an audit of a run that accepted 1,196 pairs. A wrong pair renders a
+// fake arbitrage, so the whole list has to be readable before it is
+// published.
 //
 // Needs SUPABASE_URL and SUPABASE_KEY in the environment.
+
+import fs from "node:fs";
+import path from "node:path";
 
 import { matchNonSportsMarkets } from "../lib/matcher.js";
 
 const [, , category, ...flags] = process.argv;
 const dry = flags.includes("--dry");
 const thresholdArg = flags.find(f => f.startsWith("--threshold="));
+const outArg = flags.find(f => f.startsWith("--out="));
 
 const THRESHOLDS = { politics: 0.86, crypto: 0.88, econ: 0.81 };
 const threshold = thresholdArg ? parseFloat(thresholdArg.split("=")[1]) : (THRESHOLDS[category] ?? 0.81);
@@ -61,7 +71,7 @@ async function readAll(select, extra) {
 const t0 = Date.now();
 console.log(`category=${category} threshold=${threshold}${dry ? " (dry)" : ""}`);
 
-const sel = "id,title,sport_tag,embedding";
+const sel = "id,title,platform,sport_tag,embedding";
 const kalshi = await readAll(sel, `platform=eq.kalshi&sport_tag=eq.${category}&embedding=not.is.null`);
 const poly = await readAll(sel, `platform=in.(${POLY_PLATFORMS.join(",")})&sport_tag=eq.${category}&embedding=not.is.null`);
 console.log(`read kalshi=${kalshi.length} poly=${poly.length} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
@@ -75,8 +85,39 @@ const t1 = Date.now();
 const { newPairs, matchDiagnostics } = matchNonSportsMarkets(kalshi, poly, threshold);
 console.log(`matched ${newPairs.length} pairs in ${((Date.now() - t1) / 1000).toFixed(0)}s`);
 
+// A count alone does not say whether a run is 1,196 good pairs or 30
+// good ones and a templated family cross-matching itself. The shape of
+// the score distribution does, and it costs nothing to print.
+const buckets = new Map();
+for (const p of newPairs) {
+  const b = (Math.floor(p.similarity * 100) / 100).toFixed(2);
+  buckets.set(b, (buckets.get(b) || 0) + 1);
+}
+console.log("score distribution (accepted):");
+for (const b of [...buckets.keys()].sort().reverse()) {
+  console.log(`  ${b}  ${"#".repeat(Math.min(60, buckets.get(b)))} ${buckets.get(b)}`);
+}
+
 for (const p of (matchDiagnostics.acceptedPairs || []).slice(0, 40)) {
   console.log(`  ${p.score.toFixed(3)} | ${p.kalshi.slice(0, 58)} || ${p.poly.slice(0, 50)}`);
+}
+
+if (outArg) {
+  const dir = outArg.split("=")[1];
+  fs.mkdirSync(dir, { recursive: true });
+  const byId = new Map([...kalshi, ...poly].map(m => [m.id, m]));
+  const tsv = ["score\tvenue\tkalshi_id\tpoly_id\tkalshi_title\tpoly_title"];
+  for (const p of newPairs) {
+    const k = byId.get(p.kalshi_id), pm = byId.get(p.polymarket_id);
+    const cell = v => String(v ?? "").replace(/[\t\r\n]+/g, " ");
+    tsv.push([
+      p.similarity.toFixed(4), cell(pm?.platform), p.kalshi_id, p.polymarket_id,
+      cell(k?.title), cell(pm?.title),
+    ].join("\t"));
+  }
+  const file = path.join(dir, `pairs-${category}.tsv`);
+  fs.writeFileSync(file, tsv.join("\n") + "\n");
+  console.log(`wrote ${newPairs.length} rows to ${file}`);
 }
 
 if (dry) { console.log("dry run — nothing written"); process.exit(0); }
