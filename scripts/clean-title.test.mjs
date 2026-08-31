@@ -5,7 +5,12 @@
 import fs from "node:fs";
 
 const src = fs.readFileSync(new URL("../lib/titles.js", import.meta.url), "utf8");
-const body = src.slice(src.indexOf("const REDUNDANT_SIDE")).replace("export function cleanTitle", "function cleanTitle");
+// Bounded at the next export: this file grew a second helper, and an
+// unbounded slice swallowed it and failed to parse.
+const start = src.indexOf("const REDUNDANT_SIDE");
+const end = src.indexOf("export function polymarketUsUrl");
+const body = src.slice(start, end > start ? end : undefined)
+  .replace("export function cleanTitle", "function cleanTitle");
 const cleanTitle = new Function(`${body}; return cleanTitle;`)();
 
 const cases = [
