@@ -132,6 +132,40 @@ included** — a ~10s refresh every minute is ~43k runs and blows through
 it; every 5 minutes is ~8.6k runs and fits. Supabase's 5GB egress is the
 next ceiling after that.
 
+### Search (`/api/search`)
+
+The grid answers "what did we find". Search answers "what about this
+one", which is the question a reader arrives with. `markets` holds
+~23,000 rows and `pairs` covers about a thousand, so before this ~96%
+of the catalogue was invisible.
+
+Returns **one result per claim**: a matched set is one result carrying
+its venues, an unmatched market is one result on its own. "Only on
+Kalshi" is an answer, not a failure.
+
+- **Discovery, not execution pricing.** The arb figures stay in
+  `/api/markets` with the fee maths and the live depth re-check. A
+  second copy here would be a second place for them to drift, and a
+  midpoint gap rendered beside a price reads as an edge when it is not
+  one — midpoints said 98.5c on a pair that executes at 101.1c.
+- **One query per platform.** Volume is contracts on Kalshi, dollars on
+  polymarket.com and absent on polymarket.us, so a single query ordered
+  by volume ranks contracts against dollars. Volume orders within a
+  platform; relevance orders between them.
+- **Ranking is matched-and-live first, not best text match.** A prefix
+  match is a weaker signal than the site's whole purpose: "bitcoin" put
+  four settled "Bitcoin all time high by <past date>?" markets, quoted
+  at zero, above all 12 matched pairs. Settled markets rank last rather
+  than being hidden — being told a market is finished beats being told
+  nothing.
+- Never `select=*` (the ~20KB embedding), and pairs are read from both
+  directions, chunked at 200 ids.
+
+**Search is also the review queue.** What people look up and find
+unmatched is a demand signal for the matcher. Two found immediately:
+"fed rate" returns 8 markets and 0 matched, and "government shutdown"
+returns 9 across both venues with 0 matched.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
@@ -457,6 +491,21 @@ pairs it took.
 - The React key is the Kalshi id again. It was `pairId` precisely
   because one Kalshi market yielded two rows; merging removes the
   collision at its source.
+
+### Mobile
+
+**There was no viewport meta tag in the app at all**, so a phone laid
+the page out at ~980px and scaled the result down: every card "fit" and
+every word was unreadable. It lives in `_app.js`; Next rejects a
+viewport tag in `_document` and warns.
+
+The grid needs no media query. `minmax(380px, 1fr)` forces a track
+wider than a 375px screen; `minmax(min(380px, 100%), 1fr)` clamps it to
+the container, so one declaration gives two columns on a laptop and one
+on a phone. Gutters are `clamp(12px, 4vw, 24px)`.
+
+Verified in Chromium at 375x812 and 1280x900 against captured
+production data: `scrollWidth === clientWidth` at both.
 
 ### What the card must admit
 
