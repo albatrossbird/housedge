@@ -213,10 +213,96 @@ function SpreadBar({ market }) {
   );
 }
 
+// The contract, in the venue's own words.
+//
+// Every pair on this site is a CLAIM that two markets mean the same
+// thing, and until now the reader had no way to check it. Titles are
+// not the contract: "above $99,999.99" and "reach $100,000" are one
+// market reading as two, while "reach X by Dec 31" and "above X AT Dec
+// 31" are two reading as one — the second is a touch market and is
+// strictly likelier to resolve Yes. Both texts, side by side, is what
+// turns "trust the matcher" into something a person can verify.
+function Resolution({ label, color, text }) {
+  if (!text) return null;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: "0.04em", marginBottom: 3 }}>
+        {label} RESOLVES ON
+      </div>
+      <div style={{ fontSize: 12, color: T.text, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{text}</div>
+    </div>
+  );
+}
+
+function Details({ market, legs }) {
+  const anyResolution = market.resolution || legs.some(l => l.resolution);
+  return (
+    <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 12, marginTop: 2 }}>
+      {legs.map(leg => leg.arb && leg.arb.breakdown && (
+        <div key={`${leg.pairId}-cost`} style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, letterSpacing: "0.04em", marginBottom: 4 }}>
+            COST TO OWN BOTH SIDES · {leg.poly.venue.toUpperCase()}
+          </div>
+          {/* The total was asserted and never explained. Owning both
+              sides pays exactly $1.00, so what decides whether it is a
+              trade is what the two legs cost INCLUDING fees — and the
+              fee is the part a reader cannot see on either exchange. */}
+          {leg.arb.breakdown.map((b, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.muted, padding: "1px 0" }}>
+              <span>Buy {b.venue} {b.side}</span>
+              <span style={{ color: T.text, fontVariantNumeric: "tabular-nums" }}>{(b.cost * 100).toFixed(2)}¢</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, borderTop: `1px solid ${T.border}`, marginTop: 4, paddingTop: 4 }}>
+            <span style={{ color: T.text }}>Total, fees included</span>
+            <span style={{ color: leg.arb.profitable ? T.arb : T.text, fontVariantNumeric: "tabular-nums" }}>
+              {(leg.arb.cost * 100).toFixed(2)}¢
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>
+            Pays $1.00 · {leg.arb.edge >= 0 ? "+" : ""}{(leg.arb.edge * 100).toFixed(2)}¢ per contract
+            {leg.arb.maxContracts != null && (
+              <> · {leg.arb.depthKnown ? "" : "at most "}{Math.floor(leg.arb.maxContracts)} contract{Math.floor(leg.arb.maxContracts) === 1 ? "" : "s"} at this price</>
+            )}
+          </div>
+          {/* Polymarket publishes no size, so the binding leg may be
+              smaller than the one we can see. Saying "at most" is the
+              difference between a bound and a promise. */}
+          {!leg.arb.depthKnown && (
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>
+              Size is an upper bound — {leg.poly.venue} publishes no depth.
+            </div>
+          )}
+        </div>
+      ))}
+
+      {anyResolution ? (
+        <>
+          <Resolution label="KALSHI" color={T.kalshi} text={market.resolution} />
+          {legs.map(leg => (
+            <Resolution key={`${leg.pairId}-res`} label={leg.poly.venue.toUpperCase()} color={T.poly} text={leg.resolution} />
+          ))}
+          <div style={{ fontSize: 10, color: T.muted, lineHeight: 1.4 }}>
+            Read both before trading. A pair is our judgement that these two
+            contracts settle the same way; the venues' own words are the evidence.
+          </div>
+        </>
+      ) : (
+        /* The column is nullable and populates as discovery re-runs, so
+           an empty panel has to say WHY rather than look broken. */
+        <div style={{ fontSize: 11, color: T.muted }}>
+          Resolution text hasn't been fetched for this market yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MarketCard({ market }) {
   const isArb = arbAlert(market);
   const legs = legsOf(market);
   const age = cardAge(market);
+  const [open, setOpen] = useState(false);
 
   return (
     <div style={{
@@ -346,6 +432,24 @@ function MarketCard({ market }) {
         <a href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
           style={{ color: T.kalshi, fontWeight: 700, letterSpacing: "0.03em", textDecoration: "none" }}>Kalshi ↗</a>
       </div>
+
+      {/* Collapsed by default. The grid is for scanning; this is for the
+          one card a reader has decided to take seriously, and putting
+          the contract text on every card would bury the prices under
+          paragraphs of settlement language. */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          border: "none", background: "transparent", padding: 0, cursor: "pointer",
+          fontSize: 11, fontWeight: 600, color: T.muted, textAlign: "left",
+          fontFamily: "inherit", marginTop: -4,
+        }}
+      >
+        {open ? "Hide details ▲" : "How this settles, and what it costs ▼"}
+      </button>
+
+      {open && <Details market={market} legs={legs} />}
     </div>
   );
 }

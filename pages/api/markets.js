@@ -201,6 +201,10 @@ function mergeByKalshiMarket(pairs) {
         title: p.title,
         category: p.category,
         kalshi: p.kalshi,
+        // What the Kalshi side actually settles on. Null until
+        // migration 0011 has run and discovery has re-fetched, so the
+        // card must render without it.
+        resolution: p.resolution || null,
         legs: [],
       };
       byKalshi.set(p.id, card);
@@ -215,6 +219,7 @@ function mergeByKalshiMarket(pairs) {
       priceAgeSeconds: p.priceAgeSeconds,
       poly: p.poly,
       arb: p.arb,
+      resolution: p.polyResolution || null,
     });
   }
 
@@ -385,6 +390,11 @@ export default async function handler(req, res) {
           title: cleanTitle(row.k_title),
           polyTitle: cleanTitle(row.p_title),
           similarity: row.similarity,
+          // Never cleaned or truncated. This is the contract text, and
+          // the whole reason to show it is so the reader can check the
+          // two venues against each other rather than trust the match.
+          resolution: row.k_resolution || null,
+          polyResolution: row.p_resolution || null,
           category: row.k_sport_tag,
           _gameDate: extractTickerDate(row.kalshi_id),
           // How old the WORSE leg is. A pair is only as current as its
@@ -424,6 +434,20 @@ export default async function handler(req, res) {
             // of the two legs may be smaller still — depthKnown says so.
             maxContracts: arb.maxContracts,
             depthKnown: arb.depthKnown,
+            // What each leg costs, fees included. twoLegArb already
+            // computes these; surfacing them is what lets the card
+            // explain a total instead of asserting it. Derived HERE
+            // rather than in the client for the same reason the leg
+            // merging is: a second place to do this maths is a first
+            // place for it to disagree with the number beside it.
+            breakdown: [
+              arb.side === "kalshi-yes/poly-no"
+                ? { venue: "Kalshi", side: "YES", cost: Math.round(arb.r.costA * 10000) / 10000 }
+                : { venue: polyVenue, side: "YES", cost: Math.round(arb.r.costA * 10000) / 10000 },
+              arb.side === "kalshi-yes/poly-no"
+                ? { venue: polyVenue, side: "NO", cost: Math.round(arb.r.costB * 10000) / 10000 }
+                : { venue: "Kalshi", side: "NO", cost: Math.round(arb.r.costB * 10000) / 10000 },
+            ],
             edgeDollars: arb.maxContracts != null
               ? Math.round(arb.r.edge * arb.maxContracts * 100) / 100
               : null,

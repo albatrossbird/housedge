@@ -69,6 +69,10 @@ async function restFetch(path, options = {}) {
 const V1_BOOK_COLUMNS = [
   "bid", "ask", "no_bid", "no_ask", "bid_size", "ask_size",
   "fee_multiplier", "fee_schedule", "series_slug", "embedding_v",
+  // 0011. Same reason as the rest of this list — a deploy can land
+  // before the migration is run by hand, and PostgREST rejects the
+  // whole batch over one unknown column.
+  "resolution",
 ];
 
 export function stripBookColumns(row) {
@@ -616,6 +620,11 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 25) {
           slug:           null,
           outcomes:       null,
           outcome_prices: null,
+          // What the market actually settles on. The title is not the
+          // contract: "above $99,999.99" and "reach $100,000" are one
+          // market reading as two, and "reach X by Dec 31" and "above X
+          // AT Dec 31" are two reading as one.
+          resolution:     m.rules_primary || null,
           updated_at:     Math.floor(Date.now() / 1000),
         });
       }
@@ -719,6 +728,7 @@ async function fetchKalshiMarkets(sportFilter = "all") {
           slug:           null,
           outcomes:       null,
           outcome_prices: null,
+          resolution:     m.rules_primary || null,
           updated_at:     Math.floor(Date.now() / 1000),
         }));
     })
@@ -866,6 +876,10 @@ async function fetchPolymarkets(sportFilter = "all") {
               side_label:     m.groupItemTitle || null,
               outcomes:       m.outcomes || null,
               outcome_prices: m.outcomePrices || null,
+              // Gamma's name for the same thing Kalshi calls
+              // rules_primary. Stored in one venue-neutral column so
+              // the card can put them side by side.
+              resolution:     m.description || null,
               updated_at:     Math.floor(Date.now() / 1000),
             };
           });
