@@ -51,7 +51,7 @@ function marketUrl(row) {
     const q = String(row.title || "").split("—")[0].replace(/\*+/g, "").trim().slice(0, 80);
     return q ? `https://kalshi.com/search?q=${encodeURIComponent(q)}` : "https://kalshi.com/";
   }
-  if (row.platform === "polymarket_us") return polymarketUsUrl(row.slug);
+  if (row.platform === "polymarket_us") return polymarketUsUrl(row.slug, row.event_ticker);
   return row.slug ? `https://polymarket.com/event/${row.slug}` : "https://polymarket.com/";
 }
 

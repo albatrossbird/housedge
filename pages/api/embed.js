@@ -13,7 +13,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
 import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
-import { fetchUsGameMarket, fetchPolymarketUs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
+import { fetchUsGameMarket, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 // Matching lives in lib/ so this route and scripts/match-category.mjs
 // cannot drift — see the note at the top of that file.
 import { matchNonSportsMarkets, assignGreedy, cosineSimilarity } from "../../lib/matcher.js";
@@ -1153,7 +1153,14 @@ export default async function handler(req, res) {
       // every non-sports pair the site has surfaced so far sits on
       // polymarket.com, which a US trader cannot touch.
       const us = await fetchPolymarketUs();
-      const rows = us.markets.map(toMarketRow).filter(r => r && r.sport_tag === sport);
+      // The event slug is what makes a .us web link work, and it lives
+      // only on the events listing. A failure here costs links, not
+      // markets, so it must never take the fetch down with it.
+      let eventSlugs = new Map();
+      try { eventSlugs = await fetchUsEventSlugs(); } catch { /* links degrade to the market slug */ }
+      const rows = us.markets
+        .map(m => toMarketRow(m, eventSlugs.get(String(m.slug)) || null))
+        .filter(r => r && r.sport_tag === sport);
       usGames = {
         markets: rows,
         diagnostics: { fetched: us.markets.length, forCategory: rows.length, errors: us.errors.slice(0, 3) },
