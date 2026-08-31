@@ -361,19 +361,54 @@ Kalshi         Bitcoin above $199,999.99 by Dec 31 2026   0.03 / 0.04
 Polymarket US  Bitcoin above $200k by 12/31/2026          0.05
 ```
 
-Public market data: **`gateway.polymarket.us/v1`, no API key**.
-(`api.polymarket.us` is the authenticated *trading* API and is not used.)
+Public market data: **`gateway.polymarket.us/v1`, no API key** — and a
+key would not add any. Polymarket US's own quickstart says market data
+needs no authentication, and describes the keyed API as the one you
+"use to trade". The **one** thing a key unlocks that matters here is
+`wss://api.polymarket.us/v1/ws/markets` — market data, order book and
+trades over a socket, which is key-gated and would replace the polling
+this project does. It needs app KYC, and a socket needs an always-on
+worker Vercel functions cannot host, so it is an architecture change
+rather than a config one.
 
-- **Game markets are not returned by ANY list endpoint.** 1,200 events
-  paged from `/v1/events` contain zero `aec-` tickers, yet a direct
-  lookup of `aec-mlb-mil-nym-2026-08-27` returns a live book instantly.
-  I concluded from a listing sweep that `.us` had no per-game markets
-  and said so; it was wrong, and the same sweep will mislead anyone who
-  repeats it. **Games are reachable only by slug.**
+- **OPEN game markets are not returned by any list endpoint** — but
+  closed ones are, which is why a sweep of `/v1/events` looks like it
+  disproves this. `/v1/events` pages through `aec-` slugs
+  chronologically from Oct 2025; `/v1/events?closed=false` returns 600+
+  open events and **zero** games. So a game appears in the listing only
+  once it can no longer be traded. **Live games are reachable only by
+  slug**, which is why `.us` game discovery builds slugs from the `.com`
+  side rather than enumerating.
+- **`seriesSlug` is silently ignored.** `?seriesSlug=mlb-2026` and
+  `?seriesSlug=mlb` return byte-identical pages of 2025 NFL games —
+  the same trap as polymarket.com's ignored `tag=`/`search=`.
+  `closed=false` is a real filter; assume nothing else is without
+  checking that two different values return different rows.
 - Slugs are `aec-<league>-<away>-<home>-<yyyy-mm-dd>` using the **same
   team codes and the same order as `.com`**, so a `.us` slug rebuilds
   from a `.com` slug with no second alias table, and `polyOutcomeIndex`
   carries over unchanged.
+- **A `.us` WEB url is not `/event/<slug>`, and both shapes 404 in their
+  own way.** A game is
+  `/sports/<league>/<slug minus the aec- prefix>?marketSlug=<full slug>`.
+  Everything else is addressed by its PARENT EVENT —
+  `/event/us-saa-q3-2026-10-29?marketSlug=gdpc-us-saa-q3-2026-10-29-gt2pt0`,
+  where `/event/gdpc-...-gt2pt0` is a not-found page. Both were read off
+  polymarket.us's own markup; `lib/titles.js` builds them and
+  `scripts/poly-us-url.test.mjs` pins both branches.
+- **The event slug cannot be derived and is not on the market.** A `.us`
+  market carries no eventSlug, eventId or ticker, the family prefix
+  varies in length (gdpc, cpc, enwc, nphc, ushsscc, pnwpc, rdc, vtc),
+  and `cpc-btc-100k-10-31-2026` belongs to the event `btc-100k` — the
+  date is dropped. `fetchUsEventSlugs()` pages `/v1/events?closed=false`
+  to build the map and stores it in `event_ticker`. It is a lookup only,
+  so a gap there costs a link, never a market.
+- **Status codes cannot test a `.us` URL.** The wrong route answers
+  **200** and renders its not-found state client-side, and the `<title>`
+  is inconsistent between identical requests — the same URL gave
+  "Seattle Mariners vs. Boston Red Sox" once and a bare "Polymarket" the
+  next time. Grep the body for a `page-not-found` marker AND for content
+  that only the right page has, against a deliberately-wrong control.
 - **`/v1/markets/<slug>/bbo` publishes `bidDepth`/`askDepth`.**
   `polymarket.com` publishes no depth at all, so a US pair is the only
   one that can report `depthKnown: true` instead of an upper bound taken

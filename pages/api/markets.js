@@ -325,7 +325,7 @@ export default async function handler(req, res) {
         // .us routes GAMES under /sports/<league>/..., not /event/ —
         // see lib/titles.js. Every sports pair's .us link was a 404.
         const polyUrl = isPolyUs
-          ? polymarketUsUrl(row.p_slug)
+          ? polymarketUsUrl(row.p_slug, row.p_event_ticker)
           : (row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/");
         const polyVenue = isPolyUs ? "Polymarket US" : "Polymarket (global)";
 
