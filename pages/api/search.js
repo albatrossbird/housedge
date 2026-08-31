@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-import { cleanTitle } from "../../lib/titles.js";
+import { cleanTitle, polymarketUsUrl } from "../../lib/titles.js";
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
@@ -51,8 +51,8 @@ function marketUrl(row) {
     const q = String(row.title || "").split("—")[0].replace(/\*+/g, "").trim().slice(0, 80);
     return q ? `https://kalshi.com/search?q=${encodeURIComponent(q)}` : "https://kalshi.com/";
   }
-  const host = row.platform === "polymarket_us" ? "https://polymarket.us" : "https://polymarket.com";
-  return row.slug ? `${host}/event/${row.slug}` : `${host}/`;
+  if (row.platform === "polymarket_us") return polymarketUsUrl(row.slug);
+  return row.slug ? `https://polymarket.com/event/${row.slug}` : "https://polymarket.com/";
 }
 
 // How well a title answers what was typed. Volume cannot rank across

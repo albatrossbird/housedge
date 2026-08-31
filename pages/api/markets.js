@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
 import { bestArb, complementBook } from "../../lib/fees.js";
-import { cleanTitle } from "../../lib/titles.js";
+import { cleanTitle, polymarketUsUrl } from "../../lib/titles.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -322,8 +322,11 @@ export default async function handler(req, res) {
         // they cannot trade is the same class of error as a dead link,
         // and worse because it looks like it worked.
         const isPolyUs = row.p_platform === "polymarket_us";
-        const polyHost = isPolyUs ? "https://polymarket.us" : "https://polymarket.com";
-        const polyUrl = row.p_slug ? `${polyHost}/event/${row.p_slug}` : `${polyHost}/`;
+        // .us routes GAMES under /sports/<league>/..., not /event/ —
+        // see lib/titles.js. Every sports pair's .us link was a 404.
+        const polyUrl = isPolyUs
+          ? polymarketUsUrl(row.p_slug)
+          : (row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/");
         const polyVenue = isPolyUs ? "Polymarket US" : "Polymarket (global)";
 
         // ── Executable pricing ─────────────────────────────────
