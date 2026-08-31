@@ -266,6 +266,23 @@ function cleanTitle(raw) {
   const side = parts[parts.length - 1].trim();
   const question = parts.slice(0, -1).join(" \u2014 ").trim();
 
+  // A label the question already states in full adds nothing. Kalshi
+  // labels a candidate market with the candidate, so "Will Jon Ossoff
+  // be the Democratic Presidential nominee in 2028? — Jon Ossoff" says
+  // the name twice, on every one of 394 politics cards.
+  //
+  // Not on a MATCHUP, though. "Miami vs Washington (Aug 29) — Miami"
+  // names both teams in the question, so there the label is the only
+  // thing saying which side the price belongs to — dropping it is the
+  // exact regression this function was tightened to stop. A question
+  // naming one subject and a question naming two are different cases,
+  // and "vs" is what separates them.
+  const isMatchup = /\bv(?:s\.?|\.)\s/i.test(question);
+  if (!isMatchup && side.length >= 3) {
+    const escSide = side.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^\\w])${escSide}([^\\w]|$)`, "i").test(question)) return question;
+  }
+
   const m = side.match(REDUNDANT_SIDE);
   if (!m) return t;
 
