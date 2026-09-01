@@ -531,6 +531,7 @@ async function attachKalshiSeriesMeta(rows) {
 // ── Fetch Kalshi markets ───────────────────────────────────────
 const KALSHI_SERIES = [
   { ticker: "KXWCGAME",    sport: "soccer"   },
+  { ticker: "KXNFLGAME",   sport: "nfl"      },
   { ticker: "KXNBAGAME",   sport: "nba"      },
   { ticker: "KXNHLGAME",   sport: "nhl"      },
   { ticker: "KXMLBGAME",   sport: "mlb"      },
@@ -820,6 +821,7 @@ const POLY_TAGS = [
   { tag: "745",    sport: "nba"    },
   { tag: "899",    sport: "nhl"    },
   { tag: "100381", sport: "mlb"    },
+  { tag: "450",    sport: "nfl"    },
   { tag: "129",    sport: "econ"   }, // federal reserve
   { tag: "131",    sport: "econ"   }, // interest rates (rate-level questions, vs "federal reserve"'s hike-count ones)
   { tag: "101249", sport: "econ"   }, // Macro Inflation (CPI)
@@ -837,7 +839,7 @@ const POLY_TAGS = [
 // everything else - a Fed decision, for instance, can legitimately have
 // more than 4 rate-bucket outcomes. Non-sports tags skip that filter and
 // let embedding similarity do the filtering instead.
-const SPORTS_TAGS = new Set(["mlb", "nba", "nhl", "soccer"]);
+const SPORTS_TAGS = new Set(["mlb", "nba", "nhl", "soccer", "nfl"]);
 
 async function fetchPolymarkets(sportFilter = "all") {
   const tags = sportFilter === "all"

@@ -19,7 +19,7 @@ on:
     inputs:
       categories:
         description: "Space-separated categories to run"
-        default: "mlb nba nhl soccer econ crypto politics"
+        default: "mlb nfl nba nhl soccer econ crypto politics"
         required: false
 
 concurrency:
@@ -34,7 +34,7 @@ jobs:
       - name: Run /api/embed per category
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nba nhl soccer econ crypto politics' }}
+          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nfl nba nhl soccer econ crypto politics' }}
         run: |
           set -uo pipefail
           FAILED=0
@@ -95,7 +95,7 @@ jobs:
             # workflow is already handling. Sports still matches here:
             # it is an exact join, not a similarity sweep, and it is
             # fast.
-            case " mlb nba nhl soccer " in
+            case " mlb nfl nba nhl soccer " in
               *" $CAT "*) ;;
               *)
                 echo "$CAT: fetch done — matching runs in match-markets.yml"
