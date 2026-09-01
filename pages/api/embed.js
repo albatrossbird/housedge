@@ -563,30 +563,34 @@ const KALSHI_SERIES = [
 // One pass covers any category and replaces per-series fan-out.
 // What the last category sweep did, so a truncated one is visible.
 //
-// This paginates ALL open Kalshi events and keeps the ones whose series
-// belongs to the category, so the page cap is a cap on the WHOLE
-// exchange, not on the category. Hit it and the tail of the catalogue
-// is silently dropped — which is a category losing markets with every
-// counter still reporting success, the exact shape of failure this
-// project keeps rediscovering. Module-scoped is fine: a serverless
-// invocation handles one request.
+// Kalshi has NO server-side category filter on /events. `?category=`
+// is silently ignored — Economics, Crypto and a deliberately-invalid
+// value return byte-identical pages — the same trap as polymarket.us's
+// `seriesSlug` and polymarket.com's `tag=`. `?series_ticker=` IS real
+// (an invalid one returns []), but Elections alone is 1,662 series, so
+// per-series calls are far worse than paging. The sweep therefore
+// stays client-side: page the exchange, keep what belongs to the
+// category.
+//
+// Module-scoped is fine: a serverless invocation handles one request.
 export const kalshiSweep = [];
 
-async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 60) {
-  const sres = await fetch(
-    `https://api.elections.kalshi.com/trade-api/v2/series?category=${encodeURIComponent(kalshiCategory)}`
-  );
-  if (!sres.ok) return { markets: [], pages: 0, seriesInCategory: 0 };
-  const sdata = await sres.json();
-  const tickers = new Set(
-    (sdata.series || []).map(x => x.ticker).filter(Boolean)
-  );
-  if (!tickers.size) return { markets: [], pages: 0, seriesInCategory: 0 };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  const out = [];
+// ONE pagination of the exchange per invocation, shared by every
+// category in it.
+//
+// Each category used to page all 12,356 open events for itself, and
+// `Promise.all` ran them CONCURRENTLY — econ fired an Economics sweep
+// and a Financials sweep at the same rate-limited endpoint to fetch the
+// same pages twice. Sharing one sequential pass halves the requests for
+// econ and politics and removes the self-inflicted concurrency.
+let openEventsOnce = null;
+
+async function fetchAllOpenEvents(maxPages = 150) {
+  const events = [];
   let cursor = null;
   let pages = 0;
-  let eventsSeen = 0;
 
   while (pages < maxPages) {
     const url = new URL("https://api.elections.kalshi.com/trade-api/v2/events");
@@ -595,73 +599,139 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag, maxPages = 60) {
     url.searchParams.set("with_nested_markets", "true");
     if (cursor) url.searchParams.set("cursor", cursor);
 
-    const r = await fetch(url);
-    if (!r.ok) break;
-    const d = await r.json();
-    pages++;
-
-    for (const ev of d.events || []) {
-      eventsSeen++;
-      if (!tickers.has(ev.series_ticker)) continue;
-      for (const m of ev.markets || []) {
-        if (!m.ticker || m.ticker.startsWith("KXMVE") || !m.title) continue;
-        out.push({
-          id:             m.ticker,
-          platform:       "kalshi",
-          title:          kalshiGameTitle(m) ||
-                          (m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
-          yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
-          no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
-          // TOTAL volume, not 24h. The other order understated every
-          // Kalshi market by roughly sixty times: across KXFED's 98
-          // markets, volume_24h_fp sums to 72k against volume_fp's
-          // 4.29M. A market with 10,260 contracts traded and 6 of them
-          // today rendered as "6".
-          volume:         parseFloat(m.volume_fp || m.volume_24h_fp || 0),
-          // The real books. yes_price above is the ask, which is what
-          // v1 has always stored as though it were a mid.
-          bid:            num(m.yes_bid_dollars),
-          ask:            num(m.yes_ask_dollars),
-          // Kalshi's NO side is its own book, not 1 - yes.
-          no_bid:         num(m.no_bid_dollars),
-          no_ask:         num(m.no_ask_dollars),
-          bid_size:       num(m.yes_bid_size_fp),
-          ask_size:       num(m.yes_ask_size_fp),
-          close_time:     m.close_time || null,
-          sport_tag:      sportTag,
-          event_ticker:   m.event_ticker || ev.event_ticker || m.ticker,
-          side_label:     m.yes_sub_title || null,
-          slug:           null,
-          outcomes:       null,
-          outcome_prices: null,
-          // What the market actually settles on. The title is not the
-          // contract: "above $99,999.99" and "reach $100,000" are one
-          // market reading as two, and "reach X by Dec 31" and "above X
-          // AT Dec 31" are two reading as one.
-          resolution:     m.rules_primary || null,
-          updated_at:     Math.floor(Date.now() / 1000),
-        });
+    // A rejected page must never read as an exhausted cursor. The old
+    // loop did `if (!r.ok) break` and then reported
+    // `truncated: pages >= maxPages`, which is FALSE when the break came
+    // from an error — so a sweep that died on page 3 was indistinguishable
+    // from one that saw the whole exchange. Econ shipped 600 of 12,356
+    // events that way and reported a clean run, which is how six KXGDP
+    // markets kept a null resolution through a run that upserted 1,729.
+    let page = null;
+    let failure = null;
+    for (let attempt = 0; attempt < 4 && !page; attempt++) {
+      if (attempt) await sleep(500 * 2 ** attempt);
+      try {
+        const r = await fetch(url);
+        if (r.ok) { page = await r.json(); break; }
+        failure = `HTTP ${r.status}: ${(await r.text()).slice(0, 160)}`;
+      } catch (e) {
+        failure = e?.cause?.code || e?.message || String(e);
       }
     }
 
-    cursor = d.cursor;
-    if (!cursor) break;
+    if (!page) {
+      return {
+        events, pages, complete: false,
+        failure: `page ${pages + 1} failed after 4 attempts — ${failure}`,
+      };
+    }
+
+    pages++;
+    for (const ev of page.events || []) events.push(ev);
+
+    cursor = page.cursor;
+    // An exhausted cursor is the ONLY clean end. Everything else is a
+    // sweep that did not see the whole exchange, and says so.
+    if (!cursor) return { events, pages, complete: true, failure: null };
+  }
+
+  return {
+    events, pages, complete: false,
+    failure: `page cap ${maxPages} reached with a cursor still open`,
+  };
+}
+
+function openEvents() {
+  if (!openEventsOnce) openEventsOnce = fetchAllOpenEvents();
+  return openEventsOnce;
+}
+
+async function fetchKalshiByCategory(kalshiCategory, sportTag) {
+  const sres = await fetch(
+    `https://api.elections.kalshi.com/trade-api/v2/series?category=${encodeURIComponent(kalshiCategory)}`
+  );
+  if (!sres.ok) {
+    kalshiSweep.push({
+      category: kalshiCategory, pages: 0, complete: false,
+      failure: `series list: HTTP ${sres.status}`,
+      seriesInCategory: 0, eventsSeen: 0, marketsKept: 0, truncated: true,
+    });
+    return { markets: [], pages: 0, seriesInCategory: 0 };
+  }
+  const sdata = await sres.json();
+  const tickers = new Set(
+    (sdata.series || []).map(x => x.ticker).filter(Boolean)
+  );
+  if (!tickers.size) {
+    kalshiSweep.push({
+      category: kalshiCategory, pages: 0, complete: false,
+      failure: "series list was empty",
+      seriesInCategory: 0, eventsSeen: 0, marketsKept: 0, truncated: true,
+    });
+    return { markets: [], pages: 0, seriesInCategory: 0 };
+  }
+
+  const sweep = await openEvents();
+
+  const out = [];
+  for (const ev of sweep.events) {
+    if (!tickers.has(ev.series_ticker)) continue;
+    for (const m of ev.markets || []) {
+      if (!m.ticker || m.ticker.startsWith("KXMVE") || !m.title) continue;
+      out.push({
+        id:             m.ticker,
+        platform:       "kalshi",
+        title:          kalshiGameTitle(m) ||
+                        (m.yes_sub_title ? `${m.title} — ${m.yes_sub_title}` : m.title),
+        yes_price:      m.yes_ask_dollars ? parseFloat(m.yes_ask_dollars) : null,
+        no_price:       m.yes_ask_dollars ? 1 - parseFloat(m.yes_ask_dollars) : null,
+        // TOTAL volume, not 24h. The other order understated every
+        // Kalshi market by roughly sixty times: across KXFED's 98
+        // markets, volume_24h_fp sums to 72k against volume_fp's
+        // 4.29M. A market with 10,260 contracts traded and 6 of them
+        // today rendered as "6".
+        volume:         parseFloat(m.volume_fp || m.volume_24h_fp || 0),
+        // The real books. yes_price above is the ask, which is what
+        // v1 has always stored as though it were a mid.
+        bid:            num(m.yes_bid_dollars),
+        ask:            num(m.yes_ask_dollars),
+        // Kalshi's NO side is its own book, not 1 - yes.
+        no_bid:         num(m.no_bid_dollars),
+        no_ask:         num(m.no_ask_dollars),
+        bid_size:       num(m.yes_bid_size_fp),
+        ask_size:       num(m.yes_ask_size_fp),
+        close_time:     m.close_time || null,
+        sport_tag:      sportTag,
+        event_ticker:   m.event_ticker || ev.event_ticker || m.ticker,
+        side_label:     m.yes_sub_title || null,
+        slug:           null,
+        outcomes:       null,
+        outcome_prices: null,
+        // What the market actually settles on. The title is not the
+        // contract: "above $99,999.99" and "reach $100,000" are one
+        // market reading as two, and "reach X by Dec 31" and "above X
+        // AT Dec 31" are two reading as one.
+        resolution:     m.rules_primary || null,
+        updated_at:     Math.floor(Date.now() / 1000),
+      });
+    }
   }
 
   await attachKalshiSeriesMeta(out);
   kalshiSweep.push({
     category: kalshiCategory,
-    pages,
-    maxPages,
-    // The alarm. Cursor exhausted means the sweep saw everything;
-    // stopping on the page cap means it did not, and anything past that
-    // point keeps whatever it already had in the database.
-    truncated: pages >= maxPages,
+    pages: sweep.pages,
+    // The alarm, and it now has one meaning. `complete` is true only on
+    // an exhausted cursor; a failed page and a hit page cap are both
+    // false and both carry the reason.
+    complete: sweep.complete,
+    truncated: !sweep.complete,
+    failure: sweep.failure,
     seriesInCategory: tickers.size,
-    eventsSeen,
+    eventsSeen: sweep.events.length,
     marketsKept: out.length,
   });
-  return { markets: out, pages, seriesInCategory: tickers.size };
+  return { markets: out, pages: sweep.pages, seriesInCategory: tickers.size };
 }
 
 // Categories fetched by enumeration rather than a fixed series list.
@@ -702,10 +772,14 @@ async function fetchKalshiMarkets(sportFilter = "all") {
   // series list — see fetchKalshiByCategory for why.
   if (KALSHI_CATEGORIES[sportFilter]) {
     kalshiSweep.length = 0;
+    openEventsOnce = null;
     const cats = KALSHI_CATEGORIES[sportFilter];
-    const results = await Promise.all(
-      cats.map(c => fetchKalshiByCategory(c, sportFilter))
-    );
+    // Sequential, not Promise.all. The two categories now share one
+    // pagination of the exchange, but each still makes its own
+    // series-list and per-series metadata calls, and firing those
+    // concurrently is load this endpoint does not need.
+    const results = [];
+    for (const c of cats) results.push(await fetchKalshiByCategory(c, sportFilter));
     // Dedupe: a series listed under two categories would otherwise be
     // fetched twice and upserted twice.
     const byId = new Map();
