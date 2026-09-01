@@ -816,6 +816,26 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - Base URL must be `https://api.elections.kalshi.com/trade-api/v2` — `api.kalshi.com` and `trading-api.kalshi.com` are wrong/dead.
 - Prices come from `yes_ask_dollars`/`yes_bid_dollars` as decimal strings (`"0.4200"`), not the `_fp` fields (those return `"0.00"`).
 - Default `/markets` is dominated by `KXMVE*` parlay tickers — always filter `!ticker.startsWith("KXMVE")`.
+- **`/events` has NO server-side category filter.** `?category=Economics`,
+  `?category=Crypto` and a deliberately-invalid value return
+  **byte-identical pages** — the same trap as polymarket.us's
+  `seriesSlug` and polymarket.com's `tag=`/`search=`. `?series_ticker=`
+  IS real (an invalid one returns `[]`), but Elections alone is 1,662
+  series against 62 pages for the whole exchange, so per-series calls
+  are far worse than paging. Category selection has to happen
+  client-side, which is why the sweep pages everything and filters.
+- **A whole-exchange sweep is 62 pages / 12,356 open events** (measured
+  2026-09-01). Any sweep reporting materially fewer has not seen the
+  exchange, whatever its own counters say — the first version reported
+  `truncated: pages >= maxPages`, which is FALSE when the loop broke on
+  an HTTP error, so econ shipped **600 of 12,356 events and reported a
+  clean run**. `complete` is now true only on an exhausted cursor, a
+  failed page retries four times with backoff and then names the status
+  and body, and an incomplete sweep fails the workflow. The sweep is
+  also fetched **once per invocation and shared**: econ ran Economics
+  and Financials through `Promise.all`, paginating the same 12,356
+  events twice, concurrently, against an endpoint that rate-limits
+  datacenter IPs.
 - **Web URLs are three segments**: `/markets/<series>/<event-slug>/<event-ticker>`, all lowercase.
 
   ```

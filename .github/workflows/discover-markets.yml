@@ -74,13 +74,22 @@ jobs:
             jq -r '"'"$CAT"' fetch: embedded=\(.embedded) remaining=\(.embedRemaining) marketsUpserted=\(.writes.marketsUpserted // "n/a")"' "fetch-$CAT.json"
 
             # The category sweep paginates ALL open Kalshi events and keeps
-            # the ones in the category, so its page cap is a cap on the
-            # whole exchange. Hitting it drops the tail of the catalogue
-            # while every other counter still reports success — which is
-            # how six KXGDP markets kept a null resolution through a run
-            # that reported 7,101 markets upserted.
-            jq -r '(.kalshiSweep // [])[] | select(.truncated) | "::error::" + .category + ": Kalshi sweep TRUNCATED at " + (.pages|tostring) + " pages (" + (.eventsSeen|tostring) + " events seen) — the tail of the catalogue was not fetched"' "fetch-$CAT.json" || true
-            jq -r '(.kalshiSweep // [])[] | "  sweep \(.category): pages=\(.pages)/\(.maxPages) events=\(.eventsSeen) kept=\(.marketsKept) truncated=\(.truncated)"' "fetch-$CAT.json" || true
+            # the ones in the category — Kalshi has no server-side category
+            # filter — so anything that ends the pass early drops the tail
+            # of the catalogue while every other counter reports success.
+            #
+            # `complete` is true ONLY on an exhausted cursor. It replaced
+            # `truncated`, which was computed as `pages >= maxPages` and so
+            # read FALSE when the sweep died on an HTTP error: econ shipped
+            # 600 of 12,356 events and reported a clean run, which is how
+            # six KXGDP markets kept a null resolution through a run that
+            # upserted 1,729 markets. An incomplete sweep fails the job.
+            jq -r '(.kalshiSweep // [])[] | select(.complete | not) | "::error::" + .category + ": Kalshi sweep INCOMPLETE after " + (.pages|tostring) + " pages (" + (.eventsSeen|tostring) + " events seen) — " + (.failure // "no reason reported") + " — the tail of the catalogue was not fetched"' "fetch-$CAT.json" || true
+            jq -r '(.kalshiSweep // [])[] | "  sweep \(.category): pages=\(.pages) events=\(.eventsSeen) kept=\(.marketsKept) complete=\(.complete)\(if .failure then " failure=\(.failure)" else "" end)"' "fetch-$CAT.json" || true
+            if jq -e '(.kalshiSweep // []) | map(select(.complete | not)) | length > 0' "fetch-$CAT.json" >/dev/null 2>&1; then
+              FAILED=1
+            fi
+
             REMAINING=$(jq -r '.embedRemaining // 0' "fetch-$CAT.json")
             if [ "$REMAINING" -gt 0 ]; then
               echo "::warning::$CAT: $REMAINING titles still need embedding; next run continues"
