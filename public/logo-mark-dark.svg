@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 274 280" role="img" aria-label="MarketSlap">
   <defs>
     <linearGradient id="mdTop" gradientUnits="userSpaceOnUse" x1="550" y1="2030" x2="2480" y2="2620">
-      <stop offset="0" stop-color="#4B36DC"/><stop offset="1" stop-color="#8A6BFF"/>
+      <stop offset="0" stop-color="#6650F2"/><stop offset="1" stop-color="#9B80FF"/>
     </linearGradient>
     <linearGradient id="mdBot" gradientUnits="userSpaceOnUse" x1="280" y1="260" x2="2260" y2="760">
-      <stop offset="0" stop-color="#3E63F0"/><stop offset="1" stop-color="#1B3AA8"/>
+      <stop offset="0" stop-color="#4E76FF"/><stop offset="1" stop-color="#3358DB"/>
     </linearGradient>
   </defs>
   <g transform="translate(0,280) scale(0.1,-0.1)">
