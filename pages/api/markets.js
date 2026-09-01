@@ -13,7 +13,7 @@ const supabase = createClient(
 );
 
 const SPORT_TAGS = {
-  sports:    ["soccer", "nba", "nhl", "mlb"],
+  sports:    ["soccer", "nba", "nhl", "mlb", "nfl"],
   economics: ["econ"],
   crypto:    ["crypto"],
   politics:  ["politics"],

@@ -313,9 +313,17 @@ correctly and then price the wrong half of it.
 - The Kalshi side suffix (`-NYM`) is what makes the concatenated team
   blob splittable: `MILNYM` minus `NYM` leaves `MIL`. There is no other
   unambiguous split point between two variable-length codes.
-- `TEAM_CODE_ALIASES` maps Kalshi codes to Polymarket's. It has **two**
-  entries (`AZ→ARI`, `ATH→OAK`) — the venues agree on every other MLB
-  code. This replaced a 30-entry full-name map per league.
+- `TEAM_CODE_ALIASES` maps Kalshi codes to Polymarket's, and is
+  deliberately codes rather than names. Diffing all 32 NFL codes on both
+  venues turned up exactly two disagreements, same as MLB's two — the
+  venues agree on nearly everything, which is why this replaced a
+  30-entry full-name map per league.
+  **The Los Angeles pair is a trap**: Polymarket writes the Rams as
+  `LA` but the Chargers as `LAC`, so `LAR→LA` while `LAC` needs no
+  alias. One rule for "both LA teams" pairs the wrong club and prices
+  the wrong half of the game.
+  The map is flat across leagues, so a new league's codes have to be
+  checked against the existing entries, not just against its own venue.
 - **`polyOutcomeIndex()` decides which Polymarket price belongs to a
   Kalshi side.** Slug order matches `outcomes` order on every 2026
   fixture Polymarket lists (45/45), so it is a lookup. Do not go back to
@@ -821,7 +829,29 @@ $$ LANGUAGE sql SECURITY DEFINER;
 1. **Embedding storage is the real tier pressure, and `/api/prune` does not touch it.** ~11,300 embedded rows (politics 7,443, crypto 3,870) at ~20KB of JSON-encoded floats each is roughly 225MB of a 500MB tier, and only 62 of them are in a pair. They cannot simply be deleted — the unpaired ones *are* the candidate pool, and dropping them means re-embedding next run. **pgvector is the lever**: `vector(1024)` as float4 is ~4KB against ~20KB, a 5x reduction with no loss of function. Already the plan in `docs/architecture-v2.md`; now the thing standing between this project and the ceiling.
 2. **Polymarket publishes no depth.** Gamma exposes aggregate liquidity but no size at the touch, so any leg on that venue reports `depthKnown: false` and `maxContracts` is an upper bound set by the Kalshi leg alone. Closing this means the CLOB API (`clob.polymarket.com/book`), which is a per-market call on a different host.
 3. **Polymarket outcome-price ordering** — `outcomePrices` vs `outcomes` index misalignment can attribute the wrong side's price. A sanity check (`prices[0] + prices[1] ≈ 1.0`, both in 0.05–0.95) would catch a misindexed pick.
-5. **Only MLB and NBA are verified against the game-key join.** NHL and soccer had zero open Kalshi markets when it was built, so their ticker and slug conventions are untested — `TEAM_CODE_ALIASES` may need entries per league. `kalshiKeyFailures` in `matchDiagnostics` is what will say so.
+5. **We fetch four of Kalshi's 262 per-game series, and two are out of
+   season.** `KXWCGAME` (World Cup) and `KXNHLGAME` both had **zero**
+   open markets on 2026-08-31, which is why soccer sat at 9,888 stored
+   Polymarket rows against **zero** pairs — a fifth of the catalogue
+   paying storage for a Kalshi side that was never wired up. Live and
+   unfetched on the same day: `KXMLSGAME` 132, `KXLALIGAGAME` 63,
+   `KXEPLGAME` 60, `KXSERIEAGAME` 60. NFL is now wired (below); the
+   rest are the obvious next win.
+
+   The series list is `/series?category=Sports` — 3,627 of them, 262
+   ending in `GAME`. Before concluding a league is absent from Kalshi,
+   check that list rather than the four tickers this file used to name.
+6. **NFL specifics.** Kalshi's tickers carry **no start time**
+   (`26SEP21NYGLAR`) where MLB's do (`26SEP031940MIAKC`);
+   `kalshiGameKey` already strips an optional `HHMM`, so both parse.
+   Polymarket's NFL tag is **450**, its game events carry 29 markets
+   (spreads, totals, props) and are kept by the `teams.length === 2`
+   branch rather than the `<= 4 markets` heuristic, then narrowed by
+   `sportsMarketType === "moneyline"`. `scripts/sports-keys.test.mjs`
+   pins the join, the outcome index and the LA/LAC alias.
+7. **NHL and soccer are still unverified against the join** — both had
+   zero open Kalshi markets when it was built. `kalshiKeyFailures` in
+   `matchDiagnostics` is what will say so.
 6. **Polymarket US non-sports titles come from `titleShort`, not `question`.** Every market in a templated family shares ONE question — all six GDP strikes are "US GDP Growth in Q3 2026?", every candidate in a race is the same "Who will win…?" — and the distinguishing text ("Above 2.5%", "$200,000", "Jon Ossoff (D)") lives in `titleShort`. 5,866 of 5,877 non-sports US markets share a question with a sibling, so reading only `question` stored the catalogue as **1,073 distinct titles instead of 5,877**.
 
    This was recorded here for a long time as a measured fact about venue overlap ("crypto matches exactly one, politics matches zero"). It was this bug. Reading `titleShort` took econ from 0 US-tradable pairs to 14 and crypto from 1 to 4. **The lesson is the same one the `.us` listing sweep and the truncated Kalshi econ fetch taught: before concluding a venue does not list something, check what the fetch actually kept.**
