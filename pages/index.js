@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 
+// Brand palette, sampled from the MarketSlap logo artwork rather than
+// eyeballed: the wordmark's two inks and the app-icon tile.
+const BRAND = {
+  ink:  "#0A1226",   // "MARKET"
+  slap: "#5641D2",   // "SLAP"
+  tile: "#040F29",   // dark app-icon ground
+};
+
 const T = {
   bg: "#F7F8FA",
   surface: "#FFFFFF",
@@ -721,11 +729,31 @@ export default function HouseEdge() {
       {/* Nav */}
       <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontSize: 18, fontWeight: 800, color: T.text, letterSpacing: "-0.03em" }}>
-              hous<span style={{ color: T.kalshi }}>edge</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            {/* The mark is decorative here — the wordmark beside it already
+                names the site, so a second label would be read twice by a
+                screen reader. */}
+            {/* The TILE, not the bare mark. An S set flush against a
+                wordmark beginning with M reads as one word —
+                "SMARKETSLAP" — because a letterform next to letterforms
+                is parsed as a letter. Bounding it in the app-icon tile
+                makes it an icon instead, and it is the same artwork as
+                the favicon and the social avatar. */}
+            <img
+              src="/favicon.svg"
+              alt=""
+              aria-hidden="true"
+              width={28}
+              height={28}
+              style={{ display: "block", flexShrink: 0 }}
+            />
+            <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
+              <span style={{ color: BRAND.ink }}>MARKET</span>
+              <span style={{ color: BRAND.slap }}>SLAP</span>
             </span>
-            <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>Kalshi vs Polymarket</span>
+            <span style={{ fontSize: 11, color: T.muted, fontWeight: 500, whiteSpace: "nowrap" }}>
+              Kalshi vs Polymarket
+            </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {oldestAge != null ? (
