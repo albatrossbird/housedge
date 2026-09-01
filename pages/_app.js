@@ -41,6 +41,7 @@ export default function App({ Component, pageProps }) {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="MarketSlap" />
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@MarketSlap" />
       </Head>
       <Component {...pageProps} />
     </>
