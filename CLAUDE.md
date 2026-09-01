@@ -428,9 +428,21 @@ rather than a config one.
 - `outcomes`/`outcomePrices` are misaligned here too — a market with
   `outcomes ["No","Yes"]` returned `["0.0400","0.97"]` where 0.04 is the
   YES. Read `marketSides`, where each side carries its own price.
-- US lists games only ~2 days ahead. A 404 means *not listed yet*, not
-  an error; `fetchUsGameMarket` returns `notListed` so the two cannot be
-  confused.
+- **The listing horizon is the next SLATE, not a fixed number of days.**
+  This file said "~2 days ahead" and NFL disproved it on the first run:
+  12 US-tradable legs for fixtures 12 days out. Measured on 2026-09-01
+  against pairs the site actually holds — MLB +0 to +2 days, NFL +12 —
+  which is what a daily sport and a weekly one look like under the same
+  rule. Do not code against a day count.
+
+  A 404 means *not listed yet*, not an error; `fetchUsGameMarket`
+  returns `notListed` so the two cannot be confused, and that is what
+  makes the horizon a non-issue in practice.
+
+  **Probe with REAL fixtures.** Testing this with constructed slugs
+  proves nothing: `aec-nfl-was-dal-2026-09-13` comes back absent
+  because WAS at DAL is played on the 20th, not because the venue is
+  behind. An invented matchup and an unlisted one are the same 404.
 - **Reads must use `POLY_PLATFORMS`, never `.eq("platform",
   "polymarket")`** — that filter excludes `polymarket_us` exactly, which
   is how 30 successfully fetched US markets produced zero US pairs while
@@ -624,7 +636,8 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Cards | Stored pairs | US-tradable cards | Floor |
 |---|---|---|---|---|
-| sports (mlb) | 29 | 53 | 24 | exact join |
+| sports (mlb) | 31 | 76 | 27 | exact join |
+| sports (nfl) | 25 | 37 | 12 | exact join |
 | economics | 25 | 34 | 21 | 0.81 |
 | crypto | 16 | 27 | 4 | 0.88 |
 | politics | 394 | 905 | 51 | 0.86 |
