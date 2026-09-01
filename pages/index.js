@@ -14,21 +14,44 @@ const BRAND = {
   tintBorder: "#DFE4F6",
 };
 
+// Colour has three jobs on this page and they must never overlap.
+//
+//   SIGNAL  what a reader must notice — yes/no, arb, staleness.
+//   VENUE   which exchange a row belongs to.
+//   ACCENT  interactive chrome — links, active tabs, focus.
+//
+// They used to be one pool. Colour was spent 22 times on venue identity
+// against 11 on state, and 13 of those 22 carried NO venue meaning at
+// all: the active category tab was Kalshi-blue, the search box border
+// and the "matched" badge were Polymarket-purple. The palette had no
+// accent, so the venue colours were borrowed for chrome — which meant a
+// colour on this page could not be read.
+//
+// VENUE is now VALUE, not hue. Every venue name is already spelled out
+// beside its price, so the hue was redundant, and hue does not scale:
+// three venues today and more coming, each needing a hue that collides
+// with neither the others nor signal nor brand. That palette cannot be
+// built. Freeing those hues is also what lets the brand gradient exist
+// without implying an exchange.
+// Neutral space is narrow, and these two steps are the widest pair that
+// clears everything at once. The first attempt used slate 500 for
+// Polymarket and it landed dE 6 from T.muted — a venue label that read
+// as de-emphasised text, which is a collision rather than a step.
+const VENUE = {
+  kalshi: "#1E293B",   // 14.6:1 — the anchor side of every pair
+  poly:   "#475569",   //  7.6:1 — both .com and .us; the label says which
+};                     // dE 19 apart, and dE 13 clear of T.muted
+
+// One accent, not two. A second would re-open the ambiguity this split
+// closes.
+const ACCENT = "#5641D2";
+
 const T = {
   bg: "#F7F8FA",
   surface: "#FFFFFF",
   border: "#E4E7ED",
   text: "#0F1923",
   muted: "#6B7280",
-  // Teal, not blue. Purple means Polymarket on this page, and the old
-  // Kalshi blue sat only dE 34 from it while the brand ink sat dE 19
-  // from BOTH — the identity was inside the encoding it had to be read
-  // against. Teal puts the two venues dE 99 apart.
-  //
-  // NOT teal-600 (#0D9488): that lands dE 20 from the YES green, which
-  // trades a venue collision for an outcome collision.
-  kalshi: "#0E7490",
-  poly: "#7C3AED",
   yes: "#059669",
   no: "#DC2626",
   arb: "#D97706",
@@ -205,7 +228,7 @@ function SpreadBar({ market }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <Row label="KALSHI" color={T.kalshi} pct={kPct} />
+      <Row label="KALSHI" color={VENUE.kalshi} pct={kPct} />
       {/* One row per venue rather than one card per venue. The same
           fixture used to render twice, a few cents apart, with nothing
           saying the two cards were the same claim — and since a US
@@ -215,7 +238,7 @@ function SpreadBar({ market }) {
         <Row
           key={l.pairId}
           label={l.poly.usTradable ? "POLY US" : "POLY"}
-          color={T.poly}
+          color={VENUE.poly}
           pct={Math.round(l.poly.yes * 100)}
         />
       ))}
@@ -299,9 +322,9 @@ function Details({ market, legs }) {
 
       {anyResolution ? (
         <>
-          <Resolution label="KALSHI" color={T.kalshi} text={market.resolution} />
+          <Resolution label="KALSHI" color={VENUE.kalshi} text={market.resolution} />
           {legs.map(leg => (
-            <Resolution key={`${leg.pairId}-res`} label={leg.poly.venue.toUpperCase()} color={T.poly} text={leg.resolution} />
+            <Resolution key={`${leg.pairId}-res`} label={leg.poly.venue.toUpperCase()} color={VENUE.poly} text={leg.resolution} />
           ))}
           <div style={{ fontSize: 10, color: T.muted, lineHeight: 1.4 }}>
             Read both before trading. A pair is our judgement that these two
@@ -372,7 +395,7 @@ function MarketCard({ market }) {
             in the same order as the bars above. */}
         <a
           href={market.kalshi.url} target="_blank" rel="noopener noreferrer"
-          style={{ fontSize: 11, fontWeight: 700, color: T.kalshi, letterSpacing: "0.03em", textDecoration: "none" }}
+          style={{ fontSize: 11, fontWeight: 700, color: ACCENT, letterSpacing: "0.03em", textDecoration: "none" }}
         >
           Kalshi ↗
         </a>
@@ -389,7 +412,7 @@ function MarketCard({ market }) {
                     shorter than naming it and then saying "Open". */}
                 <a
                   href={l.poly.url} target="_blank" rel="noopener noreferrer"
-                  style={{ fontSize: 11, fontWeight: 700, color: T.poly, letterSpacing: "0.03em", textDecoration: "none" }}
+                  style={{ fontSize: 11, fontWeight: 700, color: ACCENT, letterSpacing: "0.03em", textDecoration: "none" }}
                 >
                   {l.poly.usTradable ? "Polymarket US" : "polymarket.com"} ↗
                   {!l.poly.usTradable && (
@@ -520,7 +543,9 @@ function volumeLabel(vol) {
 
 function VenueLine({ m, similarity }) {
   const isK = m.platform === "kalshi";
-  const color = isK ? T.kalshi : T.poly;
+  // A link is a link. Colouring it by destination said nothing the
+  // venue name beside it did not already say.
+  const color = ACCENT;
   const vol = volumeLabel(m.volume);
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "3px 0" }}>
@@ -541,15 +566,15 @@ function SearchResult({ r }) {
   const matched = r.kind === "matched";
   return (
     <div style={{
-      border: `1px solid ${matched ? `${T.poly}44` : T.border}`,
+      border: `1px solid ${matched ? `${ACCENT}44` : T.border}`,
       borderRadius: 10, background: T.surface, padding: 14,
       opacity: r.live ? 1 : 0.62,
     }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 8 }}>
         <span style={{
           fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase",
-          color: matched ? T.poly : T.muted,
-          background: matched ? `${T.poly}14` : "transparent",
+          color: matched ? ACCENT : T.muted,
+          background: matched ? `${ACCENT}14` : "transparent",
           padding: matched ? "2px 7px" : 0, borderRadius: 99,
         }}>
           {matched ? `On ${r.counterparts.length + 1} venues` : `Only on ${r.market.venue}`}
@@ -787,7 +812,7 @@ export default function HouseEdge() {
               width: "100%", boxSizing: "border-box",
               padding: "12px 40px 12px 14px",
               fontSize: 15, color: T.text, background: T.surface,
-              border: `1px solid ${searchMode ? T.poly : T.border}`,
+              border: `1px solid ${searchMode ? ACCENT : T.border}`,
               borderRadius: 10, outline: "none",
               fontFamily: "inherit",
             }}
@@ -822,7 +847,7 @@ export default function HouseEdge() {
                     <>
                       <strong style={{ color: T.text }}>{searchData.counts.total}</strong>{" "}
                       {searchData.counts.total === 1 ? "market" : "markets"} ·{" "}
-                      <strong style={{ color: T.poly }}>{searchData.counts.matched}</strong> quoted on more
+                      <strong style={{ color: ACCENT }}>{searchData.counts.matched}</strong> quoted on more
                       than one venue
                       {searchData.counts.returned < searchData.counts.total && <> · showing {searchData.counts.returned}</>}
                     </>
@@ -854,9 +879,9 @@ export default function HouseEdge() {
               onClick={() => { setActiveCategory(key); setQuery(""); }}
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
-                cursor: "pointer", border: `1px solid ${activeCategory === key ? T.kalshi : T.border}`,
-                background: activeCategory === key ? `${T.kalshi}12` : T.surface,
-                color: activeCategory === key ? T.kalshi : T.muted, transition: "all 0.15s",
+                cursor: "pointer", border: `1px solid ${activeCategory === key ? ACCENT : T.border}`,
+                background: activeCategory === key ? `${ACCENT}12` : T.surface,
+                color: activeCategory === key ? ACCENT : T.muted, transition: "all 0.15s",
                 display: "flex", alignItems: "center", gap: 6,
                 opacity: cat.supported ? 1 : 0.5,
               }}
@@ -908,8 +933,8 @@ export default function HouseEdge() {
                   padding: "10px 14px", fontSize: 13, fontWeight: venue === key ? 700 : 500,
                   cursor: "pointer", border: "none",
                   borderLeft: i === 0 ? "none" : `1px solid ${T.border}`,
-                  background: venue === key ? `${T.poly}14` : "transparent",
-                  color: venue === key ? T.poly : T.muted,
+                  background: venue === key ? `${ACCENT}14` : "transparent",
+                  color: venue === key ? ACCENT : T.muted,
                   transition: "all 0.15s",
                 }}
               >
@@ -978,7 +1003,7 @@ export default function HouseEdge() {
             <strong>No matched markets yet.</strong> The embedding engine needs to run first to match markets across platforms.
             <br /><br />
             <a href="/api/embed" target="_blank" rel="noopener noreferrer"
-              style={{ padding: "8px 16px", background: T.kalshi, color: "#fff", borderRadius: 6, textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
+              style={{ padding: "8px 16px", background: ACCENT, color: "#fff", borderRadius: 6, textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
               Initialize matching engine ↗
             </a>
           </div>
@@ -1018,8 +1043,8 @@ export default function HouseEdge() {
                 <button
                   onClick={() => setVenue(venue === "us" ? "global" : "us")}
                   style={{
-                    padding: "9px 16px", border: `1px solid ${T.poly}`, borderRadius: 8,
-                    background: `${T.poly}12`, color: T.poly, cursor: "pointer",
+                    padding: "9px 16px", border: `1px solid ${ACCENT}`, borderRadius: 8,
+                    background: `${ACCENT}12`, color: ACCENT, cursor: "pointer",
                     fontSize: 13, fontWeight: 600,
                   }}
                 >
@@ -1066,8 +1091,8 @@ export default function HouseEdge() {
 
         {/* Legend */}
         <div style={{ marginTop: 32, padding: "14px 18px", border: `1px solid ${T.border}`, borderRadius: 10, display: "flex", gap: 20, flexWrap: "wrap", fontSize: 11, color: T.muted }}>
-          <span><span style={{ color: T.kalshi, fontWeight: 700 }}>■</span> Kalshi</span>
-          <span><span style={{ color: T.poly, fontWeight: 700 }}>■</span> Polymarket</span>
+          <span><span style={{ color: VENUE.kalshi, fontWeight: 700 }}>■</span> Kalshi</span>
+          <span><span style={{ color: VENUE.poly, fontWeight: 700 }}>■</span> Polymarket</span>
           <span><span style={{ color: T.arb, fontWeight: 700 }}>⚡</span> Arb = both legs cost &lt; $1.00 including fees</span>
           {/* The page re-polls every 60s; the PRICES behind it come from
               a scheduled job that GitHub throttles to somewhere between
