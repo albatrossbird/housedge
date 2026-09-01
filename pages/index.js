@@ -14,7 +14,14 @@ const T = {
   border: "#E4E7ED",
   text: "#0F1923",
   muted: "#6B7280",
-  kalshi: "#2563EB",
+  // Teal, not blue. Purple means Polymarket on this page, and the old
+  // Kalshi blue sat only dE 34 from it while the brand ink sat dE 19
+  // from BOTH — the identity was inside the encoding it had to be read
+  // against. Teal puts the two venues dE 99 apart.
+  //
+  // NOT teal-600 (#0D9488): that lands dE 20 from the YES green, which
+  // trades a venue collision for an outcome collision.
+  kalshi: "#0E7490",
   poly: "#7C3AED",
   yes: "#059669",
   no: "#DC2626",
