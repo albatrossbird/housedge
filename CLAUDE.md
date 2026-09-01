@@ -636,11 +636,20 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Cards | Stored pairs | US-tradable cards | Floor |
 |---|---|---|---|---|
-| sports (mlb) | 31 | 76 | 27 | exact join |
+| sports (mlb) | 39 | 69 | 30 | exact join |
 | sports (nfl) | 25 | 37 | 12 | exact join |
-| economics | 25 | 34 | 21 | 0.81 |
-| crypto | 16 | 27 | 4 | 0.88 |
-| politics | 394 | 905 | 51 | 0.86 |
+| economics | 24 | 34 | 20 | 0.81 |
+| crypto | 15 | 27 | 3 | 0.88 |
+| politics | 373 | 881 | 31 | 0.86 |
+
+All five rows read from `/api/markets` on 2026-09-01, not carried over
+from an earlier revision. **Only "Stored pairs" is stable.** "Cards" and
+"US-tradable" are functions of LIVE PRICES — a pair whose quote drifts
+outside 0.05-0.95 stops rendering and comes back later — so they move
+between reads without anything being wrong. Politics went 51 -> 31
+US-tradable in a day on price movement alone. Treat a change in those
+two columns as weather; treat a change in "Stored pairs" as the
+matcher having run.
 
 "Cards" is what the site renders — one per Kalshi market, with a leg per
 Polymarket venue. "US-tradable" counts cards carrying a `polymarket_us`
