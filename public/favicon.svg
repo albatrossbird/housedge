@@ -1,12 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MarketSlap">
-  <defs>
-    <linearGradient id="fTop" gradientUnits="userSpaceOnUse" x1="550" y1="2030" x2="2480" y2="2620">
-      <stop offset="0" stop-color="#6650F2"/><stop offset="1" stop-color="#9B80FF"/>
-    </linearGradient>
-    <linearGradient id="fBot" gradientUnits="userSpaceOnUse" x1="280" y1="260" x2="2260" y2="760">
-      <stop offset="0" stop-color="#4E76FF"/><stop offset="1" stop-color="#3358DB"/>
-    </linearGradient>
-  </defs>
+  <defs><linearGradient id="fG" gradientUnits="userSpaceOnUse" x1="2480" y1="2620" x2="280" y2="260"><stop offset="0" stop-color="#9B80FF"/><stop offset="0.45" stop-color="#6B63E8"/><stop offset="1" stop-color="#2AA5C0"/></linearGradient></defs>
   <rect width="512" height="512" rx="116" fill="#040F29"/>
   <g transform="translate(76,72) scale(1.314)">
     <g transform="translate(0,280) scale(0.1,-0.1)">
@@ -14,12 +7,12 @@
 46 -216 207 -377 438 -439 103 -28 376 -71 453 -71 11 0 -18 21 -64 47 -46 26
 -113 72 -149 103 -235 198 -243 493 -17 645 120 80 107 79 675 85 361 4 516
 10 542 18 65 22 118 73 219 212 100 138 118 180 82 195 -19 7 -1445 16 -1503
-9z" fill="url(#fTop)"/>
+9z" fill="url(#fG)"/>
       <path d="M1560 1362 c0 -5 25 -26 55 -46 130 -90 233 -234 256 -359 34 -189
 -103 -367 -336 -434 -52 -14 -131 -17 -595 -22 l-535 -6 -47 -24 c-61 -31 -95
 -69 -207 -224 -91 -127 -102 -152 -79 -175 19 -19 1620 -17 1720 2 283 54 507
 249 573 496 9 32 15 99 15 160 0 164 -48 277 -163 393 -106 106 -223 160 -457
-210 -146 32 -200 39 -200 29z" fill="url(#fBot)"/>
+210 -146 32 -200 39 -200 29z" fill="url(#fG)"/>
     </g>
   </g>
 </svg>

@@ -40,3 +40,24 @@ a {
     color-scheme: dark;
   }
 }
+
+/* The "SLAP" half of the wordmark, carrying the same purple -> teal fade
+   as the mark.
+
+   The solid colour is declared FIRST and unconditionally. background-clip
+   on text needs `color: transparent` to show through, so a browser that
+   supports the colour but not the clip would render the brand name
+   invisible. Guarding the whole gradient behind @supports means the worst
+   case is a flat purple wordmark rather than no wordmark. */
+.ms-slap {
+  color: #5641D2;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .ms-slap {
+    background-image: linear-gradient(100deg, #7C4DFF 0%, #5641D2 40%, #0E7490 92%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
