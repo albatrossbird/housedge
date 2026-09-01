@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 274 280" role="img" aria-label="MarketSlap">
+  <defs>
+    <linearGradient id="msTop" gradientUnits="userSpaceOnUse" x1="550" y1="2030" x2="2480" y2="2620">
+      <stop offset="0" stop-color="#2A18B7"/><stop offset="1" stop-color="#6C47EC"/>
+    </linearGradient>
+    <linearGradient id="msBot" gradientUnits="userSpaceOnUse" x1="280" y1="260" x2="2260" y2="760">
+      <stop offset="0" stop-color="#1437B9"/><stop offset="1" stop-color="#041336"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(0,280) scale(0.1,-0.1)">
+    <path d="M1160 2734 c-321 -39 -573 -225 -660 -487 -30 -87 -36 -222 -16 -317
+46 -216 207 -377 438 -439 103 -28 376 -71 453 -71 11 0 -18 21 -64 47 -46 26
+-113 72 -149 103 -235 198 -243 493 -17 645 120 80 107 79 675 85 361 4 516
+10 542 18 65 22 118 73 219 212 100 138 118 180 82 195 -19 7 -1445 16 -1503
+9z" fill="url(#msTop)"/>
+    <path d="M1560 1362 c0 -5 25 -26 55 -46 130 -90 233 -234 256 -359 34 -189
+-103 -367 -336 -434 -52 -14 -131 -17 -595 -22 l-535 -6 -47 -24 c-61 -31 -95
+-69 -207 -224 -91 -127 -102 -152 -79 -175 19 -19 1620 -17 1720 2 283 54 507
+249 573 496 9 32 15 99 15 160 0 164 -48 277 -163 393 -106 106 -223 160 -457
+210 -146 32 -200 39 -200 29z" fill="url(#msBot)"/>
+  </g>
+</svg>
