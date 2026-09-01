@@ -3,9 +3,15 @@ import { useState, useEffect, useCallback } from "react";
 // Brand palette, sampled from the MarketSlap logo artwork rather than
 // eyeballed: the wordmark's two inks and the app-icon tile.
 const BRAND = {
-  ink:  "#0A1226",   // "MARKET"
-  slap: "#5641D2",   // "SLAP"
-  tile: "#040F29",   // dark app-icon ground
+  ink:   "#0A1226",  // "MARKET"
+  slap:  "#5641D2",  // "SLAP" — the gradient's midpoint; see .ms-slap
+  teal:  "#0E7490",  // where the mark's fade lands, = the Kalshi venue colour
+  tile:  "#040F29",  // dark app-icon ground, kept for the favicon
+  // The nav tile is a TINT, not the near-black favicon ground. At 38px on
+  // a white page the dark square was the heaviest object on screen and
+  // read as a hole punched in the header.
+  tint:       "#EDF0FB",
+  tintBorder: "#DFE4F6",
 };
 
 const T = {
@@ -736,59 +742,28 @@ export default function HouseEdge() {
       {/* Nav */}
       <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            {/* The mark is decorative here — the wordmark beside it already
-                names the site, so a second label would be read twice by a
-                screen reader. */}
-            {/* The TILE, not the bare mark. An S set flush against a
-                wordmark beginning with M reads as one word —
-                "SMARKETSLAP" — because a letterform next to letterforms
-                is parsed as a letter. Bounding it in the app-icon tile
-                makes it an icon instead, and it is the same artwork as
-                the favicon and the social avatar. */}
-            <img
-              src="/favicon.svg"
-              alt=""
-              aria-hidden="true"
-              width={28}
-              height={28}
-              style={{ display: "block", flexShrink: 0 }}
-            />
-            <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
+            {/* A TINT tile, not the favicon's near-black. The mark still
+                needs bounding — an S flush against a wordmark starting
+                with M reads as one word — but at 38px on a white page the
+                dark square was the heaviest thing on screen. The favicon
+                keeps the dark ground, which is right for 16px against
+                browser chrome of unknown colour. */}
+            <span
+              style={{
+                width: 38, height: 38, borderRadius: 9, flexShrink: 0,
+                background: BRAND.tint, border: `1px solid ${BRAND.tintBorder}`,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              <img src="/logo-mark.svg" alt="" aria-hidden="true" width={24} height={25} style={{ display: "block" }} />
+            </span>
+            {/* The rule does the separating the old gap could not. */}
+            <span aria-hidden="true" style={{ width: 1, height: 26, background: T.border, flexShrink: 0 }} />
+            <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap", lineHeight: 1 }}>
               <span style={{ color: BRAND.ink }}>MARKET</span>
-              <span style={{ color: BRAND.slap }}>SLAP</span>
+              <span className="ms-slap">SLAP</span>
             </span>
-            <span style={{ fontSize: 11, color: T.muted, fontWeight: 500, whiteSpace: "nowrap" }}>
-              Kalshi vs Polymarket
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {oldestAge != null ? (
-              <span
-                title={`Stalest leg on this tab. Prices come from a scheduled job, not live feeds.${
-                  fetchedAt ? ` Page last checked ${fetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` : ""
-                }`}
-                style={{
-                  fontSize: 10,
-                  fontWeight: oldestAge > STALE_SECONDS ? 700 : 500,
-                  color: oldestAge > STALE_SECONDS ? T.arb : T.muted,
-                  background: oldestAge > STALE_SECONDS ? `${T.arb}18` : "transparent",
-                  padding: oldestAge > STALE_SECONDS ? "3px 8px" : 0,
-                  borderRadius: 99,
-                }}
-              >
-                Prices {ageLabel(oldestAge)}
-              </span>
-            ) : fetchedAt ? (
-              <span style={{ fontSize: 10, color: T.muted }}>
-                Checked {fetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            ) : null}
-            {arbCount > 0 && (
-              <span style={{ background: `${T.arb}18`, color: T.arb, fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 99 }}>
-                ⚡ {arbCount} arb {arbCount === 1 ? "signal" : "signals"}
-              </span>
-            )}
           </div>
         </div>
       </div>
