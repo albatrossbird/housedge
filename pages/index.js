@@ -733,12 +733,18 @@ export default function HouseEdge() {
             {/* The mark is decorative here — the wordmark beside it already
                 names the site, so a second label would be read twice by a
                 screen reader. */}
+            {/* The TILE, not the bare mark. An S set flush against a
+                wordmark beginning with M reads as one word —
+                "SMARKETSLAP" — because a letterform next to letterforms
+                is parsed as a letter. Bounding it in the app-icon tile
+                makes it an icon instead, and it is the same artwork as
+                the favicon and the social avatar. */}
             <img
-              src="/logo-mark.svg"
+              src="/favicon.svg"
               alt=""
               aria-hidden="true"
-              width={24}
-              height={25}
+              width={28}
+              height={28}
               style={{ display: "block", flexShrink: 0 }}
             />
             <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
