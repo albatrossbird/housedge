@@ -827,6 +827,13 @@ floor come down to ~0.88, which is worth about 5 more correct pairs.
 The v1 model can't express a third venue or a multi-outcome market (see `docs/architecture-v2.md` for the full argument). The v2 schema is **built and backfilled**, running in parallel — v1 still serves the live site.
 
 - **Migrations now live in `supabase/migrations/`.** Run them in the Supabase SQL editor; both are idempotent.
+- **Always hand over a LINK, never just a migration number.** Anything
+  the user has to run by hand — a migration, a diagnostic query, a
+  one-off statement — is delivered as
+  `https://github.com/albatrossbird/housedge/blob/main/supabase/migrations/<file>`,
+  because the SQL editor is a different window from the repo and
+  "run 0014" makes them go looking for it. Paste the SQL inline only
+  when asked, or when there is no file to point at.
   - `0001_v2_schema.sql` — `events` → `outcomes` → `listings` → `quotes`, plus `latest_quotes` and `v2_market_view`.
   - `0002_v2_rls.sql` — RLS on v2 tables only (v1's posture is untouched so the live path can't break).
 - **Writes to v2 tables need `SUPABASE_SERVICE_ROLE_KEY`** (set in Vercel). It bypasses RLS; anon is SELECT-only. Server-side API routes only — never a `NEXT_PUBLIC_*` var. `lib/v2/db.js` falls back to anon and reports `credentialInUse()` so a missing key fails loudly.
