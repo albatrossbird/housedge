@@ -1108,7 +1108,7 @@ export default async function handler(req, res) {
       const buildKalshi = () => {
         let q = supabase
           .from("markets")
-          .select("id, title, sport_tag, embedding, side_label, close_time")
+          .select("id, title, sport_tag, embedding_v, side_label, close_time")
           .eq("platform", "kalshi");
         if (sportFilter) q = q.eq("sport_tag", sportFilter);
         return q;
@@ -1127,7 +1127,7 @@ export default async function handler(req, res) {
       const buildPoly = () => {
         let q = supabase
           .from("markets")
-          .select("id, platform, title, sport_tag, embedding, side_label, outcomes, outcome_prices, slug")
+          .select("id, platform, title, sport_tag, embedding_v, side_label, outcomes, outcome_prices, slug")
           .in("platform", POLY_PLATFORMS);
         if (sportFilter) q = q.eq("sport_tag", sportFilter);
         return q;
@@ -1288,7 +1288,7 @@ export default async function handler(req, res) {
     // filter below assumes, and re-embeds anything that lost or never
     // got one. Sports rows are excluded regardless, so they do not churn.
     const existing = await fetchAllRows(() => supabase
-      .from("markets").select("id, title").not("embedding", "is", null));
+      .from("markets").select("id, title").not("embedding_v", "is", null));
     const embeddedTitles = new Map((existing || []).map(r => [r.id, r.title]));
     // An embedding belongs to a TITLE, so a row whose title changed has
     // a stale one. Keying only on id meant a corrected title kept the
@@ -1510,11 +1510,11 @@ export default async function handler(req, res) {
       // scoped) no longer matched what the run wrote.
       const scoped = q => (sport === "all" ? q : q.eq("sport_tag", sport));
       const kalshiDb = await fetchAllRows(() => scoped(supabase
-        .from("markets").select("id, title, sport_tag, embedding")
-        .eq("platform", "kalshi").not("embedding", "is", null)));
+        .from("markets").select("id, title, sport_tag, embedding_v")
+        .eq("platform", "kalshi").not("embedding_v", "is", null)));
       const polyDb = await fetchAllRows(() => scoped(supabase
-        .from("markets").select("id, title, sport_tag, embedding")
-        .in("platform", POLY_PLATFORMS).not("embedding", "is", null)));
+        .from("markets").select("id, title, sport_tag, embedding_v")
+        .in("platform", POLY_PLATFORMS).not("embedding_v", "is", null)));
 
       // MATCH FIRST, then clear.
       //

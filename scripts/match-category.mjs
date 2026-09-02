@@ -71,9 +71,9 @@ async function readAll(select, extra) {
 const t0 = Date.now();
 console.log(`category=${category} threshold=${threshold}${dry ? " (dry)" : ""}`);
 
-const sel = "id,title,platform,sport_tag,embedding";
-const kalshi = await readAll(sel, `platform=eq.kalshi&sport_tag=eq.${category}&embedding=not.is.null`);
-const poly = await readAll(sel, `platform=in.(${POLY_PLATFORMS.join(",")})&sport_tag=eq.${category}&embedding=not.is.null`);
+const sel = "id,title,platform,sport_tag,embedding_v";
+const kalshi = await readAll(sel, `platform=eq.kalshi&sport_tag=eq.${category}&embedding_v=not.is.null`);
+const poly = await readAll(sel, `platform=in.(${POLY_PLATFORMS.join(",")})&sport_tag=eq.${category}&embedding_v=not.is.null`);
 console.log(`read kalshi=${kalshi.length} poly=${poly.length} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 
 if (!kalshi.length || !poly.length) {
