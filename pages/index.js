@@ -6,12 +6,9 @@ const BRAND = {
   ink:   "#0A1226",  // "MARKET"
   slap:  "#5641D2",  // "SLAP" — the gradient's midpoint; see .ms-slap
   teal:  "#0E7490",  // where the mark's fade lands, = the Kalshi venue colour
-  tile:  "#040F29",  // dark app-icon ground, kept for the favicon
-  // The nav tile is a TINT, not the near-black favicon ground. At 38px on
-  // a white page the dark square was the heaviest object on screen and
-  // read as a hole punched in the header.
-  tint:       "#EDF0FB",
-  tintBorder: "#DFE4F6",
+  // The dark app-icon ground lives in favicon.svg, which is the only
+  // place it is used. It is not a token here because nothing on the page
+  // draws on it — the header shows the bare mark.
 };
 
 // Colour has three jobs on this page and they must never overlap.
@@ -776,25 +773,31 @@ export default function HouseEdge() {
       {/* Nav */}
       <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
-            {/* A TINT tile, not the favicon's near-black. The mark still
-                needs bounding — an S flush against a wordmark starting
-                with M reads as one word — but at 38px on a white page the
-                dark square was the heaviest thing on screen. The favicon
-                keeps the dark ground, which is right for 16px against
-                browser chrome of unknown colour. */}
-            <span
-              style={{
-                width: 38, height: 38, borderRadius: 9, flexShrink: 0,
-                background: BRAND.tint, border: `1px solid ${BRAND.tintBorder}`,
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-              }}
-            >
-              <img src="/logo-mark.svg" alt="" aria-hidden="true" width={24} height={25} style={{ display: "block" }} />
-            </span>
-            {/* The rule does the separating the old gap could not. */}
-            <span aria-hidden="true" style={{ width: 1, height: 26, background: T.border, flexShrink: 0 }} />
-            <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap", lineHeight: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+            {/* No tile on the page. The tile was there to stop an S set
+                flush against a wordmark beginning with M reading as one
+                word, but the RULE below does that job now, and the mark
+                carries a violet-to-teal gradient the near-black MARKET
+                does not — two separations where the run-on needed one.
+                What the tile added on top was weight: even as a tint it
+                was a box drawn around the one element that did not need
+                one.
+
+                The FAVICON keeps its dark tile. A tab icon sits at 16px
+                against browser chrome of unknown colour and needs its own
+                ground; a 44px mark on a known white header does not. They
+                are the same artwork with different jobs. */}
+            <img
+              src="/logo-mark.svg"
+              alt=""
+              aria-hidden="true"
+              width={44}
+              height={45}
+              style={{ display: "block", flexShrink: 0 }}
+            />
+            {/* Carries the separation the tile used to. */}
+            <span aria-hidden="true" style={{ width: 1, height: 28, background: T.border, flexShrink: 0 }} />
+            <span style={{ fontSize: 21, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap", lineHeight: 1 }}>
               <span style={{ color: BRAND.ink }}>MARKET</span>
               <span className="ms-slap">SLAP</span>
             </span>
