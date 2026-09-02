@@ -116,6 +116,55 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Resolution text on rows nothing can display ────────────────
+    //
+    // `resolution` holds Kalshi's rules_primary, and it is stored for
+    // every market in the catalogue but readable on almost none of
+    // them: the only path to it is get_pairs, which JOINS pairs, so a
+    // row outside `pairs` has text nobody can reach. 55,355 rows carry
+    // it where roughly 2,000 can show it.
+    //
+    // Measured 2026-09-01: markets TOAST was 581MB, of which the JSON
+    // embedding accounted for 266MB and the vector for 147MB, leaving
+    // ~168MB unexplained — this column.
+    //
+    // Nulling rather than deleting the row, because the market itself
+    // is still wanted: it is fetched, stored, and searchable by title.
+    // Discovery rewrites the text on the next run for anything that
+    // becomes paired, so this is self-healing rather than lossy — the
+    // panel already says "hasn't been fetched yet" for a row without it.
+    //
+    // Runs AFTER the delete so it never updates a row that just went.
+    //
+    // NOTE: nulling a TOASTed value marks space reusable, it does not
+    // return it to the OS. The database's reported size will not fall
+    // until a rewrite; what this stops is the GROWTH.
+    let resolutionCleared = 0;
+    const resolutionErrors = [];
+    const resRead = await pageAll(() => supabase
+      .from("markets").select("id").not("resolution", "is", null));
+    if (resRead.errors.length) {
+      resolutionErrors.push(...resRead.errors);
+    } else {
+      const unreadable = resRead.rows
+        .map(r => String(r.id))
+        .filter(id => !protectedIds.has(id));
+      if (dry) {
+        resolutionCleared = unreadable.length;
+      } else {
+        // Plain .update(), not upsert. An upsert with a partial column
+        // set fails NOT NULL `platform` on the attempted insert row even
+        // when the row already exists.
+        for (let i = 0; i < unreadable.length; i += CHUNK) {
+          const chunk = unreadable.slice(i, i + CHUNK);
+          const { error, count } = await supabase
+            .from("markets").update({ resolution: null }, { count: "exact" }).in("id", chunk);
+          if (error) resolutionErrors.push(error.message || JSON.stringify(error));
+          else resolutionCleared += count || chunk.length;
+        }
+      }
+    }
+
     res.status(200).json({
       dry,
       days,
@@ -125,6 +174,9 @@ export default async function handler(req, res) {
       candidates: doomed.length,
       deleted: dry ? 0 : deleted,
       byCategory,
+      resolutionRowsCarrying: resRead.errors.length ? null : resRead.rows.length,
+      resolutionCleared,
+      resolutionErrors: resolutionErrors.slice(0, 3),
       errors: errors.slice(0, 5),
     });
   } catch (err) {
