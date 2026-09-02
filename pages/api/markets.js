@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
 import { bestArb, complementBook } from "../../lib/fees.js";
-import { cleanTitle, polymarketUsUrl } from "../../lib/titles.js";
+import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -260,6 +260,32 @@ function mergeByKalshiMarket(pairs) {
 //
 // So: only a bare comparator-and-value label, and only when that exact
 // value (with its unit) is already in the question.
+// The price a card SHOWS, derived from the book it also shows.
+//
+// Two independent numbers were being rendered as one. Polymarket's
+// `outcome_prices` is a LAST-TRADE figure; `bid`/`ask` is the live
+// book. A last trade legitimately sits outside a book that moved after
+// it, and 13 of 108 Polymarket legs did — one by 6.5 points, showing
+// 0.555 against a book of 0.485/0.490. The card then implied a spread
+// that was not there, which is exactly what "5 point spread but over a
+// dollar to own both sides" looks like from the outside.
+//
+// Kalshi had the mirror problem: it displayed its ASK while Polymarket
+// displayed a last trade, so the cross-venue comparison the whole card
+// exists to make was not like-for-like.
+//
+// Both venues now show the MID of their own book. The arb figure still
+// comes from the ASKS, because that is what a trade costs — and the
+// difference between the two is now a real quantity (book width) the
+// card can explain, rather than an inconsistency it has to hide.
+function bookMid(bid, ask, fallback) {
+  const b = Number(bid), a = Number(ask);
+  if (Number.isFinite(b) && Number.isFinite(a) && a >= b && a > 0) {
+    return Math.round(((b + a) / 2) * 10000) / 10000;
+  }
+  return fallback;
+}
+
 export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];
@@ -282,6 +308,10 @@ export default async function handler(req, res) {
     }
 
     const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0 };
+    // How often the shown price came from the book rather than the
+    // stored last-trade figure. A large poly number is the bug this
+    // replaced still being present in the data.
+    const priceFromBook = { kalshi: 0, poly: 0 };
     let noExecutablePrice = 0;
     let implausibleArbs = 0;
     const sampleDropped = [];
@@ -326,7 +356,7 @@ export default async function handler(req, res) {
         // see lib/titles.js. Every sports pair's .us link was a 404.
         const polyUrl = isPolyUs
           ? polymarketUsUrl(row.p_slug, row.p_event_ticker)
-          : (row.p_slug ? `https://polymarket.com/event/${row.p_slug}` : "https://polymarket.com/");
+          : polymarketComUrl(row.p_slug);
         const polyVenue = isPolyUs ? "Polymarket US" : "Polymarket (global)";
 
         // ── Executable pricing ─────────────────────────────────
@@ -343,6 +373,14 @@ export default async function handler(req, res) {
         const polyOtherBook = polyOnOutcome1
           ? rawPolyBook
           : complementBook(row.p_bid, row.p_ask);
+
+        // Display the mid of the book this leg actually trades on.
+        // polyBook is already index-aware, so this cannot quote the
+        // opponent's side the way the raw book would.
+        const pYesShown = bookMid(polyBook.bid, polyBook.ask, pYes);
+        const kYesShown = bookMid(row.k_bid, row.k_ask, row.k_yes_price);
+        if (pYesShown !== pYes) priceFromBook.poly++;
+        if (kYesShown !== row.k_yes_price) priceFromBook.kalshi++;
 
         const arb = bestArb(
           {
@@ -407,13 +445,13 @@ export default async function handler(req, res) {
           // says nothing rather than claiming an age it does not have.
           priceAgeSeconds: ageSeconds(row.k_updated_at, row.p_updated_at),
           kalshi: {
-            yes: row.k_yes_price, no: row.k_no_price, volume: row.k_volume || 0, url: kalshiUrl,
+            yes: kYesShown, no: kYesShown == null ? row.k_no_price : 1 - kYesShown, volume: row.k_volume || 0, url: kalshiUrl,
             bid: row.k_bid ?? null, ask: row.k_ask ?? null,
             noBid: row.k_no_bid ?? null, noAsk: row.k_no_ask ?? null,
             ageSeconds: ageSeconds(row.k_updated_at),
           },
           poly: {
-            yes: pYes, no: 1 - pYes, volume: row.p_volume || 0, url: polyUrl,
+            yes: pYesShown, no: pYesShown == null ? null : 1 - pYesShown, volume: row.p_volume || 0, url: polyUrl,
             bid: polyBook.bid ?? null, ask: polyBook.ask ?? null,
             venue: polyVenue,
             ageSeconds: ageSeconds(row.p_updated_at),
@@ -525,6 +563,7 @@ export default async function handler(req, res) {
       // `true` here would assert fee-inclusive figures that do not
       // exist.
       feesIncluded: priced > 0,
+      priceFromBook,
       pricing: {
         priced,
         noExecutablePrice,
