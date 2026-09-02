@@ -849,6 +849,23 @@ floor come down to ~0.88, which is worth about 5 more correct pairs.
 The v1 model can't express a third venue or a multi-outcome market (see `docs/architecture-v2.md` for the full argument). The v2 schema is **built and backfilled**, running in parallel — v1 still serves the live site.
 
 - **Migrations now live in `supabase/migrations/`.** Run them in the Supabase SQL editor; both are idempotent.
+- **The dashboard SQL editor times out at ~60 SECONDS, and it cannot be
+  raised from the dashboard.** The failure surfaces as
+  `Error: Failed to fetch (api.supabase.com)` with `0 rows` — which
+  looks like a broken statement and is a broken *request*. The statement
+  is cancelled when the connection drops, so nothing half-applies.
+  Anything long — `VACUUM FULL`, a big backfill, an index build over a
+  large table — has to run over a **direct connection** instead
+  (Project Settings -> Database -> **Session pooler**, port 5432; the
+  transaction pooler on 6543 does not support session-level settings):
+
+  ```
+  psql "<session-pooler-url>" -c "set statement_timeout = 0;" \
+                              -c "vacuum (full, analyze) markets;"
+  ```
+
+  Do not hand a `VACUUM FULL` to the SQL editor and expect it to run;
+  at 776MB it never had 60 seconds' hope.
 - **Always hand over a LINK, never just a migration number.** Anything
   the user has to run by hand — a migration, a diagnostic query, a
   one-off statement — is delivered as
