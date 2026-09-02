@@ -235,8 +235,45 @@ it first is what makes "not seen in N days" mean *delisted* rather than
 - Reads without `embedding` (that is the read that was failing on payload
   size) and deletes in chunks of 200, per the `.in()` URL-length lesson.
 
-**It prunes row count, not bytes.** The dominant cost is embeddings on
-unpaired non-sports rows — see known bug 1.
+**It prunes row count AND the one column nothing can read.**
+`resolution` holds Kalshi's `rules_primary` and is stored for every
+market, but the only path to it is `get_pairs`, which JOINS `pairs` — so
+a row outside `pairs` carries text nobody can reach. 55,355 rows carry
+it where roughly 2,000 can display it. Prune nulls it for unpaired rows,
+**after** the delete so it never touches a row that just went, and
+discovery rewrites it for anything that becomes paired, so it is
+self-healing rather than lossy.
+
+**Nulling a TOASTed value does not shrink the database.** It marks the
+space reusable by the table; the reported size falls only on a rewrite
+(`VACUUM FULL`, which takes an exclusive lock and needs free disk about
+equal to the table). What this stops is the GROWTH. Dropping an INDEX,
+by contrast, returns its space immediately.
+
+### Measured storage, 2026-09-01
+
+The free tier is 500MB. The database was **800MB**.
+
+| | size |
+|---|---|
+| `markets` TOAST | 581MB |
+| `markets` indexes | 121MB |
+| `markets` heap | 74MB |
+
+Inside TOAST: `embedding` (JSON) **266MB**, `embedding_v` (vector)
+**147MB**, and ~168MB of `resolution`.
+
+**The three HNSW vector indexes had `idx_scan: 0`** — 114MB of the
+121MB, never scanned, because `match_candidates()` is opt-in behind
+`?matcher=sql` and stays off on performance. Migration `0014` drops
+them; `0007` recreates them and is the way back.
+
+**Migration 0007 is already applied and is NON-DESTRUCTIVE**: `embedding`
+and `embedding_v` are both stored, so it *added* a copy rather than
+replacing one. The 5x win only lands when the JSON column is dropped,
+and that is blocked — `lib/matcher.js` reads `m.embedding` and is the
+live matching path for both the route and the Actions workflow.
+Dropping it today stops every non-sports category from matching.
 
 ### Hitting the routes by hand
 

@@ -165,6 +165,14 @@ jobs:
               echo "::warning::prune: $(jq -r '.error' prune.json)"
             else
               jq -r '"pruned \(.deleted) of \(.marketsScanned) markets, \(.pairsProtecting) protected"' prune.json
+              # Resolution text is stored for every market and readable
+              # only on paired ones, which was ~168MB of TOAST. Nulling
+              # it stops the growth; it does not shrink the reported
+              # database size until the table is rewritten.
+              jq -r 'if .resolutionCleared != null then
+                       "  resolution: cleared \(.resolutionCleared) unreadable of \(.resolutionRowsCarrying // 0) carrying"
+                     else empty end' prune.json || true
+              jq -r '(.resolutionErrors // [])[:3][] | "::warning::prune resolution: " + .' prune.json || true
               jq -r '(.errors // [])[:3][] | "::warning::prune: " + .' prune.json || true
             fi
           else
