@@ -166,6 +166,55 @@ unmatched is a demand signal for the matcher. Two found immediately:
 "fed rate" returns 8 markets and 0 matched, and "government shutdown"
 returns 9 across both venues with 0 matched.
 
+### Embedding is gated per Kalshi series
+
+`lib/embedGate.js`, imported by `embed.js`. Kalshi's econ catalogue is
+14,760 markets against Polymarket's **342**, so at most 342 Kalshi rows
+can ever be paired and the rest are vectors bought to be compared
+against nothing. Each costs a flat **~4KB** of pgvector — float arrays
+are high-entropy, so TOAST compresses them to nothing.
+
+**The rule is evidence, not taxonomy.** A series is embedded in full the
+first time it is seen; after that only if it has actually produced a
+pair. A series that had its chance and matched nothing stops consuming
+quota as it lists new strikes and periods.
+
+- **Taxonomy was tried first and is wrong.** Excluding Kalshi's
+  Financials category looks obvious — 10,772 markets of S&P, Treasury,
+  Nasdaq and FX ladders — but `KXIPOOPENAI` and `KXIPOANTHROPIC` are in
+  Financials too and are **4 of the 21 econ pairs the site shows**. The
+  waste is also a long tail: ~1,050 series of roughly ten markets each,
+  one per listed company, which no hand-written list can track.
+- **Skipping is not deleting.** An already-embedded row keeps its
+  vector, and the market is still fetched, stored and searchable —
+  search reads titles, so nothing leaves the catalogue. The series
+  simply stops being a match candidate.
+- **Polymarket is never gated.** It is the scarce side every pair is
+  built against, and its ids carry no series anyway.
+- **A first chance is the FULL series, not a sample.** Sampling risks
+  missing the one strike in a ladder that has a counterpart, which is
+  the loss this gate exists to avoid trading storage for.
+- **`?reprobe=1` re-opens everything for one run.** That is the way back
+  in when Polymarket adds coverage for something Kalshi already lists.
+  `force=1` bypasses the gate too.
+- The gate applies to **every non-sports category**, not just econ —
+  politics and crypto have the same shape of waste.
+- `embedGate` in the response and the workflow log **names** the skipped
+  series rather than only counting them, so a series that ought to be
+  matching is recognisable instead of hiding inside a total.
+  `scripts/embed-gate.test.mjs` pins the cases.
+
+**Measured storage reality (2026-09-01):** `embedding_v` alone is
+**147MB across 37,518 rows** — 4.01KB each, confirming vectors do not
+compress. That is 3.3x the ~11,300 embedded rows this file used to
+claim. Migration 0007 is **already applied**, and it is
+**non-destructive**: `embedding` (JSON) and `embedding_v` (vector) are
+both stored, so it *added* a second copy rather than replacing the
+first. The 5x win only lands when the JSON column is dropped, and that
+is blocked — `lib/matcher.js` reads `m.embedding` and is the live
+matching path for both the route and the Actions workflow. Dropping it
+today stops every non-sports category from matching.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that

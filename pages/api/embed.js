@@ -18,6 +18,7 @@ import { fetchUsGameMarket, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, P
 // cannot drift — see the note at the top of that file.
 import { matchNonSportsMarkets, assignGreedy, cosineSimilarity } from "../../lib/matcher.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
+import { buildSeriesGate, allowEmbed } from "../../lib/embedGate.js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -1301,9 +1302,67 @@ export default async function handler(req, res) {
     // means re-embedding ~11k rows to fix a few thousand.
     const needsEmbedding = m =>
       !embeddedTitles.has(m.id) || embeddedTitles.get(m.id) !== m.title;
-    const eligible = force
+
+    // ── One chance per Kalshi series ────────────────────────────────
+    //
+    // Kalshi's econ catalogue is 14,760 markets against Polymarket's
+    // 342, so at most 342 Kalshi rows can EVER be paired and the rest
+    // are vectors bought to be compared against nothing. At a flat 4KB
+    // of pgvector each — float arrays are high-entropy, so TOAST
+    // compresses them to nothing — that is the tier filling up with
+    // markets that cannot match.
+    //
+    // The rule is evidence, not taxonomy: a series is embedded in full
+    // the first time it is seen, and after that only if it has actually
+    // produced a pair. A series that had its chance and matched nothing
+    // stops consuming quota as it lists new strikes and periods.
+    //
+    // TAXONOMY WAS TRIED FIRST AND IS WRONG. Excluding Kalshi's
+    // Financials category looks obvious — it is 10,772 markets of S&P
+    // and Treasury and Nasdaq and FX ladders — but KXIPOOPENAI and
+    // KXIPOANTHROPIC live there too and are 4 of the 21 econ pairs the
+    // site currently shows. The waste is also a LONG TAIL: ~1,050
+    // series of roughly ten markets each, one per listed company, which
+    // no hand-written list can track. Guessing the shape of what
+    // matches is what this rule avoids having to do.
+    //
+    // Skipping is not deleting: an already-embedded row keeps its
+    // vector, and the market is still fetched, stored and searchable.
+    // Search reads titles, so nothing disappears from the catalogue —
+    // the series simply stops being a MATCH candidate.
+    //
+    // ?reprobe=1 ignores the gate for one run. That is the way back in
+    // when Polymarket adds coverage for something Kalshi already lists:
+    // the series gets a fresh full chance and, if it pairs, is proven
+    // from then on.
+    const gateOff = req.query.reprobe === "1" || force;
+
+    let seriesGate = { proven: new Set(), tried: new Set() };
+    if (!gateOff) {
+      // Series that have produced a pair. Paged, for the same reason
+      // every other read here is: the 1000-row server-side cap.
+      const pairRows = await fetchAllRows(() => supabase
+        .from("pairs").select("kalshi_id"));
+      seriesGate = buildSeriesGate({
+        pairKalshiIds: (pairRows || []).map(r => r.kalshi_id),
+        // Costs no extra query — the embedded set was already read above.
+        embeddedIds: [...embeddedTitles.keys()],
+      });
+    }
+
+    const embedGateSkips = new Map();
+    const seriesAllowed = m => {
+      if (gateOff) return true;
+      if (allowEmbed(m.id, seriesGate)) return true;
+      const t = String(m.id).split("-")[0];
+      embedGateSkips.set(t, (embedGateSkips.get(t) || 0) + 1);
+      return false;
+    };
+
+    const eligibleBeforeGate = force
       ? allMarkets.filter(m => !SPORTS_TAGS.has(m.sport_tag))
       : allMarkets.filter(m => needsEmbedding(m) && !SPORTS_TAGS.has(m.sport_tag));
+    const eligible = eligibleBeforeGate.filter(seriesAllowed);
 
     // Cap the work per invocation. Vercel kills a function at 300s, and
     // reading polymarket.us side labels changed the title of roughly
@@ -1319,6 +1378,23 @@ export default async function handler(req, res) {
     const embedLimit = Math.max(1, parseInt(req.query.embedLimit, 10) || EMBED_BATCH_LIMIT);
     const toEmbed = eligible.slice(0, embedLimit);
     const embedRemaining = eligible.length - toEmbed.length;
+
+    // What the series gate held back, and why it can be trusted.
+    //
+    // A gate that cannot be seen is how silent data loss happens in this
+    // codebase — every counter here exists because something was wrong
+    // and invisible. `skippedSeries` names the biggest offenders rather
+    // than only counting them, so a series that should be matching is
+    // recognisable by name instead of hiding inside a total.
+    const embedGate = gateOff ? { enabled: false } : {
+      enabled: true,
+      skipped: eligibleBeforeGate.length - eligible.length,
+      seriesProven: seriesGate.proven.size,
+      seriesTried: seriesGate.tried.size,
+      skippedSeries: [...embedGateSkips.entries()]
+        .sort((a, b) => b[1] - a[1]).slice(0, 20)
+        .map(([ticker, n]) => `${ticker}:${n}`),
+    };
 
     // Upsert all markets. Deliberately not touching `embedding` here -
     // omitting the key from the payload leaves it untouched for rows
@@ -1374,6 +1450,7 @@ export default async function handler(req, res) {
         sport,
         embedded,
         embedRemaining,
+        embedGate,
         kalshiSweep: [...kalshiSweep],
         totalKalshi: kalshiRaw.length,
         totalPoly: polyRaw.length,
@@ -1478,6 +1555,7 @@ export default async function handler(req, res) {
     res.status(200).json({
       embedded,
       embedRemaining,
+      embedGate,
       newPairs:    newPairs.length,
       totalKalshi: kalshiRaw.length,
       totalPoly:   polyRaw.length,
