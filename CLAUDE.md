@@ -268,12 +268,34 @@ Inside TOAST: `embedding` (JSON) **266MB**, `embedding_v` (vector)
 `?matcher=sql` and stays off on performance. Migration `0014` drops
 them; `0007` recreates them and is the way back.
 
-**Migration 0007 is already applied and is NON-DESTRUCTIVE**: `embedding`
-and `embedding_v` are both stored, so it *added* a copy rather than
-replacing one. The 5x win only lands when the JSON column is dropped,
-and that is blocked — `lib/matcher.js` reads `m.embedding` and is the
-live matching path for both the route and the Actions workflow.
-Dropping it today stops every non-sports category from matching.
+**Migration 0007 is applied and is NON-DESTRUCTIVE**: it *added*
+`embedding_v` rather than replacing `embedding`, which is why the
+database grew when it was meant to shrink. Migration `0015` drops the
+JSON column; `0014` drops the unused HNSW indexes.
+
+**Everything reads `embedding_v` now** — `lib/matcher.js`,
+`scripts/match-category.mjs` and every select in `embed.js` — and
+`embed.js` writes only the vector. The two columns serialise
+identically: pgvector renders `[0.1,0.2,...]`, exactly what
+`JSON.stringify` produced, so the cutover was a column rename and a
+shared `parseVector()`. That helper returns null rather than throwing,
+because it runs inside the loop over every stored row and
+`JSON.parse("")` would otherwise cost a whole category its run.
+
+**Float4 carries less precision than the float64 JSON did, and
+borderline candidates CAN move.** Verified on identical production
+inputs: econ came back byte-identical at 34 pairs, crypto went 29 -> 30,
+losing nothing and gaining one correct pair (Kalshi's
+`above $109,999.99 by Dec 31 2026` against Polymarket's
+`reach $110,000 by December 31 2026`). One moved in, none moved out — a
+future run could move one the other way, and the GATES rather than the
+score are what should catch that.
+
+**`drop column` does not reclaim the space.** It marks the attribute
+dropped without rewriting the table, so the TOAST entries stay and the
+reported size does not fall. `vacuum (full, analyze) markets` returns
+it, takes an ACCESS EXCLUSIVE lock for its duration, and needs free disk
+about equal to the table.
 
 ### Hitting the routes by hand
 

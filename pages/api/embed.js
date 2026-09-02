@@ -1416,21 +1416,21 @@ export default async function handler(req, res) {
       // NOT NULL columns like `platform` on the attempted insert row
       // even when the row already exists and conflict resolution will
       // just update it, so a partial payload fails every time.
-      // Both columns. `embedding_v` (migration 0007) is the vector the
-      // database matches on; `embedding` is the original JSON, kept
-      // until the vector path has proven itself on real matches.
+      // `embedding_v` only. The JSON `embedding` column it used to be
+      // written alongside was a second copy of the same numbers at ~7KB
+      // compressed against the vector's 4KB — 266MB of an 800MB
+      // database — and nothing reads it any more: matcher.js,
+      // match-category.mjs and every select here moved to the vector in
+      // the change before this one, verified against a production
+      // before/after diff.
       //
-      // pgvector parses the same bracketed form JSON.stringify produces,
-      // so one string serves both — no separate encoding to drift.
-      const records = toEmbed.map((m, i) => {
-        const encoded = JSON.stringify(embeddings[i]);
-        return {
-          ...m,
-          embedding: encoded,
-          embedding_v: encoded,
-          updated_at: Math.floor(Date.now() / 1000),
-        };
-      });
+      // pgvector accepts the bracketed form JSON.stringify produces, so
+      // the encoding is unchanged; only the destination is.
+      const records = toEmbed.map((m, i) => ({
+        ...m,
+        embedding_v: JSON.stringify(embeddings[i]),
+        updated_at: Math.floor(Date.now() / 1000),
+      }));
       embeddingUpsert = await upsertRows("markets", records, "id");
       embedded = toEmbed.length;
     }
