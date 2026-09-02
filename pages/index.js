@@ -170,8 +170,15 @@ const CATEGORIES = {
 };
 
 // ── Fetch from new Supabase-backed API ─────────────────────────
-async function fetchMarkets(category) {
-  const res = await fetch(`/api/markets?category=${category}`);
+async function fetchMarkets(category, bypassEdgeCache = false) {
+  // `/api/markets` is cached at Vercel's edge, and the edge keys on the
+  // URL. The read that follows a manual refresh therefore has to ask a
+  // DIFFERENT url, or it is served the copy cached before the refresh
+  // wrote — the button reads the venues, stores new prices, and then
+  // shows the old ones. That is the exact failure this project already
+  // fixed once: a refresh button that looks like it works and does not.
+  const bust = bypassEdgeCache ? `&fresh=${Date.now()}` : "";
+  const res = await fetch(`/api/markets?category=${category}${bust}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return await res.json();
 }
@@ -626,7 +633,7 @@ export default function HouseEdge() {
   const [searchData, setSearchData] = useState(null);
   const [searching, setSearching] = useState(false);
 
-  const loadMarkets = useCallback(async (categoryKey) => {
+  const loadMarkets = useCallback(async (categoryKey, bypassEdgeCache = false) => {
     const cat = CATEGORIES[categoryKey];
     setLoading(true);
     setError(null);
@@ -641,7 +648,7 @@ export default function HouseEdge() {
     }
 
     try {
-      const { pairs, needsEmbed: ne, hidden: h } = await fetchMarkets(categoryKey);
+      const { pairs, needsEmbed: ne, hidden: h } = await fetchMarkets(categoryKey, bypassEdgeCache);
       setMarkets(pairs || []);
       setNeedsEmbed(!!ne);
       setHidden(h || null);
@@ -668,7 +675,9 @@ export default function HouseEdge() {
       // Only re-read when the server actually wrote something. A skipped
       // call means the stored prices were already fresh, and re-fetching
       // to display the same numbers is a spinner for nothing.
-      if (didWork) await loadMarkets(categoryKey);
+      // Bypass the edge cache: the refresh only just wrote the prices
+      // this read is meant to show.
+      if (didWork) await loadMarkets(categoryKey, true);
     } finally {
       setRefreshing(false);
     }

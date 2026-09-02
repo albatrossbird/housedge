@@ -488,7 +488,29 @@ export default async function handler(req, res) {
     // After the depth re-check, so every leg carries its final numbers.
     const cards = mergeByKalshiMarket(shaped);
 
-    res.setHeader("Cache-Control", "s-maxage=30");
+    // 30 SECONDS WAS 60x SHORTER THAN THE DATA IT CACHES.
+    //
+    // A TTL is a claim about how often the answer changes. Prices here
+    // come from a scheduled job GitHub throttles to between 45 minutes
+    // and 3.5 hours, with an on-demand read that fires at most once per
+    // ON_DEMAND_AFTER_SECONDS (180) when someone is actually looking.
+    // So the fastest this response can change is ~3 minutes, and the
+    // usual case is hours — while the page polls every 60s.
+    //
+    // At 30s that is two origin reads a minute per viewing category, and
+    // the politics payload is 874KB: ONE continuously-open tab was ~75GB
+    // of Supabase egress a month against a 5GB free-tier allowance. The
+    // reads bought nothing, because the bytes were identical.
+    //
+    // 300s is still shorter than the interval at which the underlying
+    // job can produce new numbers, so nobody sees a staler page than
+    // they did before — they see the same numbers fetched 10x less.
+    //
+    // The manual ↻ path bypasses this by asking a different url; see
+    // fetchMarkets() in pages/index.js. Without that, a refresh would
+    // write new prices and then be served the copy cached before the
+    // write, which is a refresh button that only looks like one.
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=60");
     res.status(200).json({
       // One entry per Kalshi market; the Polymarket venues are `legs`
       // inside it. `pairs` remains the key because that is what a
