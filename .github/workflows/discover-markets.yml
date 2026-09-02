@@ -90,6 +90,15 @@ jobs:
               FAILED=1
             fi
 
+            # What the series gate held back. A series is embedded in
+            # full the first time it is seen and after that only if it
+            # has produced a pair, so a NAMED series here that ought to
+            # be matching is the signal to re-open it with ?reprobe=1.
+            jq -r 'if (.embedGate // {}).enabled then
+                     "  gate: skipped \(.embedGate.skipped) in tried-but-unproven series (proven \(.embedGate.seriesProven), tried \(.embedGate.seriesTried))"
+                   else empty end' "fetch-$CAT.json" || true
+            jq -r '((.embedGate // {}).skippedSeries // [])[:8] | select(length>0) | "  gate skipped: " + join(" ")' "fetch-$CAT.json" || true
+
             REMAINING=$(jq -r '.embedRemaining // 0' "fetch-$CAT.json")
             if [ "$REMAINING" -gt 0 ]; then
               echo "::warning::$CAT: $REMAINING titles still need embedding; next run continues"
