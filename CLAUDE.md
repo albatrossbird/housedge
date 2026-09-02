@@ -250,7 +250,29 @@ space reusable by the table; the reported size falls only on a rewrite
 equal to the table). What this stops is the GROWTH. Dropping an INDEX,
 by contrast, returns its space immediately.
 
-### Measured storage, 2026-09-01
+### Measured storage
+
+**Resolved, 2026-09-02: `markets` is 301MB.** It was 776MB. The project
+is on Supabase Pro (8GB included), so storage is no longer a constraint
+— this section is kept as the record of what the cleanup consisted of,
+not as an open problem.
+
+What got it there, in order: `0014` dropped 114MB of never-scanned HNSW
+indexes (immediate), prune nulled ~168MB of unreadable `resolution`
+text, `0015` dropped the 266MB JSON `embedding` column, and a
+`vacuum (full, analyze) markets` over a direct connection rewrote the
+table to actually return the space. The catalogue GREW from 55,355 to
+63,239 rows across the same period, so it now holds 14% more markets in
+39% of the space.
+
+**The vacuum reported `Failed to fetch (api.supabase.com)` and had
+nevertheless completed.** The editor's request timed out; the statement
+did not. Only a rewrite can take the table from 776MB to 301MB, so the
+size is the evidence — do not re-run a `VACUUM FULL` on the strength of
+an error message alone, because a needless one costs an exclusive lock
+and several minutes of downtime.
+
+### What the numbers were, 2026-09-01
 
 The free tier is 500MB. The database was **800MB**.
 
