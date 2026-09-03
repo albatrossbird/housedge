@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/router";
 
 // Brand palette, sampled from the MarketSlap logo artwork rather than
 // eyeballed: the wordmark's two inks and the app-icon tile.
@@ -169,6 +170,8 @@ function arbAlert(m) {
 // last rather than being hidden, so a new league is visible the day it
 // starts matching.
 const LEAGUE_ORDER = ["mlb", "nfl", "nba", "nhl", "soccer"];
+// A card carries its sport_tag ("mlb"), not its tab ("sports").
+const CATEGORY_OF_CARD = { mlb: "sports", nfl: "sports", nba: "sports", nhl: "sports", soccer: "sports", econ: "economics", crypto: "crypto", politics: "politics" };
 const LEAGUE_LABEL = { mlb: "MLB", nfl: "NFL", nba: "NBA", nhl: "NHL", soccer: "Soccer" };
 
 const CATEGORIES = {
@@ -554,6 +557,124 @@ function Skeleton() {
   );
 }
 
+function MenuItem({ label, onClick, active, soon }) {
+  return (
+    <button
+      onClick={soon ? undefined : onClick}
+      disabled={!!soon}
+      style={{
+        width: "100%", textAlign: "left", padding: "11px 16px",
+        background: active ? `${ACCENT}0E` : "transparent",
+        border: "none", borderTop: `1px solid ${T.border}`,
+        color: soon ? T.muted : (active ? ACCENT : T.text),
+        fontWeight: active ? 700 : 500, fontSize: 14,
+        cursor: soon ? "default" : "pointer",
+        display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
+      }}
+    >
+      <span>{label}</span>
+      {soon && <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em", color: T.muted, textTransform: "uppercase" }}>Soon</span>}
+    </button>
+  );
+}
+
+// ── Home ───────────────────────────────────────────────────────
+//
+// A way in, not a dashboard. Someone arriving from a link has no idea
+// what this site compares, and the old front door was the sports tab
+// with no explanation.
+//
+// "Most traded" is ranked by KALSHI CONTRACTS, and says so. It is the
+// one figure every card has — Polymarket reports dollars and
+// polymarket.us reports nothing — so a combined "volume" would be three
+// units added together. The category badge on each row matters: those
+// markets run to millions of contracts where a ball game runs to
+// thousands, so this list is politics-heavy, and that is a fact about
+// the venues rather than a bug.
+function HomeView({ data, onCategory }) {
+  const cards = data?.pairs || [];
+  const counts = data?.byCategory || {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  return (
+    <div>
+      <div style={{ marginBottom: 26 }}>
+        <h1 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 800, color: T.text, letterSpacing: "-0.02em" }}>
+          The same claim, priced on every venue that lists it
+        </h1>
+        <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.5, maxWidth: 620 }}>
+          Kalshi, Polymarket and Polymarket US, side by side — with each venue&apos;s
+          fees in the number.{" "}
+          {total > 0 && <><strong style={{ color: T.text }}>{total.toLocaleString()}</strong> matched markets right now.</>}
+        </p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(190px, 100%), 1fr))", gap: 10, marginBottom: 30 }}>
+        {Object.entries(CATEGORIES).map(([key, cat]) => (
+          <button
+            key={key}
+            onClick={() => onCategory(key)}
+            style={{
+              textAlign: "left", cursor: "pointer", background: T.surface,
+              border: `1px solid ${T.border}`, borderRadius: 10, padding: "14px 16px",
+              display: "flex", flexDirection: "column", gap: 4, transition: "border-color 0.15s",
+            }}
+          >
+            <span style={{ fontSize: 18 }}>{cat.icon}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{cat.label}</span>
+            <span style={{ fontSize: 12, color: T.muted }}>
+              {/* undefined and 0 are different answers: one is "still
+                  loading", the other is "nothing matched". */}
+              {counts[key] == null ? "—" : `${counts[key]} matched`}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: T.text }}>Most traded</h2>
+        <span style={{ fontSize: 11, color: T.muted }}>
+          by contracts traded on Kalshi — the one unit every venue here shares
+        </span>
+      </div>
+
+      {cards.length === 0 ? (
+        <div style={{ padding: 24, border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, fontSize: 13, color: T.muted }}>
+          Loading the most traded markets…
+        </div>
+      ) : (
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, overflow: "hidden" }}>
+          {cards.map((m, i) => {
+            const tab = CATEGORY_OF_CARD[m.category] || m.category;
+            return (
+              <button
+                key={m.id}
+                onClick={() => onCategory(tab)}
+                style={{
+                  width: "100%", textAlign: "left", cursor: "pointer", background: "transparent",
+                  border: "none", borderTop: i === 0 ? "none" : `1px solid ${T.border}`,
+                  padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
+                }}
+              >
+                <span style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase",
+                  color: T.muted, minWidth: 74,
+                }}>
+                  {CATEGORIES[tab]?.label || tab}
+                </span>
+                <span style={{ flex: 1, fontSize: 13, color: T.text, minWidth: 0 }}>{m.title}</span>
+                <span style={{ fontSize: 12, color: T.muted, whiteSpace: "nowrap" }}>
+                  {compact(m.kalshi?.volume || 0)} contracts
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────
 function priceCell(v) {
   return v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -633,12 +754,43 @@ function SearchResult({ r }) {
 }
 
 export default function HouseEdge() {
-  const [activeCategory, setActiveCategory] = useState("sports");
+  // Kept as a name because a dozen call sites read it, but it is now
+  // DERIVED from the url rather than a second source of truth. Two
+  // places holding "which tab" is how a back button ends up showing one
+  // tab's data under another tab's heading.
+  const [homeData, setHomeData] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [sort, setSort] = useState("trending");
   // Sports is four leagues sharing one tab. Derived from the cards
   // rather than a constant, so a league that starts matching appears
   // without a code change and one that stops does not leave a dead chip.
   const [league, setLeague] = useState("all");
+
+  // THE URL IS THE STATE, not a mirror of it.
+  //
+  // Everything here used to live in React state alone, so every view had
+  // the same address: a reader could not link anyone to the politics tab,
+  // the back button left the site, and a refresh dropped them on sports.
+  // For a site with a domain and a social account, a page you cannot link
+  // to is a page that cannot be shared.
+  //
+  // Shallow routing rather than separate page files — the data fetch is
+  // the same call either way, so splitting the file would buy nothing and
+  // cost a rewrite.
+  const router = useRouter();
+  const urlCategory = typeof router.query.category === "string" ? router.query.category : null;
+  const view = urlCategory && CATEGORIES[urlCategory] ? "category" : "home";
+  const activeCategory = view === "category" ? urlCategory : "sports";
+
+  const goHome = useCallback(() => {
+    router.push("/", undefined, { shallow: true });
+  }, [router]);
+
+  const goCategory = useCallback((key) => {
+    setQuery("");
+    setLeague("all");
+    router.push({ pathname: "/", query: { category: key } }, undefined, { shallow: true });
+  }, [router]);
   // "Show me only the ones I can act on." The arb badge already exists;
   // this makes it a filter rather than something to scroll for.
   const [arbOnly, setArbOnly] = useState(false);
@@ -714,10 +866,11 @@ export default function HouseEdge() {
   }, [loadMarkets]);
 
   useEffect(() => {
+    if (view !== "category") return undefined;
     loadMarkets(activeCategory);
     const interval = setInterval(() => loadMarkets(activeCategory), 60_000);
     return () => clearInterval(interval);
-  }, [activeCategory, loadMarkets]);
+  }, [activeCategory, view, loadMarkets]);
 
 
   const venueOf = leg => (leg.poly.usTradable ? "us" : "global");
@@ -822,6 +975,28 @@ export default function HouseEdge() {
     return () => clearTimeout(t);
   }, [query]);
 
+  // The home page asks for every category at once, which is only
+  // affordable because ?top= trims server-side: politics alone is 930KB
+  // of cards and the home page needs twelve of them.
+  useEffect(() => {
+    if (view !== "home") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/markets?category=all&top=12");
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const body = await res.json();
+        if (!cancelled) setHomeData(body);
+      } catch {
+        // Silent by design. The home page is a way in, not a place to
+        // report an outage — every category tile still works, and the
+        // tab itself surfaces a read failure properly.
+        if (!cancelled) setHomeData({ pairs: [], byCategory: {} });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [view]);
+
   const searchMode = query.trim().length >= 2;
 
   return (
@@ -829,7 +1004,15 @@ export default function HouseEdge() {
       {/* Nav */}
       <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <button
+            onClick={goHome}
+            aria-label="MarketSlap home"
+            style={{
+              display: "flex", alignItems: "center", gap: 12, minWidth: 0,
+              background: "transparent", border: "none", padding: 0,
+              cursor: view === "home" ? "default" : "pointer", font: "inherit",
+            }}
+          >
             {/* No tile on the page. The tile was there to stop an S set
                 flush against a wordmark beginning with M reading as one
                 word, but the RULE below does that job now, and the mark
@@ -857,11 +1040,54 @@ export default function HouseEdge() {
               <span style={{ color: BRAND.ink }}>MARKET</span>
               <span className="ms-slap">SLAP</span>
             </span>
-          </div>
+          </button>
+
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            style={{
+              width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+              border: `1px solid ${menuOpen ? ACCENT : T.border}`,
+              background: menuOpen ? `${ACCENT}12` : T.surface,
+              color: menuOpen ? ACCENT : T.text,
+              cursor: "pointer", fontSize: 16, lineHeight: 1,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            {menuOpen ? "\u2715" : "\u2630"}
+          </button>
         </div>
+
+        {menuOpen && (
+          <div style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 14 }}>
+            <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, overflow: "hidden" }}>
+              <MenuItem label="Home" onClick={() => { goHome(); setMenuOpen(false); }} active={view === "home"} />
+              {Object.entries(CATEGORIES).map(([key, cat]) => (
+                <MenuItem
+                  key={key}
+                  label={`${cat.icon}  ${cat.label}`}
+                  onClick={() => { goCategory(key); setMenuOpen(false); }}
+                  active={view === "category" && activeCategory === key}
+                />
+              ))}
+              {/* Labelled, not linked. A menu item that navigates nowhere
+                  reads as a broken site; one that says "soon" reads as a
+                  roadmap, and costs nothing to leave in place until the
+                  page behind it exists. */}
+              {["About", "Contact", "Pricing", "FAQ", "Sign in"].map(label => (
+                <MenuItem key={label} label={label} soon />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px clamp(12px, 4vw, 24px)" }}>
+        {view === "home" ? (
+          <HomeView data={homeData} onCategory={goCategory} />
+        ) : (
+        <>
         {/* Search comes FIRST, above the tabs.
             The tabs answer "what did you find"; the box answers "what
             about this one", which is the question a reader actually
@@ -944,7 +1170,7 @@ export default function HouseEdge() {
               /* The venue choice survives a category switch. Resetting it
                  silently re-showed .com markets the reader had just
                  chosen to hide. */
-              onClick={() => { setActiveCategory(key); setQuery(""); setLeague("all"); }}
+              onClick={() => goCategory(key)}
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: `1px solid ${activeCategory === key ? ACCENT : T.border}`,
@@ -1226,6 +1452,8 @@ export default function HouseEdge() {
               reader to assume the second. */}
           <span>Page reloads every 60s · prices from the last scheduled venue read</span>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
