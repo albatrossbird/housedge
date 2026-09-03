@@ -112,6 +112,10 @@ const KALSHI_CONCURRENCY = 4;
 // "we stopped early" are the two answers this bug turned on.
 const KALSHI_PAGE = 200;
 const KALSHI_MAX_PAGES = 12;
+// A measured run polls 233 series in 67s against a 300s ceiling, so the
+// budget for backing off a throttle is real. Worst case here is roughly
+// 1.5 + 3 + 6 + 12s on one series, four at a time.
+const KALSHI_ATTEMPTS = 5;
 
 async function fetchKalshiSeries(series) {
   const markets = [];
@@ -123,7 +127,9 @@ async function fetchKalshiSeries(series) {
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
     let body = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < KALSHI_ATTEMPTS; attempt++) {
+      const last = attempt === KALSHI_ATTEMPTS - 1;
+      let waitMs = 400 * Math.pow(2, attempt);
       try {
         const r = await fetch(url);
         if (r.ok) { body = await r.json(); break; }
@@ -131,11 +137,23 @@ async function fetchKalshiSeries(series) {
         if (r.status !== 429 && r.status < 500) {
           return { series, markets, error: `HTTP ${r.status}` };
         }
-        if (attempt === 2) return { series, markets, error: `HTTP ${r.status}` };
+        if (last) return { series, markets, error: `HTTP ${r.status}` };
+        if (r.status === 429) {
+          // A RATE LIMITER DOES NOT RELENT IN 400ms. Widening the poll
+          // list from 124 series to 233 drew 16 straight 429s in one
+          // run, and three tries 400ms apart is not a retry against a
+          // throttle — it is three more requests into it. Each 429 that
+          // exhausts its tries freezes that series until the next run,
+          // which is between 45 minutes and 3.5 hours away.
+          const retryAfter = Number(r.headers.get("retry-after"));
+          waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(retryAfter * 1000, 15000)
+            : 1500 * Math.pow(2, attempt);
+        }
       } catch (err) {
-        if (attempt === 2) return { series, markets, error: err.message };
+        if (last) return { series, markets, error: err.message };
       }
-      await new Promise(res => setTimeout(res, 400 * Math.pow(2, attempt)));
+      await new Promise(res => setTimeout(res, waitMs));
     }
     if (!body) return { series, markets, error: "exhausted retries" };
 
