@@ -24,10 +24,19 @@ import { selectAll } from "../../../lib/v2/db.js";
 import { extractClaims, claimsCompatible, costOf } from "../../../lib/v2/extract.js";
 import { extractNumericClaim, extractPeriod } from "../../../lib/v2/claims.js";
 import { PAIR_CASES } from "../../../lib/v2/eval-cases.js";
+import { cronAuthorized } from "../../../lib/cronAuth.js";
 
 const DEFAULT_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"];
 
 export default async function handler(req, res) {
+  // The v1 job routes have been behind this since they existed; these
+  // were not, and they are the more expensive half. /api/v2/extract and
+  // /api/v2/extract-eval SPEND ANTHROPIC CREDITS per call, and the repo
+  // is public, so the url is too. Inert until CRON_SECRET is set, then
+  // closed everywhere at once.
+  const auth = cronAuthorized(req);
+  if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(400).json({
       error: "ANTHROPIC_API_KEY not set",

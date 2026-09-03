@@ -688,6 +688,34 @@ old  min(0.53, 0.545) + min(0.47, 0.455) = 0.9850  -> flagged ARB
 new  0.5388 + 0.4724                     = 1.0112  -> -1.1c, not a trade
 ```
 
+### Naming the venue is the whole point of the row
+
+The bars read `KALSHI` / `POLY US` / `POLY`. Two labels differing by two
+characters, a few cents apart, read as the same venue listed twice or a
+typo — and worse, **the unqualified one is the one a US reader cannot
+trade**: a reader who has heard of Polymarket takes the bare `POLY` for
+the real one, and that is `polymarket.com`. It is now `POLY GLOBAL`, so
+both labels name a jurisdiction and neither reads as the default.
+
+The label column is 96px and `nowrap`; `POLY GLOBAL` wrapped to two
+lines at 86px on a 375px screen. The "widest book" caption's
+`paddingLeft` tracks that width plus the row gap, or it stops lining up
+with where the bars start.
+
+### Job routes are gated, including the ones that spend money
+
+`lib/cronAuth.js` covered `/api/refresh`, `/api/embed` and `/api/prune`
+from the start. It did **not** cover the v2 routes, which are the more
+expensive half: `/api/v2/extract` and `/api/v2/extract-eval` spend
+**Anthropic credits** per call, `/api/v2/backfill` and
+`/api/v2/rematch?write=1` write through the service-role key. The repo
+is public, so those urls are public. All four are gated now.
+
+The gate is permissive until `CRON_SECRET` is set, so **setting that one
+variable is what actually closes them** — on Vercel *and* as a GitHub
+repository secret, or the workflows start 401ing. Verified open on
+2026-09-03: `/api/prune?dry=1` answered 200 with no credential.
+
 ### An empty book is not a wide one
 
 Both venues quote an untraded market as **best bid 0 / best ask 1** —
