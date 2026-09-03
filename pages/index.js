@@ -375,23 +375,43 @@ function Details({ market, legs }) {
   );
 }
 
-function MarketCard({ market }) {
+function MarketCard({ market, pinned, onPin }) {
   const isArb = arbAlert(market);
   const legs = legsOf(market);
   const age = cardAge(market);
   const [open, setOpen] = useState(false);
 
+  // Pinned outranks arb for the BORDER, because pinning is a thing the
+  // reader just did and the arb badge is still on the card either way.
+  const edge = pinned ? ACCENT : (isArb ? T.arb : T.border);
   return (
     <div style={{
       background: T.surface,
-      border: `1px solid ${isArb ? T.arb : T.border}`,
+      border: `1px solid ${edge}`,
       borderRadius: 10, padding: "18px 20px",
       display: "flex", flexDirection: "column", gap: 14,
-      boxShadow: isArb ? `0 0 0 1px ${T.arb}22` : "0 1px 3px rgba(0,0,0,0.04)",
+      boxShadow: pinned ? `0 0 0 2px ${ACCENT}26`
+               : isArb ? `0 0 0 1px ${T.arb}22`
+               : "0 1px 3px rgba(0,0,0,0.04)",
     }}>
       <div>
         <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
           {market.trending && <span style={{ fontSize: 10, fontWeight: 600, color: T.yes, letterSpacing: "0.04em" }}>↑ TRENDING</span>}
+          {/* A dedicated control, not a click on the card body. The card
+              already carries three links and an expander; making the
+              whole surface a pin target would steal those clicks. */}
+          <button
+            onClick={() => onPin(pinned ? null : market.id)}
+            aria-pressed={!!pinned}
+            title={pinned ? "Unpin" : "Pin this matchup to the top while you scroll"}
+            style={{
+              marginLeft: "auto", border: "none", background: "transparent",
+              cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 700,
+              letterSpacing: "0.04em", color: pinned ? ACCENT : T.muted,
+            }}
+          >
+            {pinned ? "\u2716 UNPIN" : "\u2295 PIN"}
+          </button>
           {/* Sits next to the arb badge on purpose. A flagged edge on a
               three-hour-old book is the one combination that costs a
               reader money, and it looked exactly like a fresh one. */}
@@ -553,6 +573,63 @@ function Skeleton() {
           <div style={{ height: 6, background: T.border, borderRadius: 99 }} />
         </div>
       ))}
+    </div>
+  );
+}
+
+// The pinned matchup, held under the nav while the list scrolls.
+//
+// A strip rather than frozen panes. Freezing a column is a desktop-table
+// idea that has nowhere to go on a 375px screen, where this site gets
+// most of its traffic; a strip is the same affordance in one dimension
+// and survives the fold.
+//
+// Deliberately CONDENSED, not a second copy of the card. Two full cards
+// on screen — one pinned, one being read — is the layout the merge into
+// `legs` was meant to end. What a reader pins a matchup FOR is its
+// numbers, so the strip carries the prices and the cost and drops
+// everything else.
+function PinnedStrip({ market, onClear }) {
+  const legs = legsOf(market);
+  const best = bestLeg(market);
+  return (
+    <div style={{
+      maxWidth: 900, margin: "0 auto", paddingBottom: 10,
+      display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+    }}>
+      <div style={{
+        flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 12,
+        flexWrap: "wrap",
+        border: `1px solid ${ACCENT}55`, background: `${ACCENT}0A`,
+        borderRadius: 8, padding: "8px 12px",
+      }}>
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: ACCENT }}>PINNED</span>
+        <span style={{ flex: 1, minWidth: 120, fontSize: 12, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {market.title}
+        </span>
+        <span style={{ display: "flex", gap: 10, fontSize: 11, color: T.muted, flexWrap: "wrap" }}>
+          <span><strong style={{ color: T.text }}>{pct(market.kalshi.yes)}</strong> Kalshi</span>
+          {legs.map(l => (
+            <span key={l.pairId}>
+              <strong style={{ color: T.text }}>{l.poly.yes == null ? "—" : pct(l.poly.yes)}</strong>{" "}
+              {l.poly.usTradable ? "Poly US" : "Poly"}
+            </span>
+          ))}
+          {/* Same rule as the card: no executable price is not zero edge. */}
+          {best?.arb && (
+            <span style={{ color: best.arb.profitable ? T.arb : T.muted, fontWeight: best.arb.profitable ? 700 : 400 }}>
+              {(best.arb.cost * 100).toFixed(1)}¢ both sides
+            </span>
+          )}
+        </span>
+        <button
+          onClick={onClear}
+          aria-label="Unpin"
+          style={{ border: "none", background: "transparent", cursor: "pointer", color: ACCENT, fontSize: 13, padding: 0, lineHeight: 1 }}
+        >
+          {"\u2715"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -760,6 +837,10 @@ export default function HouseEdge() {
   // tab's data under another tab's heading.
   const [homeData, setHomeData] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Cleared when the tab changes: a matchup pinned on sports has no
+  // meaning above a politics list, and leaving it there would be a
+  // stale row the reader did not put here.
+  const [pinnedId, setPinnedId] = useState(null);
   const [sort, setSort] = useState("trending");
   // Sports is four leagues sharing one tab. Derived from the cards
   // rather than a constant, so a league that starts matching appears
@@ -789,6 +870,7 @@ export default function HouseEdge() {
   const goCategory = useCallback((key) => {
     setQuery("");
     setLeague("all");
+    setPinnedId(null);
     router.push({ pathname: "/", query: { category: key } }, undefined, { shallow: true });
   }, [router]);
   // "Show me only the ones I can act on." The arb badge already exists;
@@ -933,6 +1015,11 @@ export default function HouseEdge() {
   // Counted BEFORE the arb filter. Counting `visible` would make the
   // toggle's own label change when you press it — the number would
   // always equal the row count once on, which tells the reader nothing.
+  // Resolved from the CURRENTLY VISIBLE set, not from `markets`. A card
+  // filtered out by venue or league is not on screen, and a strip
+  // describing something the reader cannot see is a ghost.
+  const pinnedCard = pinnedId ? visible.find(m => m.id === pinnedId) || null : null;
+
   const arbCount = byLeague.filter(arbAlert).length;
   // The stalest leg among what is actually on screen. Reported rather
   // than an average, because the reader is about to act on the worst
@@ -983,7 +1070,7 @@ export default function HouseEdge() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/markets?category=all&top=12");
+        const res = await fetch("/api/markets?category=all&perCategory=3");
         if (!res.ok) throw new Error(`API error: ${res.status}`);
         const body = await res.json();
         if (!cancelled) setHomeData(body);
@@ -1081,6 +1168,11 @@ export default function HouseEdge() {
             </div>
           </div>
         )}
+
+        {/* Inside the sticky nav rather than a sibling with a top offset:
+            the nav wraps at narrow widths, so any hard-coded offset would
+            be wrong on exactly the screens this matters most on. */}
+        {pinnedCard && <PinnedStrip market={pinnedCard} onClear={() => setPinnedId(null)} />}
       </div>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px clamp(12px, 4vw, 24px)" }}>
@@ -1421,7 +1513,7 @@ export default function HouseEdge() {
                 stale children and the list only looked right after a
                 manual refresh — while the stat row, being plain numbers,
                 updated instantly. */}
-            {sorted.map(m => <MarketCard key={m.id} market={m} />)}
+            {sorted.map(m => <MarketCard key={m.id} market={m} pinned={pinnedId === m.id} onPin={setPinnedId} />)}
           </div>
         )}
 
