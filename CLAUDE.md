@@ -479,6 +479,47 @@ were games played two weeks earlier — and reported success throughout.
 `matchDiagnostics.kalshiKeyFailures` exists so the next format change is
 loud instead of silent.
 
+### Implausible pairs are hidden, not just unflagged
+
+**Two venues do not disagree by 15 points on the same claim.** The
+`IMPLAUSIBLE_SPREAD_PTS` guard used to suppress only the arb badge, so
+the card still rendered "Kalshi 92% / Polymarket 10%" side by side — and
+a reader who sees that concludes the site is broken, which costs more
+trust than showing nothing and is the CORRECT conclusion, because the
+pair is wrong. `/api/markets` now drops them and counts them under
+`hidden.implausibleSpread`, named separately from `longShots` because a
+long shot is the product working and this is the matcher failing.
+
+Measured 2026-09-03: **24 of 535 displayed legs** were over the
+threshold, 22 of them politics. Every one read by hand was a matching
+fault rather than an edge. Four distinct failure modes, three now gated:
+
+- **Negation.** "Zelenskyy and Putin meet before 2027" against "Will
+  Zelenskyy and Putin NOT meet before 2027" — 0.908 similar, priced 7%
+  against 92%. `hasNegation` uses a SHORT list of inverters; "no" is
+  excluded because it is load-bearing in "no more than 3 cuts" and
+  would cost a family of correct threshold pairs.
+- **Opposing modifiers.** "Red wave in 2026" against "Blue wave in
+  2026" — 0.913, priced 6% against 77%. Each side must commit to one
+  pole and only one, so a title naming both parties states no
+  preference and is not caught.
+- **National versus state.** "Democrats win exactly 5 seats in the U.S.
+  House" against "House Seats … In Arizona — 5". `statesNamed()`
+  already existed and did not catch it: the asymmetry rule rejects only
+  on MUTUAL disagreement, and the national side names no state. That
+  rule is right nearly everywhere and wrong here — on a title that says
+  "U.S." explicitly, naming no state IS the claim.
+- **Participant scope** ("Trump meet Putin" against "Trump, Putin AND
+  Zelensky meet together") is NOT gated. Every rule that catches it
+  also rejects correct pairs where one title omits a name, and the
+  display filter catches it anyway.
+
+Some implausible pairs are not text-diagnosable at all — Delcy
+Rodríguez "de facto head of state" against "the leader of Venezuela"
+reads as the same claim and prices 81 points apart. The gates handle
+what the words reveal; the display filter is what makes the rest
+invisible to a reader.
+
 ### Diagnostics convention
 
 Both modes return `matchDiagnostics` with `threshold`, embedded counts, `acceptedPairs` (what was actually paired, post-gate, post-exclusivity), and `topScores` (best candidate per Kalshi row **regardless of threshold or gate**). `topScores` is what distinguishes "real candidates just under threshold" from "nothing close" from "gate correctly rejecting". Write routes return per-stage `writes` counts and real error strings. **Keep this** — nearly every bug this codebase has had was invisible until the relevant counter/error was surfaced in the response.

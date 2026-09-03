@@ -368,7 +368,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
 
-    const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0 };
+    const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0, implausibleSpread: 0 };
     // How often the shown price came from the book rather than the
     // stored last-trade figure. A large poly number is the bug this
     // replaced still being present in the data.
@@ -477,7 +477,11 @@ export default async function handler(req, res) {
         // profitable: true, and every other consumer - v2, any future
         // client, and the checks in this session - believed it. A
         // safety rule that lives in one client is not a safety rule.
-        const spreadPts = Math.abs((row.k_yes_price ?? 0) - (pYes ?? 0)) * 100;
+        // Measured on the numbers the CARD SHOWS — the book mids — not on
+        // the stored last-trade figures. Judging a displayed pair by
+        // prices the reader cannot see is how a card ends up flagged, or
+        // not flagged, for reasons nothing on screen explains.
+        const spreadPts = Math.abs((kYesShown ?? 0) - (pYesShown ?? 0)) * 100;
         const implausible = spreadPts > IMPLAUSIBLE_SPREAD_PTS;
         if (implausible && arb?.r?.profitable) implausibleArbs++;
 
@@ -487,6 +491,8 @@ export default async function handler(req, res) {
           // two pairs. Anything keying on it (React lists included) will
           // collide and reuse the wrong row, so pairs carry their own
           // identity as well.
+          _implausible: implausible,
+          _spreadPts: spreadPts,
           pairId: `${row.kalshi_id}|${row.polymarket_id}`,
           id: row.kalshi_id,
           title: cleanTitle(row.k_title),
@@ -583,9 +589,23 @@ export default async function handler(req, res) {
         if (m.kalshi.yes <= 0.05 || m.kalshi.yes >= 0.95)   return note("kalshiOutOfBand");
         if (m.poly.yes   <= 0.05 || m.poly.yes   >= 0.95)   return note("polyOutOfBand");
         if (m._gameDate && m._gameDate.getTime() < todayMs) return note("expired");
+        // TWO VENUES DO NOT DISAGREE BY 15 POINTS ON THE SAME CLAIM.
+        //
+        // Suppressing the arb badge was not enough. The card still
+        // rendered "Kalshi 92% / Polymarket 10%" side by side, and a
+        // reader who sees that concludes the site is broken — which
+        // costs more trust than showing nothing would, and is the
+        // correct conclusion, because the pair IS wrong.
+        //
+        // Every one read by hand was a matching fault rather than an
+        // edge: "meet before 2027" against "NOT meet before 2027",
+        // "Red wave" against "Blue wave", a national House count
+        // against an Arizona one. The gap is the evidence, not the
+        // finding.
+        if (m._implausible) return note("implausibleSpread");
         return true;
       })
-      .map(({ _gameDate, ...m }) => m);
+      .map(({ _gameDate, _implausible, _spreadPts, ...m }) => m);
 
     const depthCheck = await verifyKalshiDepth(shaped);
     const priced = shaped.filter(m => m.arb).length;
@@ -701,6 +721,10 @@ export default async function handler(req, res) {
       // them", and the difference decides whether they trust the tab.
       hidden: {
         longShots: dropped.kalshiOutOfBand + dropped.polyOutOfBand,
+        // Named separately from longShots on purpose: a long shot is the
+        // product working, this is the matcher failing, and folding them
+        // together would hide a defect inside an expected number.
+        implausibleSpread: dropped.implausibleSpread,
         expired: dropped.expired,
         missingPrice: dropped.missingPrice,
         total: data.length - shaped.length,

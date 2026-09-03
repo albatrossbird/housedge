@@ -20,6 +20,30 @@ const REJECT = [
 // Politics: Kalshi's Elections category against Polymarket's. Every
 // REJECT here was accepted by a real dry run and read wrong by hand.
 const REJECT_POL = [
+  // ── Live on the site until it was measured ────────────────────
+  // Each of these was RENDERING as a card, with the two venues shown
+  // disagreeing by 35 to 86 points. The gap was the evidence; the
+  // titles are the finding.
+  //
+  // A claim and its exact complement, 0.908 apart to an embedding and
+  // priced 7% against 92%.
+  ["Volodymyr Zelenskyy and Vladimir Putin meet before Jan 1, 2027? — Before 2027",
+   "Will Zelenskyy and Putin not meet before 2027?"],
+  // Every word that carries meaning is shared except the one that
+  // reverses it. 0.913, priced 6% against 77%.
+  ["Red wave in 2026? — Yes", "Blue wave in 2026?"],
+  // Same number, same party, same chamber, different country-sized
+  // scope. statesNamed() saw a state on one side and nothing on the
+  // other, which the asymmetry rule reads as missing rather than as
+  // "all of them".
+  ["Will Democrats win exactly 5 seats in the 2026 U.S. House of Representatives elections?",
+   "How Many House Seats Will The Democrats Win In Arizona? — 5"],
+  ["Will Democrats win exactly 48 seats in the 2026 U.S. House of Representatives elections?",
+   "How Many House Seats Will The Democrats Win In California? — 48"],
+  // Opposing parties for the same seat are opposite bets.
+  ["Will Republicans win the U.S. Senate in 2026? — Republican Party",
+   "Will Democrats win the U.S. Senate in 2026?"],
+
   // Wrong district, wrong state, wrong chamber.
   ["Will Republican win the House race for RI-02? — Republican party", "Will the Republican Party win the CT-02 House seat?"],
   ["Will Democratic win the House race for MI-13? — Donavan McKinney", "Will the Democratic Party win the MI-10 House seat?"],
