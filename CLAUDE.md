@@ -688,6 +688,31 @@ old  min(0.53, 0.545) + min(0.47, 0.455) = 0.9850  -> flagged ARB
 new  0.5388 + 0.4724                     = 1.0112  -> -1.1c, not a trade
 ```
 
+### An empty book is not a wide one
+
+Both venues quote an untraded market as **best bid 0 / best ask 1** —
+no orders, so the touch spans the whole probability range. Read
+literally that is a two-sided market a hundred points wide, and the
+card said exactly that: *"widest book 100.0pt"* next to a leg reading
+*"no executable price"*. It also fed `bookMid`, which averaged 0 and 1
+into a confident-looking **50%** and displayed it as the venue's price.
+
+`realBook()` in `lib/fees.js` empties it. **Both edges are required**: a
+one-sided book — a real bid with nothing offered, or an offer with no
+bid — is genuinely quoted and stays, because "you can sell but not buy"
+is a fact about the market rather than an absence of one. Kalshi's YES
+and NO books are separate and each is tested on its own.
+
+The complement is taken from the ALREADY-EMPTIED book, not from the
+row: mirroring a raw 0/1 gives 0/1 back and the emptiness is lost.
+
+**`complementBook` mirrored an ABSENT book into a `{bid: 1, ask: 1}`
+quote**, because `Number(null)` is 0 and the finite check let it
+through — a venue offering to sell at $1.00 that does not exist.
+`bestArb` prices that out of any edge, so it hid inside the arb figure
+and surfaced as a 100% mid on the card instead. Found by writing
+`scripts/real-book.test.mjs`, not by reading the page.
+
 ### One card, N venues
 
 A Kalshi market listed on both `polymarket.com` and `polymarket.us`

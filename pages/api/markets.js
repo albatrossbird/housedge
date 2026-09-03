@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
-import { bestArb, complementBook } from "../../lib/fees.js";
+import { bestArb, complementBook, realBook } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
@@ -427,26 +427,33 @@ export default async function handler(req, res) {
         // 1 - bid(outcome 0). Using the raw book either way would
         // quote the opponent's price.
         const polyOnOutcome1 = idx === 1;
-        const rawPolyBook = { bid: row.p_bid, ask: row.p_ask };
+        const rawPolyBook = realBook(row.p_bid, row.p_ask);
+        // The complement of an empty book is an empty book, so it is
+        // taken from rawPolyBook — already emptied — rather than from
+        // the row, or 0/1 would come back as 0/1 through the mirror.
         const polyBook = polyOnOutcome1
-          ? complementBook(row.p_bid, row.p_ask)
+          ? complementBook(rawPolyBook.bid, rawPolyBook.ask)
           : rawPolyBook;
         const polyOtherBook = polyOnOutcome1
           ? rawPolyBook
-          : complementBook(row.p_bid, row.p_ask);
+          : complementBook(rawPolyBook.bid, rawPolyBook.ask);
 
         // Display the mid of the book this leg actually trades on.
         // polyBook is already index-aware, so this cannot quote the
         // opponent's side the way the raw book would.
+        // Kalshi quotes an untraded market 0/1 too, and its YES and NO
+        // books are genuinely separate, so each is tested on its own.
+        const kBook = realBook(row.k_bid, row.k_ask);
+        const kNoBook = realBook(row.k_no_bid, row.k_no_ask);
         const pYesShown = bookMid(polyBook.bid, polyBook.ask, pYes);
-        const kYesShown = bookMid(row.k_bid, row.k_ask, row.k_yes_price);
+        const kYesShown = bookMid(kBook.bid, kBook.ask, row.k_yes_price);
         if (pYesShown !== pYes) priceFromBook.poly++;
         if (kYesShown !== row.k_yes_price) priceFromBook.kalshi++;
 
         const arb = bestArb(
           {
-            yesAsk: row.k_ask,
-            noAsk:  row.k_no_ask,
+            yesAsk: kBook.ask,
+            noAsk:  kNoBook.ask,
             // Kalshi publishes size on the YES book only; taking NO at
             // no_ask is backed by the YES bid queue.
             yesAskSize: row.k_ask_size,
@@ -513,8 +520,8 @@ export default async function handler(req, res) {
           priceAgeSeconds: ageSeconds(row.k_updated_at, row.p_updated_at),
           kalshi: {
             yes: kYesShown, no: kYesShown == null ? row.k_no_price : 1 - kYesShown, volume: row.k_volume ?? null, url: kalshiUrl,
-            bid: row.k_bid ?? null, ask: row.k_ask ?? null,
-            noBid: row.k_no_bid ?? null, noAsk: row.k_no_ask ?? null,
+            bid: kBook.bid ?? null, ask: kBook.ask ?? null,
+            noBid: kNoBook.bid ?? null, noAsk: kNoBook.ask ?? null,
             ageSeconds: ageSeconds(row.k_updated_at),
           },
           poly: {
