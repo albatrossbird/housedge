@@ -159,6 +159,12 @@ function arbAlert(m) {
 
 // ── Categories (UI display only) ──────────────────────────────
 // Fetch config lives in pages/api/markets.js and pages/api/embed.js
+// Display order for the sports sub-tabs. Anything not listed sorts
+// last rather than being hidden, so a new league is visible the day it
+// starts matching.
+const LEAGUE_ORDER = ["mlb", "nfl", "nba", "nhl", "soccer"];
+const LEAGUE_LABEL = { mlb: "MLB", nfl: "NFL", nba: "NBA", nhl: "NHL", soccer: "Soccer" };
+
 const CATEGORIES = {
   sports:    { label: "Sports",    icon: "⚽", supported: true  },
   economics: { label: "Economics", icon: "📊", supported: true  },
@@ -609,6 +615,13 @@ function SearchResult({ r }) {
 export default function HouseEdge() {
   const [activeCategory, setActiveCategory] = useState("sports");
   const [sort, setSort] = useState("trending");
+  // Sports is four leagues sharing one tab. Derived from the cards
+  // rather than a constant, so a league that starts matching appears
+  // without a code change and one that stops does not leave a dead chip.
+  const [league, setLeague] = useState("all");
+  // "Show me only the ones I can act on." The arb badge already exists;
+  // this makes it a filter rather than something to scroll for.
+  const [arbOnly, setArbOnly] = useState(false);
   // Which Polymarket to compare against. They are different exchanges
   // and a US account can only trade the .us one, so this is not cosmetic
   // — it decides whether a card in front of you is actionable.
@@ -702,11 +715,24 @@ export default function HouseEdge() {
   // entirely under "US only" would hide a market the reader can
   // actually trade, and showing it with its .com leg still attached
   // would quote them a price they cannot take.
-  const visible = venue === "all"
+  const byVenue = venue === "all"
     ? markets
     : markets
         .map(m => ({ ...m, legs: legsOf(m).filter(l => venueOf(l) === venue) }))
         .filter(m => m.legs.length > 0);
+
+  // Derived from the VENUE-FILTERED set, not from every market. Counting
+  // the unfiltered list would let a chip read "NFL 25" and then show
+  // nothing under the US filter — a label disagreeing with its own
+  // result, which is the failure the venue control already avoids.
+  const leaguesPresent = [...new Set(byVenue.map(m => m.category).filter(Boolean))]
+    .sort((a, b) => (LEAGUE_ORDER.indexOf(a) + 1 || 99) - (LEAGUE_ORDER.indexOf(b) + 1 || 99));
+
+  const byLeague = league === "all" ? byVenue : byVenue.filter(m => m.category === league);
+  // Filters the CARDS, and the count beside the toggle counts the same
+  // set — a filter whose label disagrees with its result is worse than
+  // no filter.
+  const visible = arbOnly ? byLeague.filter(arbAlert) : byLeague;
 
   const sorted = [...visible].sort((a, b) => {
     // The executable ranking, and the one that should be reachable
@@ -720,11 +746,21 @@ export default function HouseEdge() {
     }
     if (sort === "spread") return widestSpread(b) - widestSpread(a);
     if (sort === "volume") return kalshiContracts(b) - kalshiContracts(a);
+    // Biggest edge first. A pair with no executable price sinks rather
+    // than sorting as a zero edge, for the same reason "no price" and
+    // "no edge" render differently on the card.
+    if (sort === "arb") {
+      const ea = bestLeg(a)?.arb?.edge, eb = bestLeg(b)?.arb?.edge;
+      return (eb == null ? -Infinity : eb) - (ea == null ? -Infinity : ea);
+    }
     if (sort === "similarity") return (bestLeg(b)?.similarity || 0) - (bestLeg(a)?.similarity || 0);
     return (b.trending ? 1 : 0) - (a.trending ? 1 : 0);
   });
 
-  const arbCount = visible.filter(arbAlert).length;
+  // Counted BEFORE the arb filter. Counting `visible` would make the
+  // toggle's own label change when you press it — the number would
+  // always equal the row count once on, which tells the reader nothing.
+  const arbCount = byLeague.filter(arbAlert).length;
   // The stalest leg among what is actually on screen. Reported rather
   // than an average, because the reader is about to act on the worst
   // one, not the typical one.
@@ -888,7 +924,7 @@ export default function HouseEdge() {
               /* The venue choice survives a category switch. Resetting it
                  silently re-showed .com markets the reader had just
                  chosen to hide. */
-              onClick={() => { setActiveCategory(key); setQuery(""); }}
+              onClick={() => { setActiveCategory(key); setQuery(""); setLeague("all"); }}
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: `1px solid ${activeCategory === key ? ACCENT : T.border}`,
@@ -903,6 +939,37 @@ export default function HouseEdge() {
           ))}
         </div>
 
+        {/* Sports is four leagues sharing one tab, and "39 MLB cards and
+            25 NFL ones" is two questions in one list. Rendered only when
+            there is a choice to make: one league means the row would be
+            a control with a single option. */}
+        {!searchMode && activeCategory === "sports" && leaguesPresent.length > 1 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+            {[{ key: "all", label: "All" },
+              ...leaguesPresent.map(l => ({ key: l, label: LEAGUE_LABEL[l] || l.toUpperCase() }))
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setLeague(key)}
+                style={{
+                  padding: "5px 12px", borderRadius: 99, fontSize: 12,
+                  fontWeight: league === key ? 700 : 500, cursor: "pointer",
+                  border: `1px solid ${league === key ? ACCENT : T.border}`,
+                  background: league === key ? `${ACCENT}12` : T.surface,
+                  color: league === key ? ACCENT : T.muted, transition: "all 0.15s",
+                }}
+              >
+                {label}
+                {key !== "all" && (
+                  <span style={{ fontWeight: 400, opacity: 0.7 }}>
+                    {" "}{byVenue.filter(m => m.category === key).length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* The browse view. Search replaces it rather than pushing it
             down the page: results and an unrelated grid of pairs on
             screen together is two answers to one question. */}
@@ -916,6 +983,7 @@ export default function HouseEdge() {
             style={{ padding: "10px 14px", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.text, background: T.surface, cursor: "pointer", outline: "none" }}
           >
             <option value="trending">Sort: Trending</option>
+            <option value="arb">Sort: Biggest edge</option>
             <option value="cost">Sort: Cheapest to own both sides</option>
             <option value="spread">Sort: Biggest mid gap</option>
             <option value="volume">Sort: Most volume</option>
@@ -927,6 +995,29 @@ export default function HouseEdge() {
               the filter kept applying — an empty tab with no way out.
               A segmented control also states the current venue at a
               glance, which a dropdown only does once you read it. */}
+          {/* A filter, not just a badge. The arb count was already on the
+              page; scrolling a 373-card politics tab to find four of
+              them was the reader's job. Disabled rather than hidden at
+              zero, so the control does not appear and vanish as prices
+              move. */}
+          <button
+            onClick={() => setArbOnly(v => !v)}
+            disabled={arbCount === 0 && !arbOnly}
+            title={arbCount === 0 ? "No pair on this tab currently costs less than $1.00 including fees" : "Show only pairs that cost less than $1.00 to own both sides"}
+            style={{
+              padding: "10px 14px", fontSize: 13, fontWeight: arbOnly ? 700 : 500,
+              borderRadius: 8, flexShrink: 0,
+              border: `1px solid ${arbOnly ? T.arb : T.border}`,
+              background: arbOnly ? `${T.arb}18` : T.surface,
+              color: arbCount === 0 && !arbOnly ? T.muted : (arbOnly ? T.arb : T.text),
+              cursor: arbCount === 0 && !arbOnly ? "not-allowed" : "pointer",
+              opacity: arbCount === 0 && !arbOnly ? 0.55 : 1,
+              transition: "all 0.15s",
+            }}
+          >
+            ⚡ Arb only <span style={{ fontWeight: 400, opacity: 0.75 }}>{arbCount}</span>
+          </button>
+
           <div style={{ display: "flex", border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden", background: T.surface, flexShrink: 0 }}>
             {[
               { key: "us",     label: "US",     n: venueCounts.us || 0 },
