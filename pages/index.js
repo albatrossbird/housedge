@@ -696,7 +696,43 @@ function MenuItem({ label, onClick, active, soon }) {
 // markets run to millions of contracts where a ball game runs to
 // thousands, so this list is politics-heavy, and that is a fact about
 // the venues rather than a bug.
-function HomeView({ data, onCategory }) {
+// One box, rendered in two places — above the category tabs, and inside
+// the home hero. Duplicating the markup would be two places for the
+// placeholder, the clear button and the Escape key to drift apart.
+function SearchBox({ query, setQuery, active, marginBottom }) {
+  return (
+    <div style={{ position: "relative", marginBottom }}>
+      <input
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        onKeyDown={e => { if (e.key === "Escape") setQuery(""); }}
+        placeholder="Search every market on Kalshi and Polymarket…"
+        aria-label="Search markets"
+        style={{
+          width: "100%", boxSizing: "border-box",
+          padding: "12px 40px 12px 14px",
+          fontSize: 15, color: T.text, background: T.surface,
+          border: `1px solid ${active ? ACCENT : T.border}`,
+          borderRadius: 10, outline: "none",
+          fontFamily: "inherit",
+        }}
+      />
+      {query && (
+        <button
+          onClick={() => setQuery("")}
+          aria-label="Clear search"
+          style={{
+            position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+            border: "none", background: "transparent", color: T.muted,
+            fontSize: 18, cursor: "pointer", padding: "4px 10px", lineHeight: 1,
+          }}
+        >×</button>
+      )}
+    </div>
+  );
+}
+
+function HomeView({ data, onCategory, query, setQuery, searchMode }) {
   const cards = data?.pairs || [];
   const counts = data?.byCategory || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -726,6 +762,13 @@ function HomeView({ data, onCategory }) {
           {total > 0 && <><strong style={{ color: T.text }}>{total.toLocaleString()}</strong> matched markets right now.</>}
         </p>
       </div>
+
+      {/* UNDER the hero, not above it. A control before any context
+          asks the reader to act before they know what the site is;
+          the headline is one line and then the box is the first thing
+          they can do. On a category tab the order is reversed — they
+          already know, so search leads. */}
+      <SearchBox query={query} setQuery={setQuery} active={searchMode} marginBottom={26} />
 
       {/* THE TILES ARE THE FALLBACK, NOT THE FRONT DOOR.
           Each card below now carries its category, its count and its
@@ -1285,47 +1328,26 @@ export default function HouseEdge() {
       </div>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px clamp(12px, 4vw, 24px)" }}>
-        {view === "home" ? (
-          <HomeView data={homeData} onCategory={goCategory} />
-        ) : (
-        <>
-        {/* Search comes FIRST, above the tabs.
-            The tabs answer "what did you find"; the box answers "what
-            about this one", which is the question a reader actually
-            arrives with. It searches the whole catalogue — ~23,000
-            markets against the ~1,000 that are paired — so a market
-            with no counterpart still comes back, and saying so is the
+        {/* SEARCH IS ABOVE EVERYTHING, ON EVERY VIEW.
+            It used to live inside the category branch, so the home
+            page — the first thing anyone sees — had no way to ask
+            about a specific market. The grid answers "what did you
+            find"; the box answers "what about this one", which is the
+            question a reader arrives with, and the catalogue is ~86,000
+            markets against the ~960 that are paired. A market with no
+            counterpart still comes back, and "only on Kalshi" is an
             answer rather than a failure. */}
-        <div style={{ position: "relative", marginBottom: 18 }}>
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => { if (e.key === "Escape") setQuery(""); }}
-            placeholder="Search every market on Kalshi and Polymarket…"
-            aria-label="Search markets"
-            style={{
-              width: "100%", boxSizing: "border-box",
-              padding: "12px 40px 12px 14px",
-              fontSize: 15, color: T.text, background: T.surface,
-              border: `1px solid ${searchMode ? ACCENT : T.border}`,
-              borderRadius: 10, outline: "none",
-              fontFamily: "inherit",
-            }}
-          />
-          {query && (
-            <button
-              onClick={() => setQuery("")}
-              aria-label="Clear search"
-              style={{
-                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-                border: "none", background: "transparent", color: T.muted,
-                fontSize: 18, cursor: "pointer", padding: "4px 10px", lineHeight: 1,
-              }}
-            >×</button>
-          )}
-        </div>
 
-        {searchMode && (
+
+        {/* Searching replaces whatever view you were on, home or tab.
+            Leaving the home cards under the results would answer a
+            question nobody asked, below the answer to the one they
+            did. Clearing the box puts the view back. */}
+        {searchMode ? (
+          <>
+          {/* The box has to survive the view it replaced, or typing
+              makes the thing you are typing into disappear. */}
+          <SearchBox query={query} setQuery={setQuery} active marginBottom={18} />
           <div style={{ marginBottom: 28 }}>
             {searching && !searchData && (
               <div style={{ color: T.muted, fontSize: 13, padding: "20px 0" }}>Searching…</div>
@@ -1361,7 +1383,18 @@ export default function HouseEdge() {
               </>
             )}
           </div>
-        )}
+          </>
+        ) : view === "home" ? (
+          <HomeView
+            data={homeData}
+            onCategory={goCategory}
+            query={query}
+            setQuery={setQuery}
+            searchMode={searchMode}
+          />
+        ) : (
+        <>
+        <SearchBox query={query} setQuery={setQuery} active={searchMode} marginBottom={18} />
 
         {/* Category tabs */}
         <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
