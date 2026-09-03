@@ -375,7 +375,7 @@ function Details({ market, legs }) {
   );
 }
 
-function MarketCard({ market, pinned, onPin }) {
+function MarketCard({ market, pinned, onPin, showTrending = true }) {
   const isArb = arbAlert(market);
   const legs = legsOf(market);
   const age = cardAge(market);
@@ -396,11 +396,21 @@ function MarketCard({ market, pinned, onPin }) {
     }}>
       <div>
         <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-          {market.trending && <span style={{ fontSize: 10, fontWeight: 600, color: T.yes, letterSpacing: "0.04em" }}>↑ TRENDING</span>}
+          {/* `trending` is a volume FLOOR (>5000), not a trend, so on a
+              page that selects the top-volume market in each category
+              it is true on every card by construction — a badge that is
+              always lit says nothing and costs the reader a glance. */}
+          {showTrending && market.trending && <span style={{ fontSize: 10, fontWeight: 600, color: T.yes, letterSpacing: "0.04em" }}>↑ TRENDING</span>}
           {/* A dedicated control, not a click on the card body. The card
               already carries three links and an expander; making the
-              whole surface a pin target would steal those clicks. */}
-          <button
+              whole surface a pin target would steal those clicks.
+
+              Optional, because pinning answers "keep this one in view
+              while I scroll past four hundred others" — a question the
+              home page's four cards do not raise. Rendering it there
+              would offer a control whose effect is invisible on the
+              page you are on. */}
+          {onPin && <button
             onClick={() => onPin(pinned ? null : market.id)}
             aria-pressed={!!pinned}
             title={pinned ? "Unpin" : "Pin this matchup to the top while you scroll"}
@@ -411,7 +421,7 @@ function MarketCard({ market, pinned, onPin }) {
             }}
           >
             {pinned ? "\u2716 UNPIN" : "\u2295 PIN"}
-          </button>
+          </button>}
           {/* Sits next to the arb badge on purpose. A flagged edge on a
               three-hour-old book is the one combination that costs a
               reader money, and it looked exactly like a fresh one. */}
@@ -421,6 +431,10 @@ function MarketCard({ market, pinned, onPin }) {
               style={{
                 fontSize: 10,
                 letterSpacing: "0.04em",
+                // The pin button carries the auto margin that pushes
+                // this row apart. Without it the age would sit against
+                // the left edge, so it takes the margin over.
+                marginLeft: onPin ? undefined : "auto",
                 fontWeight: age > STALE_SECONDS ? 700 : 400,
                 color: age > STALE_SECONDS ? T.arb : T.muted,
               }}
@@ -673,6 +687,19 @@ function HomeView({ data, onCategory }) {
   const counts = data?.byCategory || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
+  // The API returns up to three per tab, already ranked by volume. The
+  // first one of each tab becomes a full card; the others stay in the
+  // list below, so nothing is shown twice and the list keeps its job of
+  // showing breadth rather than repeating the four cards above it.
+  const featured = [];
+  const rest = [];
+  const taken = new Set();
+  for (const m of cards) {
+    const tab = CATEGORY_OF_CARD[m.category] || m.category;
+    if (taken.has(tab)) rest.push(m);
+    else { taken.add(tab); featured.push(m); }
+  }
+
   return (
     <div>
       <div style={{ marginBottom: 26 }}>
@@ -686,6 +713,14 @@ function HomeView({ data, onCategory }) {
         </p>
       </div>
 
+      {/* THE TILES ARE THE FALLBACK, NOT THE FRONT DOOR.
+          Each card below now carries its category, its count and its
+          way in, so a row of tiles above them says the same four things
+          twice and pushes the actual price comparison off the first
+          screen. They stay for the case where there are no cards to
+          carry it — a cold cache or a failed read still needs a way
+          into every tab. */}
+      {featured.length === 0 && (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(190px, 100%), 1fr))", gap: 10, marginBottom: 30 }}>
         {Object.entries(CATEGORIES).map(([key, cat]) => (
           <button
@@ -707,21 +742,72 @@ function HomeView({ data, onCategory }) {
           </button>
         ))}
       </div>
+      )}
 
+      {/* THE FRONT DOOR HAS TO SHOW THE THING.
+          Four tiles and a list of titles described a price-comparison
+          site without comparing a single price: a new reader understood
+          what it was and had no reason to care. These are the real
+          cards, one per category, so the first screen answers "what do
+          I get" by handing it over rather than describing it. */}
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: T.text }}>Most traded</h2>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: T.text }}>Most traded in each category</h2>
         <span style={{ fontSize: 11, color: T.muted }}>
           by contracts traded on Kalshi — the one unit every venue here shares
         </span>
       </div>
 
       {cards.length === 0 ? (
-        <div style={{ padding: 24, border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, fontSize: 13, color: T.muted }}>
+        <div style={{ padding: 24, border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, fontSize: 13, color: T.muted, marginBottom: 30 }}>
           Loading the most traded markets…
         </div>
       ) : (
+        <div style={{
+          display: "grid",
+          // Same track rule as the category grids: wider than a phone,
+          // clamped to the container, so one declaration gives two
+          // columns on a laptop and one on a 375px screen.
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(380px, 100%), 1fr))",
+          gap: 14, marginBottom: 30, alignItems: "start",
+        }}>
+          {featured.map(m => {
+            const tab = CATEGORY_OF_CARD[m.category] || m.category;
+            return (
+              <div key={m.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, letterSpacing: "0.05em",
+                    textTransform: "uppercase", color: T.muted,
+                  }}>
+                    {CATEGORIES[tab]?.icon} {CATEGORIES[tab]?.label || tab}
+                  </span>
+                  <button
+                    onClick={() => onCategory(tab)}
+                    style={{
+                      border: "none", background: "transparent", cursor: "pointer", padding: 0,
+                      fontSize: 11, fontWeight: 700, color: ACCENT, letterSpacing: "0.03em",
+                    }}
+                  >
+                    {counts[tab] == null ? "See all" : `See all ${counts[tab]}`} →
+                  </button>
+                </div>
+                {/* No onPin: see MarketCard. */}
+                <MarketCard market={m} showTrending={false} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        <>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: T.text }}>Also trading</h2>
+      </div>
+
+      {(
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, overflow: "hidden" }}>
-          {cards.map((m, i) => {
+          {rest.map((m, i) => {
             const tab = CATEGORY_OF_CARD[m.category] || m.category;
             return (
               <button
@@ -733,13 +819,20 @@ function HomeView({ data, onCategory }) {
                   padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
                 }}
               >
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase",
-                  color: T.muted, minWidth: 74,
-                }}>
-                  {CATEGORIES[tab]?.label || tab}
+                {/* The category sits ABOVE the title rather than in a
+                    column beside it. A 74px label column plus a volume
+                    column left a phone about 120px for the title, which
+                    wrapped four lines and made the list taller than the
+                    cards it is meant to sit under. */}
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{
+                    display: "block", fontSize: 10, fontWeight: 700, letterSpacing: "0.04em",
+                    textTransform: "uppercase", color: T.muted, marginBottom: 2,
+                  }}>
+                    {CATEGORIES[tab]?.label || tab}
+                  </span>
+                  <span style={{ fontSize: 13, color: T.text }}>{m.title}</span>
                 </span>
-                <span style={{ flex: 1, fontSize: 13, color: T.text, minWidth: 0 }}>{m.title}</span>
                 <span style={{ fontSize: 12, color: T.muted, whiteSpace: "nowrap" }}>
                   {compact(m.kalshi?.volume || 0)} contracts
                 </span>
@@ -747,6 +840,8 @@ function HomeView({ data, onCategory }) {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

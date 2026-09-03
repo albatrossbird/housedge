@@ -718,6 +718,42 @@ pairs it took.
   because one Kalshi market yielded two rows; merging removes the
   collision at its source.
 
+### The home page shows cards, not a description of cards
+
+The front door read as a hero paragraph, four category tiles and a list
+of twelve titles. It told a new reader what the site was and gave them
+no reason to care: a price-comparison product that compared no prices
+above the fold.
+
+It now leads with **four real `MarketCard`s, one per category**, taken
+from `?category=all&perCategory=3` — which the API already ranks by
+Kalshi contracts, so the first of each tab is that tab's most-traded
+market and the split is a single pass over the response.
+
+- **The tiles are the FALLBACK, not the front door.** Each card header
+  carries the category, its `byCategory` count and the way into that
+  tab, so a tile row above them says the same four things twice and
+  pushes the product below the fold. They render only when there are no
+  cards — a cold cache or a failed read still needs a way into every
+  tab.
+- **The list below shows what the cards do not.** `featured` takes the
+  first of each category and `rest` takes the remainder, so nothing
+  appears twice and the list keeps its own job, which is breadth.
+- **`onPin` is optional on `MarketCard`.** Pinning answers "keep this
+  in view while I scroll past four hundred others", which the home
+  page's four cards do not raise; rendering the control there would
+  offer a button whose effect is invisible on the page you are on. The
+  age label takes over the auto margin that the pin button carried.
+- **`showTrending` is off here.** `market.trending` is a volume FLOOR
+  (`> 5000`), not a trend, so on a page that selects the top-volume
+  market in each category it is true on every card by construction. A
+  badge that is always lit says nothing and costs a glance. That the
+  flag is misnamed everywhere is a separate, open problem.
+- The "Also trading" rows put the category ABOVE the title rather than
+  in a column beside it: a 74px label column plus a volume column left
+  a 375px screen about 120px for the title, which wrapped to four lines
+  and made the secondary list taller than the cards above it.
+
 ### Mobile
 
 **There was no viewport meta tag in the app at all**, so a phone laid
