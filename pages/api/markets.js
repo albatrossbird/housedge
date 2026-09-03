@@ -34,6 +34,18 @@ const SPORT_TAGS = {
   politics:  ["politics"],
 };
 
+// `all` is derived, never hand-listed. A literal fifth entry would go
+// stale the first time a category is added and would do it silently —
+// the home page would simply stop counting the new one.
+SPORT_TAGS.all = [...new Set(Object.values(SPORT_TAGS).flat())];
+
+// Which tab a card belongs to, for the home page's counts.
+const CATEGORY_OF_TAG = Object.fromEntries(
+  Object.entries(SPORT_TAGS)
+    .filter(([cat]) => cat !== "all")
+    .flatMap(([cat, tags]) => tags.map(t => [t, cat]))
+);
+
 const MONTH_MAP = {
   JAN:"01",FEB:"02",MAR:"03",APR:"04",MAY:"05",JUN:"06",
   JUL:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12"
@@ -578,7 +590,31 @@ export default async function handler(req, res) {
     const depthCheck = await verifyKalshiDepth(shaped);
     const priced = shaped.filter(m => m.arb).length;
     // After the depth re-check, so every leg carries its final numbers.
-    const cards = mergeByKalshiMarket(shaped);
+    const allCards = mergeByKalshiMarket(shaped);
+
+    // Per-tab counts, computed on the FULL set before any trim, so the
+    // home page's "Politics 373" is the number that tab will show —
+    // not the number that survived a top-N cut.
+    const byCategory = {};
+    for (const c of allCards) {
+      const tab = CATEGORY_OF_TAG[c.category] || c.category;
+      byCategory[tab] = (byCategory[tab] || 0) + 1;
+    }
+
+    // ?top=N — the home page's "most traded", and the reason it can ask
+    // for every category at once without moving a megabyte of politics.
+    //
+    // Ranked by KALSHI CONTRACTS, which is the one figure every card
+    // has: Polymarket reports dollars and polymarket.us reports nothing,
+    // so a cross-venue "volume" would be three units added together.
+    // The home page says "most traded on Kalshi" for exactly this
+    // reason rather than claiming a total.
+    const top = Math.max(0, parseInt(req.query.top, 10) || 0);
+    const cards = top
+      ? [...allCards]
+          .sort((a, b) => (b.kalshi?.volume || 0) - (a.kalshi?.volume || 0))
+          .slice(0, top)
+      : allCards;
 
     // 30 SECONDS WAS 60x SHORTER THAN THE DATA IT CACHES.
     //
@@ -610,6 +646,11 @@ export default async function handler(req, res) {
       // card, and `pairCount` says how many stored pairs it took.
       pairs: cards,
       pairCount: shaped.length,
+      byCategory,
+      // What the reader is looking at versus what exists, so a trimmed
+      // response can never be mistaken for the whole set.
+      cardCount: allCards.length,
+      trimmedTo: top || null,
       needsEmbed: cards.length === 0,
       // A claim about the numbers actually in this response, not about
       // what the code is capable of. Before migration 0004 is run there
