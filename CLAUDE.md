@@ -809,6 +809,29 @@ pairs it took.
   because one Kalshi market yielded two rows; merging removes the
   collision at its source.
 
+### Search is on every view, including the front door
+
+The box lived inside the category branch, so the home page — the first
+thing anyone sees — had no way to ask about a specific market. The
+catalogue is **~86,000 markets against the ~960 that are paired**, so
+the grid could only ever answer "what did we find" while the question a
+reader arrives with is "what about this one".
+
+- **`SearchBox` is one component rendered in three places** (home hero,
+  above the category tabs, above the results). Duplicating the markup
+  would be three places for the placeholder, the clear button and the
+  Escape key to drift apart.
+- **Order differs by view, deliberately.** On the home page the box sits
+  UNDER the hero: a control before any context asks the reader to act
+  before they know what the site is. On a category tab it leads, because
+  they already know.
+- **It must render in search mode too**, or typing makes the thing you
+  are typing into disappear — the box only existed inside the branches
+  that searching replaces.
+- Searching replaces the whole view rather than appearing under it.
+  Leaving the home cards below the results answers a question nobody
+  asked, underneath the answer to the one they did.
+
 ### The home page shows cards, not a description of cards
 
 The front door read as a hero paragraph, four category tiles and a list
