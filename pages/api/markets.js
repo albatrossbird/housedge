@@ -445,13 +445,18 @@ export default async function handler(req, res) {
           // says nothing rather than claiming an age it does not have.
           priceAgeSeconds: ageSeconds(row.k_updated_at, row.p_updated_at),
           kalshi: {
-            yes: kYesShown, no: kYesShown == null ? row.k_no_price : 1 - kYesShown, volume: row.k_volume || 0, url: kalshiUrl,
+            yes: kYesShown, no: kYesShown == null ? row.k_no_price : 1 - kYesShown, volume: row.k_volume ?? null, url: kalshiUrl,
             bid: row.k_bid ?? null, ask: row.k_ask ?? null,
             noBid: row.k_no_bid ?? null, noAsk: row.k_no_ask ?? null,
             ageSeconds: ageSeconds(row.k_updated_at),
           },
           poly: {
-            yes: pYesShown, no: pYesShown == null ? null : 1 - pYesShown, volume: row.p_volume || 0, url: polyUrl,
+            // `?? null`, NOT `|| 0`. polymarket.us publishes no volume field
+            // at all, and `|| 0` turned that into a reported zero — which
+            // reads as "nobody has traded this", a claim about the market
+            // rather than about our data. null is the honest answer and is
+            // what polyDollars() already filters on.
+            yes: pYesShown, no: pYesShown == null ? null : 1 - pYesShown, volume: row.p_volume ?? null, url: polyUrl,
             bid: polyBook.bid ?? null, ask: polyBook.ask ?? null,
             venue: polyVenue,
             ageSeconds: ageSeconds(row.p_updated_at),

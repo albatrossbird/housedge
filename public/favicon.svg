@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MarketSlap">
   <defs><linearGradient id="fG" gradientUnits="userSpaceOnUse" x1="2480" y1="2620" x2="280" y2="260"><stop offset="0" stop-color="#9B80FF"/><stop offset="0.45" stop-color="#6B63E8"/><stop offset="1" stop-color="#2AA5C0"/></linearGradient></defs>
-  <rect width="512" height="512" rx="116" fill="#040F29"/>
+  <rect width="512" height="512" rx="116" fill="#0B1836"/>
   <g transform="translate(76,72) scale(1.314)">
     <g transform="translate(0,280) scale(0.1,-0.1)">
       <path d="M1160 2734 c-321 -39 -573 -225 -660 -487 -30 -87 -36 -222 -16 -317
