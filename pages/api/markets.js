@@ -609,12 +609,30 @@ export default async function handler(req, res) {
     // so a cross-venue "volume" would be three units added together.
     // The home page says "most traded on Kalshi" for exactly this
     // reason rather than claiming a total.
+    const byVolume = (a, b) => (b.kalshi?.volume || 0) - (a.kalshi?.volume || 0);
     const top = Math.max(0, parseInt(req.query.top, 10) || 0);
-    const cards = top
-      ? [...allCards]
-          .sort((a, b) => (b.kalshi?.volume || 0) - (a.kalshi?.volume || 0))
-          .slice(0, top)
-      : allCards;
+    // ?perCategory=N caps EACH tab before the overall ranking.
+    //
+    // A straight global top-12 was 11 politics and 1 economics — not a
+    // fault, because a presidential-nomination market trades millions of
+    // contracts where a ball game trades thousands, but a front door
+    // that shows one category is a poor map of a four-category site.
+    // Capping per tab first, then ranking what survives, keeps the
+    // ordering honest while making the page representative.
+    const perCategory = Math.max(0, parseInt(req.query.perCategory, 10) || 0);
+
+    let cards = allCards;
+    if (perCategory) {
+      const kept = {};
+      cards = [...allCards]
+        .sort(byVolume)
+        .filter(c => {
+          const tab = CATEGORY_OF_TAG[c.category] || c.category;
+          kept[tab] = (kept[tab] || 0) + 1;
+          return kept[tab] <= perCategory;
+        });
+    }
+    if (top) cards = [...cards].sort(byVolume).slice(0, top);
 
     // 30 SECONDS WAS 60x SHORTER THAN THE DATA IT CACHES.
     //
@@ -651,6 +669,7 @@ export default async function handler(req, res) {
       // response can never be mistaken for the whole set.
       cardCount: allCards.length,
       trimmedTo: top || null,
+      perCategory: perCategory || null,
       needsEmbed: cards.length === 0,
       // A claim about the numbers actually in this response, not about
       // what the code is capable of. Before migration 0004 is run there
