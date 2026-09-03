@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
+import { seriesTickerOf } from "../../lib/kalshiTicker.js";
 import { fetchUsBbo } from "../../lib/polymarketUs.js";
 
 const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v) : null));
@@ -50,10 +51,18 @@ const SEED_KALSHI_SERIES = [
 // recoverable from the ids already in the pairs table. Scoped to paired
 // markets because those are the only ones the site renders; unpaired
 // rows get their prices from the daily discovery run.
-function seriesOf(ticker) {
-  const s = String(ticker || "").split("-")[0];
-  return s.startsWith("KX") ? s : null;
-}
+// WAS `s.startsWith("KX") ? s : null`, WHICH FROZE 79 SERIES.
+//
+// Kalshi's newer series carry the KX prefix and its older ones do not:
+// HOUSENH1, SENATEAR, GOVPARTYOR, CONTROLS, RSENATESEATS and 74 more
+// are live, paired and rendered. Every one returned null here, so none
+// was ever polled and none was ever refreshed — 8.3 hours stale and
+// climbing, while this route reported 1,743 rows updated, zero failed
+// series and an empty unpolled list.
+//
+// Shared with lib/embedGate.js so the poll list and the embed gate
+// cannot disagree about what a series is.
+const seriesOf = seriesTickerOf;
 
 const CHUNK = 100;
 
@@ -91,25 +100,54 @@ const REFRESH_COLUMNS = [
 // refreshed.
 const KALSHI_CONCURRENCY = 4;
 
-async function fetchKalshiSeries(series) {
-  const url = `https://api.elections.kalshi.com/trade-api/v2/markets` +
-    `?status=open&limit=200&series_ticker=${encodeURIComponent(series)}`;
+// A SERIES IS NOT ALWAYS ONE PAGE. KXHOUSERACE lists 706 open markets;
+// this asked for 200 and read the first page, so 506 paired rows could
+// never refresh no matter how often the job ran. They did not look like
+// a failure either — a market the poll does not return is counted as
+// "paired but missed", the bucket meant for settled fixtures.
+//
+// Capped at KALSHI_MAX_PAGES so a cursor that never terminates cannot
+// spend the whole function budget on one series, and the cap is
+// REPORTED rather than silent, because "we read what there was" and
+// "we stopped early" are the two answers this bug turned on.
+const KALSHI_PAGE = 200;
+const KALSHI_MAX_PAGES = 12;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return { series, markets: (await r.json()).markets || [] };
-      // 429 and 5xx are worth another go; a 404 is a real answer.
-      if (r.status !== 429 && r.status < 500) {
-        return { series, markets: [], error: `HTTP ${r.status}` };
+async function fetchKalshiSeries(series) {
+  const markets = [];
+  let cursor = null;
+
+  for (let page = 0; page < KALSHI_MAX_PAGES; page++) {
+    let url = `https://api.elections.kalshi.com/trade-api/v2/markets` +
+      `?status=open&limit=${KALSHI_PAGE}&series_ticker=${encodeURIComponent(series)}`;
+    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+    let body = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch(url);
+        if (r.ok) { body = await r.json(); break; }
+        // 429 and 5xx are worth another go; a 404 is a real answer.
+        if (r.status !== 429 && r.status < 500) {
+          return { series, markets, error: `HTTP ${r.status}` };
+        }
+        if (attempt === 2) return { series, markets, error: `HTTP ${r.status}` };
+      } catch (err) {
+        if (attempt === 2) return { series, markets, error: err.message };
       }
-      if (attempt === 2) return { series, markets: [], error: `HTTP ${r.status}` };
-    } catch (err) {
-      if (attempt === 2) return { series, markets: [], error: err.message };
+      await new Promise(res => setTimeout(res, 400 * Math.pow(2, attempt)));
     }
-    await new Promise(res => setTimeout(res, 400 * Math.pow(2, attempt)));
+    if (!body) return { series, markets, error: "exhausted retries" };
+
+    const got = body.markets || [];
+    markets.push(...got);
+    cursor = body.cursor;
+    // An exhausted cursor is the only clean end. An empty page ends it
+    // too, or a series that keeps handing back the same cursor would
+    // loop until the page cap.
+    if (!cursor || got.length === 0) return { series, markets, pages: page + 1 };
   }
-  return { series, markets: [], error: "exhausted retries" };
+  return { series, markets, pages: KALSHI_MAX_PAGES, truncated: true };
 }
 
 // Bounded concurrency, so the burst that triggers the throttling never
@@ -334,9 +372,19 @@ export default async function handler(req, res) {
       const series = seriesOf(id);
       return series && polledSeries.has(series);
     });
+    // THIS ALARM COULD NOT REPORT THE BUG IT EXISTS FOR.
+    //
+    // Every non-KX ticker mapped to the SAME null, so a Set collapsed
+    // 79 distinct unpolled series into one `null` entry — and a lone
+    // null in a list of series names reads as a stray, not as "seventy
+    // nine series of politics prices are frozen". The two failures are
+    // split now: a series that exists and was not polled is named, and
+    // a ticker whose series cannot be derived at all is reported as the
+    // TICKER, because there is no series name to report.
     const kalshiSeriesUnpolled = [...new Set(
-      missedIds.map(id => seriesOf(id)).filter(sr => !sr || !polledSeries.has(sr))
+      missedIds.map(id => seriesOf(id)).filter(sr => sr && !polledSeries.has(sr))
     )];
+    const kalshiUnderivableIds = missedIds.filter(id => !seriesOf(id));
     const kalshiPairedMissed = kalshiPairedMissedIds.length;
 
     // Fetch fresh prices from Polymarket for pairs already in DB.
@@ -474,6 +522,14 @@ export default async function handler(req, res) {
       // THIS is the alarm: those prices freeze with nothing to say so.
       // Must be empty.
       kalshiSeriesUnpolled,
+      // A paired ticker this job cannot turn into a series is a market
+      // it can never refresh, so it is named rather than counted.
+      kalshiUnderivable: kalshiUnderivableIds.length,
+      kalshiUnderivableIds: kalshiUnderivableIds.slice(0, 20),
+      // Which series needed more than one page, and which hit the cap.
+      kalshiSeriesPaged: kalshiResults
+        .filter(r => (r.pages || 1) > 1)
+        .map(r => `${r.series}: ${r.pages} pages${r.truncated ? " (CAPPED)" : ""}`),
       polyUpdated: polyResult.updated,
       kalshiFetched: kalshiUpdates.length,
       polyFetched: polyUpdates.length,

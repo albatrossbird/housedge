@@ -98,6 +98,44 @@ this one job.
 `lib/cronAuth.js` gates both endpoints behind an optional `CRON_SECRET`
 (permissive until the var is set on Vercel *and* as a repo secret).
 
+### The refresh poll list, and the two bugs that froze politics
+
+**Measured 2026-09-03: the Kalshi side of politics was 8.3 HOURS stale
+while sports, crypto and econ were 77 SECONDS fresh** — and the job
+reported `kalshiUpdated: 1743`, `kalshiSeriesFailed: []` and an empty
+unpolled list on the same run. 186 of 278 displayed politics cards were
+frozen. Two independent causes, both in `/api/refresh`:
+
+1. **`seriesOf()` returned null for anything not starting with `KX`.**
+   Kalshi's newer series carry the prefix and **its older ones do not**:
+   `HOUSENH1`, `SENATEAR`, `GOVPARTYOR`, `CONTROLS`, `RSENATESEATS` and
+   74 more are live, paired and rendered. Every one derived to null, so
+   none was ever added to the poll list and none could ever refresh.
+   The rule now lives in `lib/kalshiTicker.js`, shared with
+   `lib/embedGate.js` — leading capital plus a dash, which still returns
+   null for Polymarket's numeric ids. `scripts/kalshi-ticker.test.mjs`
+   pins both directions.
+
+2. **A series is not one page.** `KXHOUSERACE` lists **706 open
+   markets**; the fetch asked for `limit=200` and read the first page,
+   so 506 paired rows could never refresh however often the job ran.
+   It now follows the cursor, capped at `KALSHI_MAX_PAGES` and
+   **reporting** which series paged and which hit the cap.
+
+**The alarm for exactly this could not report it.**
+`kalshiSeriesUnpolled` is documented above as the counter that must stay
+empty. It was `[null]` — because every non-KX ticker mapped to the SAME
+null and a `Set` collapsed 79 distinct frozen series into one entry,
+which reads as a stray rather than as a category-wide outage. Underivable
+tickers are now reported separately, **as tickers**, since there is no
+series name to report. A diagnostic that folds N failures into one value
+is the same class of bug as one that cannot be non-empty.
+
+Note the shape: every counter was green, and the only thing that
+revealed it was comparing `priceAgeSeconds` per category against the
+others. **Check freshness per category, not in aggregate** — an average
+over four categories hid an 8-hour outage in one of them.
+
 ### Price freshness
 
 Three layers, because the scheduled job alone cannot deliver what a
