@@ -34,6 +34,12 @@ const BRAND = {
 // clears everything at once. The first attempt used slate 500 for
 // Polymarket and it landed dE 6 from T.muted — a venue label that read
 // as de-emphasised text, which is a collision rather than a step.
+// The probability bars. One fill for every venue — see the Row comment.
+// The track is lighter than T.border so the bar itself carries the eye;
+// at 4.8:1 against the track the fill is a shape, not a tint.
+const BAR_FILL  = "#334155";
+const BAR_TRACK = "#EDEFF3";
+
 const VENUE = {
   kalshi: "#1E293B",   // 14.6:1 — the anchor side of every pair
   poly:   "#475569",   //  7.6:1 — both .com and .us; the label says which
@@ -225,20 +231,35 @@ function SpreadBar({ market }) {
   const widths = [kWide, ...legWidths].filter(v => v != null);
   const widestBook = widths.length ? Math.max(...widths) : null;
 
-  const Row = ({ label, color, pct, right }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ width: 62, fontSize: 11, color, fontWeight: 600, letterSpacing: "0.03em" }}>{label}</span>
-      <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 99, overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 99, transition: "width 0.6s ease" }} />
+  // ONE bar colour, not one per venue.
+  //
+  // Two near-identical slates read as an encoding and carried none: at
+  // 6px the difference between #1E293B and #475569 is invisible, so the
+  // rows looked like they meant something and did not. A single weight
+  // is more honest and reads as deliberate rather than drab.
+  //
+  // What separates the rows is what always separated them — the label,
+  // which spells the venue out — plus LENGTH, which is the only thing a
+  // reader should be comparing here. Bars go 6px -> 9px and the track
+  // lightens, so the comparison the card exists for is the loudest
+  // thing in it.
+  //
+  // Venues still do not own a hue. That is what lets the brand gradient
+  // exist and keeps green/red/amber meaning "act on this".
+  const Row = ({ label, pct, right }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ width: 62, fontSize: 11, color: T.text, fontWeight: 700, letterSpacing: "0.03em" }}>{label}</span>
+      <div style={{ flex: 1, height: 9, background: BAR_TRACK, borderRadius: 99, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: BAR_FILL, borderRadius: 99, transition: "width 0.6s ease" }} />
       </div>
-      <span style={{ width: 32, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{pct}%</span>
+      <span style={{ width: 34, fontSize: 13, fontWeight: 700, color: T.text, textAlign: "right" }}>{pct}%</span>
       {right}
     </div>
   );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <Row label="KALSHI" color={VENUE.kalshi} pct={kPct} />
+      <Row label="KALSHI" pct={kPct} />
       {/* One row per venue rather than one card per venue. The same
           fixture used to render twice, a few cents apart, with nothing
           saying the two cards were the same claim — and since a US
@@ -248,7 +269,6 @@ function SpreadBar({ market }) {
         <Row
           key={l.pairId}
           label={l.poly.usTradable ? "POLY US" : "POLY"}
-          color={VENUE.poly}
           pct={Math.round(l.poly.yes * 100)}
         />
       ))}
@@ -1194,8 +1214,11 @@ export default function HouseEdge() {
 
         {/* Legend */}
         <div style={{ marginTop: 32, padding: "14px 18px", border: `1px solid ${T.border}`, borderRadius: 10, display: "flex", gap: 20, flexWrap: "wrap", fontSize: 11, color: T.muted }}>
-          <span><span style={{ color: VENUE.kalshi, fontWeight: 700 }}>■</span> Kalshi</span>
-          <span><span style={{ color: VENUE.poly, fontWeight: 700 }}>■</span> Polymarket</span>
+          {/* No venue swatches. Venue is not colour-coded any more — the
+              bars share one fill and the row label names the exchange —
+              so a coloured square beside "Kalshi" would advertise an
+              encoding the page does not use, which is worse than no
+              legend at all. What IS colour-coded stays listed below. */}
           <span><span style={{ color: T.arb, fontWeight: 700 }}>⚡</span> Arb = both legs cost &lt; $1.00 including fees</span>
           {/* The page re-polls every 60s; the PRICES behind it come from
               a scheduled job that GitHub throttles to somewhere between

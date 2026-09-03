@@ -7,9 +7,24 @@ import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.
 // the difference is a matching or data fault rather than an edge.
 const IMPLAUSIBLE_SPREAD_PTS = 15;
 
+// createClient THROWS AT IMPORT TIME on a missing url, before any
+// handler runs — which is why a dev server without credentials could
+// not even reach the fixture branch below, and why embed.js cannot be
+// imported by a test.
+//
+// In production a missing variable must still fail loudly: passing a
+// placeholder there would turn a misconfigured deploy into one that
+// starts and then fails per-request, which is harder to diagnose. In
+// development the placeholder lets the module load; a request that
+// actually reaches Supabase then fails with a connection error naming
+// the fake host, which says what is wrong.
+const DEV_PLACEHOLDER = process.env.NODE_ENV === "production"
+  ? null
+  : { url: "http://supabase-credentials-not-set.invalid", key: "not-set" };
+
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_URL || DEV_PLACEHOLDER?.url,
+  process.env.SUPABASE_ANON_KEY || DEV_PLACEHOLDER?.key
 );
 
 const SPORT_TAGS = {
@@ -290,6 +305,40 @@ export default async function handler(req, res) {
   const category = req.query.category || "sports";
   const tags = SPORT_TAGS[category];
   if (!tags) return res.status(400).json({ error: `Unknown category: ${category}` });
+
+  // ── Dev-only fixture ────────────────────────────────────────────
+  //
+  // A local dev server has no Supabase credentials, so every card path
+  // renders an error and any UI change had to be checked by reading the
+  // diff. Meanwhile the sandbox's browser cannot reach production. The
+  // result was shipping visual work nobody had looked at.
+  //
+  // With MARKETS_FIXTURE_DIR set, this serves a saved production payload
+  // from <dir>/<category>.json, so the real component tree renders
+  // against real data.
+  //
+  // TWO INDEPENDENT GUARDS, because a fixture that could ever answer a
+  // real request is worse than no fixture: it would serve stale prices
+  // as though they were live. NODE_ENV is production on Vercel, and the
+  // env var is not set anywhere but a developer's own shell.
+  if (process.env.NODE_ENV !== "production" && process.env.MARKETS_FIXTURE_DIR) {
+    try {
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      // basename() so a category cannot walk out of the directory.
+      const file = path.join(process.env.MARKETS_FIXTURE_DIR, `${path.basename(category)}.json`);
+      const body = JSON.parse(await fs.readFile(file, "utf8"));
+      res.setHeader("X-Markets-Fixture", file);
+      return res.status(200).json({ ...body, fixture: file });
+    } catch (err) {
+      // Loud, not silent. A missing fixture that fell through to the
+      // real path would look like the fixture working.
+      return res.status(500).json({
+        error: `fixture for "${category}" not readable: ${err.message}`,
+        hint: "MARKETS_FIXTURE_DIR is set; unset it to use Supabase",
+      });
+    }
+  }
 
   try {
     const today = new Date();
