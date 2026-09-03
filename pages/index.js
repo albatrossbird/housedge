@@ -251,7 +251,9 @@ function SpreadBar({ market }) {
   // exist and keeps green/red/amber meaning "act on this".
   const Row = ({ label, pct, right }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <span style={{ width: 62, fontSize: 11, color: T.text, fontWeight: 700, letterSpacing: "0.03em" }}>{label}</span>
+      {/* Wide enough for POLY GLOBAL, the longest label, so no venue
+          name wraps or truncates. */}
+      <span style={{ width: 96, flexShrink: 0, whiteSpace: "nowrap", fontSize: 11, color: T.text, fontWeight: 700, letterSpacing: "0.03em" }}>{label}</span>
       <div style={{ flex: 1, height: 9, background: BAR_TRACK, borderRadius: 99, overflow: "hidden" }}>
         <div style={{ width: `${pct}%`, height: "100%", background: BAR_FILL, borderRadius: 99, transition: "width 0.6s ease" }} />
       </div>
@@ -271,7 +273,17 @@ function SpreadBar({ market }) {
       {legsOf(market).map(l => (
         <Row
           key={l.pairId}
-          label={l.poly.usTradable ? "POLY US" : "POLY"}
+          // "POLY US" AND "POLY" DIFFER BY TWO CHARACTERS, AND THE
+          // UNQUALIFIED ONE IS THE ONE YOU CANNOT TRADE.
+          //
+          // Two near-identical labels a few cents apart read as the
+          // same venue listed twice, or a typo — and a reader who has
+          // heard of Polymarket takes the bare "POLY" for the real one,
+          // which is exactly backwards: that is polymarket.com, closed
+          // to US accounts. Both labels name a jurisdiction now, so
+          // neither reads as the default and the contrast is the thing
+          // that actually differs between them.
+          label={l.poly.usTradable ? "POLY US" : "POLY GLOBAL"}
           pct={Math.round(l.poly.yes * 100)}
         />
       ))}
@@ -281,8 +293,10 @@ function SpreadBar({ market }) {
           a card could advertise "7pt spread" while costing 131c to own
           both sides, and another could show 2pt and be a real edge.
           What actually decides it is book width. */}
+      {/* paddingLeft lines up with where the bars start: label width
+          plus the row gap. */}
       {widestBook != null && (
-        <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.03em", paddingLeft: 70 }}>
+        <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.03em", paddingLeft: 106 }}>
           widest book {widestBook.toFixed(1)}pt
         </span>
       )}

@@ -18,6 +18,7 @@
 import { selectAll, upsert, credentialInUse } from "../../../lib/v2/db.js";
 import { claimsCompatible } from "../../../lib/v2/extract.js";
 import { scalarSignaturesCompatible } from "../../../lib/v2/claims.js";
+import { cronAuthorized } from "../../../lib/cronAuth.js";
 
 function cosine(a, b) {
   let dot = 0, ma = 0, mb = 0;
@@ -43,6 +44,14 @@ const claimOf = l => l.claim_title_hash ? {
 } : null;
 
 export default async function handler(req, res) {
+  // The v1 job routes have been behind this since they existed; these
+  // were not, and they are the more expensive half. /api/v2/extract and
+  // /api/v2/extract-eval SPEND ANTHROPIC CREDITS per call, and the repo
+  // is public, so the url is too. Inert until CRON_SECRET is set, then
+  // closed everywhere at once.
+  const auth = cronAuthorized(req);
+  if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
+
   const category = req.query.category || "econ";
   const write = req.query.write === "1";
   const threshold = parseFloat(req.query.threshold || "0.78");

@@ -19,6 +19,7 @@
 import crypto from "crypto";
 import { selectAll, patchWhere, credentialInUse } from "../../../lib/v2/db.js";
 import { extractClaims, costOf } from "../../../lib/v2/extract.js";
+import { cronAuthorized } from "../../../lib/cronAuth.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
 
@@ -27,6 +28,14 @@ export function titleHash(title, model) {
 }
 
 export default async function handler(req, res) {
+  // The v1 job routes have been behind this since they existed; these
+  // were not, and they are the more expensive half. /api/v2/extract and
+  // /api/v2/extract-eval SPEND ANTHROPIC CREDITS per call, and the repo
+  // is public, so the url is too. Inert until CRON_SECRET is set, then
+  // closed everywhere at once.
+  const auth = cronAuthorized(req);
+  if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
+
   const dry = req.query.dry === "1";
   const force = req.query.force === "1";
   const category = req.query.category || null;
