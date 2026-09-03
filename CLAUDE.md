@@ -136,6 +136,18 @@ revealed it was comparing `priceAgeSeconds` per category against the
 others. **Check freshness per category, not in aggregate** — an average
 over four categories hid an 8-hour outage in one of them.
 
+**Fixed, measured 2026-09-03**: series polled 124 -> **233**, Kalshi rows
+updated 1,743 -> **2,610**, paired-but-missed 225 -> **44**, and the
+stale politics cards went **186 -> 0**. Median Kalshi age is now ~47s on
+every category. A full run takes **67s** against the 300s ceiling.
+
+**Widening the poll list drew rate limiting**: the first run at 233
+series took 16 straight `HTTP 429`s, and three retries 400ms apart is
+not a retry against a throttle — it is three more requests into it.
+A 429 now honours `Retry-After` and backs off 1.5/3/6/12s over five
+attempts, because a series that exhausts its tries freezes until the
+next run, which is 45 minutes to 3.5 hours away.
+
 ### Price freshness
 
 Three layers, because the scheduled job alone cannot deliver what a
