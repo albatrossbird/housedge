@@ -8,6 +8,7 @@
 // trap clean-title.test.mjs hit. titles.js imports nothing, so a plain
 // import always worked and the hack bought nothing.
 import { polymarketUsUrl, polymarketComUrl } from "../lib/titles.js";
+import { usLeagueFor, usSlugCodes, usSidesByCode } from "../lib/polymarketUs.js";
 
 const cases = [
   ["aec-mlb-sea-bos-2026-08-31",
@@ -96,7 +97,51 @@ cok(polymarketComUrl("mlb-ari-hou-2026-09-04-nrfi"),
 cok(polymarketComUrl(""), "https://polymarket.com/", "empty slug");
 cok(polymarketComUrl(null), "https://polymarket.com/", "null slug");
 
+// ── polymarket.us league tokens and marketSides ───────────────
+//
+// .us calls college football "cfb" where our sport tag says "ncaaf".
+// Building aec-ncaaf-… slugs 404s on every game, and the league then
+// reads as "not listed on .us" — which is what it read as for a day.
+cok(usLeagueFor("ncaaf"), "cfb", "ncaaf maps to cfb");
+cok(usLeagueFor("mlb"), "mlb", "an unmapped league passes through");
+
+// CFB codes carry digits, which a letters-only pattern drops.
+cok(JSON.stringify(usSlugCodes("aec-cfb-lcdbfc25-nwst-2026-08-27")), JSON.stringify(["lcdbfc25", "nwst"]), "digits in a .us code");
+cok(JSON.stringify(usSlugCodes("aec-mlb-wsh-lad-2026-09-05")), JSON.stringify(["wsh", "lad"]), "plain .us codes");
+cok(JSON.stringify(usSlugCodes("mlb-wsh-lad-2026-09-05")), JSON.stringify(null), "a .com slug is not a .us slug");
+
+// THE TOP-LEVEL ARRAYS ARE MISALIGNED, measured on the live MLB
+// control: outcomes[0] is "Los Angeles Dodgers" while outcomePrices[0]
+// is 0.3250, the NATIONALS' price. marketSides is the only alignment
+// worth trusting, because each side carries its own price.
+//
+// Which field holds the school name also flips by league — MLB puts the
+// full name in `description` and the mascot in `safeName`; CFB does the
+// reverse — so both are kept and the caller matches on either.
+{
+  const cfb = usSidesByCode({ marketSides: [
+    { description: "Spartans", price: "0.28",
+      team: { abbreviation: "sjst", safeName: "San Jose State", name: "Spartans" } },
+    { description: "Eagles", price: "0.72",
+      team: { abbreviation: "emich", safeName: "Eastern Michigan", name: "Eagles" } },
+  ]});
+  cok(cfb.sjst.price, 0.28, "per-side price, not a shared array");
+  cok(cfb.sjst.names.includes("San Jose State"), true, "CFB school name kept");
+  cok(cfb.emich.names.includes("Eagles"), true, "CFB mascot kept too");
+
+  const mlb = usSidesByCode({ marketSides: [
+    { description: "Washington Nationals", price: "0.3250",
+      team: { abbreviation: "wsh", safeName: "Nationals" } },
+    { description: "Los Angeles Dodgers", price: "0.68",
+      team: { abbreviation: "lad", safeName: "Dodgers" } },
+  ]});
+  cok(mlb.wsh.price, 0.325, "MLB per-side price");
+  cok(mlb.wsh.names.includes("Washington Nationals"), true, "MLB full name kept");
+}
+
 console.log(cf === 0 ? "all 8 .com cases correct" : `${cf} .com FAILING`);
+
+console.log(cf ? `${cf} failing` : "all .us league / marketSides cases correct");
 
 // ONE exit, after every suite. The .com cases were appended below a
 // process.exit() and silently never ran — the file reported success
