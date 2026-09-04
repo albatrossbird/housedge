@@ -737,17 +737,49 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
   const counts = data?.byCategory || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
+  // THE HOME PAGE SHOWS THE VENUE YOU CAN ACTUALLY TRADE.
+  //
+  // Every category tab defaults to `venue = "us"`, and the front door
+  // did not — so the same market rendered three bars here and two
+  // there. On the Newsom card that read POLY US 16% above POLY GLOBAL
+  // 14%, and the row a US account cannot act on sat there looking like
+  // a third opinion.
+  //
+  // Selection has to move with the filter, though, or it breaks the
+  // card. Crypto's most-traded market is listed on polymarket.com and
+  // NOT on polymarket.us: drop its only Polymarket leg and what is left
+  // is a price-COMPARISON card with one price on it. So the rule is the
+  // most-traded market in each category THAT HAS A US LEG.
+  const usLegs = m => legsOf(m).filter(l => l.poly.usTradable);
+  const toUs = m => ({ ...m, legs: usLegs(m) });
+
   // The API returns up to three per tab, already ranked by volume. The
-  // first one of each tab becomes a full card; the others stay in the
-  // list below, so nothing is shown twice and the list keeps its job of
-  // showing breadth rather than repeating the four cards above it.
+  // first US-tradable one of each tab becomes a full card; everything
+  // else stays in the list below, so nothing is shown twice and the
+  // list keeps its job of showing breadth rather than repeating the
+  // four cards above it.
   const featured = [];
   const rest = [];
   const taken = new Set();
   for (const m of cards) {
     const tab = CATEGORY_OF_CARD[m.category] || m.category;
-    if (taken.has(tab)) rest.push(m);
-    else { taken.add(tab); featured.push(m); }
+    if (!taken.has(tab) && usLegs(m).length > 0) {
+      taken.add(tab);
+      featured.push(toUs(m));
+    } else {
+      rest.push(m);
+    }
+  }
+  // A category with nothing US-tradable in its top three still needs a
+  // card, and its global leg beats an empty slot or a lone Kalshi bar —
+  // the leg already says "can't trade from the US" on its own line.
+  for (const m of cards) {
+    const tab = CATEGORY_OF_CARD[m.category] || m.category;
+    if (taken.has(tab)) continue;
+    taken.add(tab);
+    featured.push(m);
+    const i = rest.indexOf(m);
+    if (i >= 0) rest.splice(i, 1);
   }
 
   return (
@@ -810,7 +842,7 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: T.text }}>Most traded in each category</h2>
         <span style={{ fontSize: 11, color: T.muted }}>
-          by contracts traded on Kalshi — the one unit every venue here shares
+          most traded on Kalshi, tradable from the US
         </span>
       </div>
 
