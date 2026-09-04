@@ -565,6 +565,13 @@ where Polymarket has the school ("Central Washington"), plus games
 Polymarket does not list. **Prefix matching would recover some and is
 NOT safe**: "michigan state" starts with "michigan".
 
+**CFB is polymarket.com ONLY — 0 of the 219 pairs are US-tradable.**
+`polymarket.us` returns 404 for every CFB slug shape tried
+(`aec-cfb-…`, `aec-ncaaf-…`, bare `cfb-…`). Since every category tab
+and the home page default to `venue = "us"`, all 148 CFB cards sit
+behind the Global / Both filter until `.us` lists the league. Worth
+knowing before treating the card count as what a US reader sees.
+
 **The live tag is `100351`, not `636`.** `636` ("college football") is a
 2025 archive — 53 events, all closed but one futures market — and
 reading it is how this league was first, wrongly, written off as
@@ -1113,8 +1120,9 @@ purpose. A wrong pair renders a fake arbitrage, so precision beats recall.
 
 | Category | Cards | Stored pairs | US-tradable cards | Floor |
 |---|---|---|---|---|
-| sports (mlb) | 39 | 69 | 30 | exact join |
-| sports (nfl) | 25 | 37 | 12 | exact join |
+| sports (ncaaf) | 148 | 219 | 0 | exact join, by NAME |
+| sports (mlb) | 44 | 69 | 38 | exact join |
+| sports (nfl) | 25 | 37 | 25 | exact join |
 | economics | 24 | 34 | 20 | 0.81 |
 | crypto | 15 | 27 | 3 | 0.88 |
 | politics | 373 | 881 | 31 | 0.86 |
