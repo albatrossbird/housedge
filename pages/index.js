@@ -786,11 +786,16 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
     <div>
       <div style={{ marginBottom: 26 }}>
         <h1 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 800, color: T.text, letterSpacing: "-0.02em" }}>
-          The same claim, priced on every venue that lists it
+          Same event, different prices
         </h1>
         <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.5, maxWidth: 620 }}>
-          Kalshi, Polymarket and Polymarket US, side by side — with each venue&apos;s
-          fees in the number.{" "}
+          {/* "Polymarket and Polymarket US" is a distinction that costs a
+              new reader a paragraph to understand and buys them nothing
+              on the first screen — they have not seen a card yet. The
+              cards name the venue on every row and the tabs carry the
+              full US / Global control, so the split is explained where
+              it MATTERS rather than before anything has been shown. */}
+          Kalshi and Polymarket, side by side — with fees already in the price.{" "}
           {total > 0 && <><strong style={{ color: T.text }}>{total.toLocaleString()}</strong> matched markets right now.</>}
         </p>
       </div>
