@@ -815,6 +815,12 @@ const KALSHI_CATEGORIES = {
   econ: ["Economics", "Financials"],
 };
 
+// 12 pages of 200 is 2,400 markets behind one series — far past any
+// game series, and bounded so a cursor that never terminates cannot
+// spend the whole invocation on one league.
+const KALSHI_DISCOVERY_MAX_PAGES = 12;
+const kalshiPages = {};
+
 async function fetchKalshiMarkets(sportFilter = "all") {
   // politics/crypto come from category enumeration, not the fixed
   // series list — see fetchKalshiByCategory for why.
@@ -841,12 +847,32 @@ async function fetchKalshiMarkets(sportFilter = "all") {
 
   const results = await Promise.all(
     series.map(async ({ ticker, sport }) => {
-      const r = await fetch(
-        `https://api.elections.kalshi.com/trade-api/v2/markets?status=open&limit=100&series_ticker=${ticker}`
-      );
-      if (!r.ok) return [];
-      const d = await r.json();
-      return (d.markets || [])
+      // A SERIES IS NOT ONE PAGE, and asking for one silently truncates
+      // the league. This was `limit=100` with no cursor: KXNCAAFGAME
+      // lists 500 open markets, so 400 never reached the matcher and
+      // the join produced 32 pairs where the identifiers support 219.
+      // MLB was quietly losing 6 of its 106 by the same rule.
+      //
+      // Capped, and the cap is REPORTED — see kalshiPages — because
+      // "we read what there was" and "we stopped early" are the two
+      // answers this bug turned on. Same lesson as the refresh job's
+      // KXHOUSERACE truncation.
+      const markets = [];
+      let cursor = null;
+      for (let page = 0; page < KALSHI_DISCOVERY_MAX_PAGES; page++) {
+        let url = `https://api.elections.kalshi.com/trade-api/v2/markets` +
+          `?status=open&limit=200&series_ticker=${ticker}`;
+        if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+        const r = await fetch(url);
+        if (!r.ok) break;
+        const d = await r.json();
+        const got = d.markets || [];
+        markets.push(...got);
+        cursor = d.cursor;
+        if (!cursor || got.length === 0) break;
+      }
+      kalshiPages[ticker] = markets.length;
+      return markets
         .filter(m => m.ticker && !m.ticker.startsWith("KXMVE") && m.title)
         .map(m => ({
           id:             m.ticker,
@@ -1544,6 +1570,9 @@ export default async function handler(req, res) {
         embedGate,
         kalshiSweep: [...kalshiSweep],
         totalKalshi: kalshiRaw.length,
+        // Per series, so a truncated league is visible as a number
+        // rather than as a quietly small pair count downstream.
+        kalshiPerSeries: { ...kalshiPages },
         totalPoly: polyRaw.length,
         totalPolyUs: usGames.markets.length,
         writes: {
