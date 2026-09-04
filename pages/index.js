@@ -414,6 +414,22 @@ function MarketCard({ market, pinned, onPin, showTrending = true }) {
               page that selects the top-volume market in each category
               it is true on every card by construction — a badge that is
               always lit says nothing and costs the reader a glance. */}
+          {/* WHICH SPORT AM I LOOKING AT? The sports tab mixes leagues
+              in one grid, and a card reading "New York Y vs San Diego"
+              does not say whether that is baseball or football — the
+              team names are the only clue and they are ambiguous
+              exactly where the cities overlap. Rendered only for
+              sports, because the other tabs have one kind of thing in
+              them and the label would be noise. */}
+          {LEAGUE_LABEL[market.category] && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
+              color: T.muted, border: `1px solid ${T.border}`,
+              padding: "1px 6px", borderRadius: 4,
+            }}>
+              {LEAGUE_LABEL[market.category]}
+            </span>
+          )}
           {showTrending && market.trending && <span style={{ fontSize: 10, fontWeight: 600, color: T.yes, letterSpacing: "0.04em" }}>↑ TRENDING</span>}
           {/* A dedicated control, not a click on the card body. The card
               already carries three links and an expander; making the
@@ -782,6 +798,28 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
     if (i >= 0) rest.splice(i, 1);
   }
 
+  // SPORTS LEADS, AND THE ORDER IS NOT BY VOLUME.
+  //
+  // Ranking the four cards by Kalshi contracts put POLITICS first and
+  // SPORTS last, because a presidential-nomination market trades
+  // millions of contracts where a ball game trades thousands. That is a
+  // true fact about the venues and a bad front door: politics is 70% of
+  // the catalogue and the category matched by EMBEDDINGS plus gates,
+  // where wrong pairs are a known and recurring cost. Sports is matched
+  // by an EXACT JOIN on the game identifier — it cannot pair the wrong
+  // fixture — so it is the strongest thing to be judged on and it was
+  // in the last slot.
+  //
+  // Selection WITHIN a category is still most-traded, which is what the
+  // caption claims; only the order of the four is fixed, following the
+  // CATEGORIES map so there is one place that decides it.
+  const tabOrder = Object.keys(CATEGORIES);
+  featured.sort((a, b) => {
+    const ta = tabOrder.indexOf(CATEGORY_OF_CARD[a.category] || a.category);
+    const tb = tabOrder.indexOf(CATEGORY_OF_CARD[b.category] || b.category);
+    return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb);
+  });
+
   return (
     <div>
       <div style={{ marginBottom: 26 }}>
@@ -797,6 +835,26 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
               it MATTERS rather than before anything has been shown. */}
           Kalshi and Polymarket, side by side — with fees already in the price.{" "}
           {total > 0 && <><strong style={{ color: T.text }}>{total.toLocaleString()}</strong> matched markets right now.</>}
+        </p>
+
+        {/* SAY WHAT THIS IS, RATHER THAN LOCKING THE DOOR.
+            A password gate was the alternative, and it would have cost
+            the share card, indexing, and anyone we send here — while
+            not touching the risk it was standing in for. The risk is a
+            reader ACTING on a pair the matcher got wrong, and the
+            honest fix for that is to say so, next to the prices, in the
+            reader's own line of sight. Muted and small: a warning that
+            shouts on every visit stops being read by the third one. */}
+        <p style={{
+          margin: "12px 0 0", fontSize: 12, color: T.muted, lineHeight: 1.45,
+          maxWidth: 620, display: "flex", gap: 8, alignItems: "baseline",
+        }}>
+          <span style={{
+            flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
+            textTransform: "uppercase", color: ACCENT,
+            background: `${ACCENT}14`, padding: "2px 7px", borderRadius: 99,
+          }}>Alpha</span>
+          <span>Matching is still being tuned, and prices come from a scheduled read. Check the venue before you trade.</span>
         </p>
       </div>
 

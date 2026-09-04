@@ -868,6 +868,45 @@ pairs it took.
   because one Kalshi market yielded two rows; merging removes the
   collision at its source.
 
+### The front door leads with the category we can prove
+
+Ranked by Kalshi contracts, the four home cards came out **politics,
+economics, crypto, sports** — a presidential-nomination market trades
+millions of contracts where a ball game trades thousands. True about the
+venues, and a bad front door.
+
+Politics is **70% of the catalogue** (289 of 410 cards, measured
+2026-09-04) and the category matched by embeddings plus gates, where
+wrong pairs are a known and recurring cost. Sports is matched by an
+**exact join on the game identifier** and cannot pair the wrong
+fixture. The strongest thing to be judged on was in the last slot.
+
+The order of the four now follows the `CATEGORIES` map, so one place
+decides it. Selection WITHIN a category is still most-traded, which is
+what the caption claims.
+
+### An alpha notice, instead of a password
+
+Gating the site was the alternative and it is worse on every axis: it
+costs the share card, indexing, and anyone we send to the domain —
+Vercel wants Enterprise or a **$150/mo** Pro add-on for it, and the
+Cloudflare Access route needs the orange cloud we deliberately turned
+off. None of that touches the actual risk, which is a reader ACTING on
+a pair the matcher got wrong. Arguably a gate makes it worse: an invite
+list is people who will trade.
+
+So the page says what it is, next to the prices. Muted and small — a
+warning that shouts on every visit stops being read by the third one.
+
+### The card says which sport it is
+
+The sports tab mixes leagues in one grid, and "New York Y vs San Diego"
+does not say whether that is baseball or football. Team names are the
+only clue and they are ambiguous exactly where the cities overlap.
+`LEAGUE_LABEL[market.category]` renders as a badge on sports cards
+only, because the other tabs hold one kind of thing and the label would
+be noise.
+
 ### Search is on every view, including the front door
 
 The box lived inside the category branch, so the home page — the first
