@@ -171,8 +171,8 @@ function arbAlert(m) {
 // starts matching.
 const LEAGUE_ORDER = ["mlb", "nfl", "nba", "nhl", "soccer"];
 // A card carries its sport_tag ("mlb"), not its tab ("sports").
-const CATEGORY_OF_CARD = { mlb: "sports", nfl: "sports", nba: "sports", nhl: "sports", soccer: "sports", econ: "economics", crypto: "crypto", politics: "politics" };
-const LEAGUE_LABEL = { mlb: "MLB", nfl: "NFL", nba: "NBA", nhl: "NHL", soccer: "Soccer" };
+const CATEGORY_OF_CARD = { mlb: "sports", nfl: "sports", ncaaf: "sports", nba: "sports", nhl: "sports", soccer: "sports", econ: "economics", crypto: "crypto", politics: "politics" };
+const LEAGUE_LABEL = { mlb: "MLB", nfl: "NFL", ncaaf: "CFB", nba: "NBA", nhl: "NHL", soccer: "Soccer" };
 
 const CATEGORIES = {
   sports:    { label: "Sports",    icon: "⚽", supported: true  },

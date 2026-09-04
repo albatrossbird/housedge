@@ -529,6 +529,48 @@ were games played two weeks earlier — and reported success throughout.
 `matchDiagnostics.kalshiKeyFailures` exists so the next format change is
 loud instead of silent.
 
+### College football keys on NAMES, because its codes cannot be trusted
+
+`KXNCAAFGAME` is **250 open games** against MLB's 106, and the biggest
+sports addition available. It does not fit the code-based join:
+
+- **178 of 275 Kalshi codes disagree with Polymarket's.** That is an
+  alias map two orders of magnitude past MLB's two entries, and it
+  would rot every time either venue renamed a school.
+- **Kalshi REUSES three codes for different schools** — `CSU` is both
+  Colorado St. and Central State (OH), `KSU` is Kansas St. and Kentucky
+  State, `WEB` is Weber St. and Webber International. A flat map cannot
+  say "KSU means Kansas State here and Kentucky State there", so it
+  would key two fixtures to one game and pair the wrong teams.
+
+Both venues publish clean **names** — Kalshi's `yes_sub_title`,
+Polymarket's `teams[].alias` and its moneyline `outcomes` — and names
+are unique on both sides (Polymarket reuses no code at all). So
+`NAME_KEYED_LEAGUES` keys these on the normalised name and needs no
+alias table.
+
+- A single Kalshi market names only **its own** side, so the two sides
+  are regrouped by event (`kalshiEventOf`) before a two-name key exists.
+- **CFB slugs carry digits in the code** (`cfb-lcdbfc25-nwst-2026-08-27`),
+  which the letters-only pattern in `polyGameKey` rejects outright —
+  hence `polyGameDate`, which reads the date without the codes.
+- `outcomeIndexByName` resolves which Polymarket outcome a Kalshi side
+  refers to. On this league it is a lookup, where the keyword fallback
+  would be a guess.
+
+**Measured against the live slate: 219 of 250 games join, 0 key
+failures, and all 219 outcome indexes resolve.** The 31 that do not
+join are Kalshi carrying a mascot ("Central Washington Wildcats")
+where Polymarket has the school ("Central Washington"), plus games
+Polymarket does not list. **Prefix matching would recover some and is
+NOT safe**: "michigan state" starts with "michigan".
+
+**The live tag is `100351`, not `636`.** `636` ("college football") is a
+2025 archive — 53 events, all closed but one futures market — and
+reading it is how this league was first, wrongly, written off as
+unlisted by Polymarket. `scripts/sports-keys.test.mjs` pins the three
+collisions and the near-misses a fuzzy matcher paired wrongly.
+
 ### Implausible pairs are hidden, not just unflagged
 
 **Two venues do not disagree by 15 points on the same claim.** The

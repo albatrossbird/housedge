@@ -34,7 +34,7 @@ jobs:
       - name: Run /api/embed per category
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nfl nba nhl soccer econ crypto politics' }}
+          CATEGORIES: ${{ github.event.inputs.categories || 'mlb nfl ncaaf nba nhl soccer econ crypto politics' }}
         run: |
           set -uo pipefail
           FAILED=0

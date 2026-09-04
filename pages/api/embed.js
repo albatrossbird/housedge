@@ -12,7 +12,10 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
-import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
+import {
+  kalshiGameKey, polyGameKey, NAME_KEYED_LEAGUES,
+  nameGameKey, kalshiEventOf, kalshiGameDate, polyGameDate,
+} from "../../lib/sportsKeys.js";
 import { fetchUsGameMarket, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 // Matching lives in lib/ so this route and scripts/match-category.mjs
 // cannot drift — see the note at the top of that file.
@@ -350,8 +353,36 @@ function isMoneylineTitle(title) {
   return !/(inning|o\/u|over\/under|tied|score|spread|\(-|\(\+)/.test(t);
 }
 
+// A Polymarket game's two team names. The moneyline `outcomes` ARE the
+// team names on a name-keyed league, which is what makes this possible
+// without a second fetch.
+function polyNameKey(pm) {
+  const date = polyGameDate(pm.slug);
+  if (!date) return null;
+  let names = pm.outcomes;
+  if (typeof names === "string") {
+    try { names = JSON.parse(names); } catch { return null; }
+  }
+  if (!Array.isArray(names) || names.length !== 2) return null;
+  const key = nameGameKey(date, names[0], names[1]);
+  return key ? { key, date } : null;
+}
+
+// One Kalshi market plus the set of names seen across its event.
+function kalshiNameKey(km, namesByEvent) {
+  const date = kalshiGameDate(km.id);
+  const ev = kalshiEventOf(km.id);
+  if (!date || !ev) return null;
+  const names = [...(namesByEvent.get(ev) || [])];
+  // Exactly two sides, or this is not a head-to-head game market.
+  if (names.length !== 2) return null;
+  const key = nameGameKey(date, names[0], names[1]);
+  return key ? { key, date, side: km.side_label } : null;
+}
+
 function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   const todayIso = new Date().toISOString().slice(0, 10);
+  const nameKeyed = NAME_KEYED_LEAGUES.has(sportTag);
 
   const diagnostics = {
     kalshiRows: kalshiMarkets.length,
@@ -377,7 +408,7 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   for (const pm of polyMarkets) {
     if (pm.sport_tag !== sportTag) continue;
     diagnostics.polyRows++;
-    const pk = polyGameKey(pm.slug);
+    const pk = nameKeyed ? polyNameKey(pm) : polyGameKey(pm.slug);
     if (!pk) continue;
     diagnostics.polyKeyed++;
     if (pk.date < todayIso) continue;
@@ -396,8 +427,21 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   // refers to. Taking the lowest ticker keeps that choice deterministic
   // instead of dependent on row order.
   const bySide = new Map();
+  // A name-keyed league needs BOTH teams to build a key, and a single
+  // Kalshi market names only its own side — so the two sides are
+  // regrouped by event first. Code-keyed leagues skip this entirely and
+  // take the path they always took.
+  const namesByEvent = new Map();
+  if (nameKeyed) {
+    for (const km of kalshiMarkets) {
+      const ev = kalshiEventOf(km.id);
+      if (!ev || !km.side_label) continue;
+      if (!namesByEvent.has(ev)) namesByEvent.set(ev, new Set());
+      namesByEvent.get(ev).add(km.side_label);
+    }
+  }
   for (const km of kalshiMarkets) {
-    const kk = kalshiGameKey(km.id);
+    const kk = nameKeyed ? kalshiNameKey(km, namesByEvent) : kalshiGameKey(km.id);
     if (!kk) {
       diagnostics.kalshiKeyFailures++;
       if (diagnostics.sampleKeyFailures.length < 5) {
@@ -533,6 +577,9 @@ async function attachKalshiSeriesMeta(rows) {
 const KALSHI_SERIES = [
   { ticker: "KXWCGAME",    sport: "soccer"   },
   { ticker: "KXNFLGAME",   sport: "nfl"      },
+  // 250 open games in September against MLB's 106. Keyed by NAME, not
+  // code — see NAME_KEYED_LEAGUES in lib/sportsKeys.js.
+  { ticker: "KXNCAAFGAME", sport: "ncaaf"    },
   { ticker: "KXNBAGAME",   sport: "nba"      },
   { ticker: "KXNHLGAME",   sport: "nhl"      },
   { ticker: "KXMLBGAME",   sport: "mlb"      },
@@ -897,6 +944,10 @@ const POLY_TAGS = [
   { tag: "899",    sport: "nhl"    },
   { tag: "100381", sport: "mlb"    },
   { tag: "450",    sport: "nfl"    },
+  // 100351 is the LIVE cfb tag. 636 ("college football") is a 2025
+  // archive — 53 events, all closed but a futures market — and reading
+  // it is how this league was wrongly written off as unlisted.
+  { tag: "100351", sport: "ncaaf"  },
   { tag: "129",    sport: "econ"   }, // federal reserve
   { tag: "131",    sport: "econ"   }, // interest rates (rate-level questions, vs "federal reserve"'s hike-count ones)
   { tag: "101249", sport: "econ"   }, // Macro Inflation (CPI)
@@ -914,7 +965,7 @@ const POLY_TAGS = [
 // everything else - a Fed decision, for instance, can legitimately have
 // more than 4 rate-bucket outcomes. Non-sports tags skip that filter and
 // let embedding similarity do the filtering instead.
-const SPORTS_TAGS = new Set(["mlb", "nba", "nhl", "soccer", "nfl"]);
+const SPORTS_TAGS = new Set(["mlb", "nba", "nhl", "soccer", "nfl", "ncaaf"]);
 
 async function fetchPolymarkets(sportFilter = "all") {
   const tags = sportFilter === "all"
