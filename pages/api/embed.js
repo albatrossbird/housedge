@@ -16,7 +16,7 @@ import { kalshiGameKey, polyGameKey } from "../../lib/sportsKeys.js";
 import { fetchUsGameMarket, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 // Matching lives in lib/ so this route and scripts/match-category.mjs
 // cannot drift — see the note at the top of that file.
-import { matchNonSportsMarkets, assignGreedy, cosineSimilarity } from "../../lib/matcher.js";
+import { matchNonSportsMarkets, assignGreedy, cosineSimilarity, explainKalshiRow } from "../../lib/matcher.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
 import { buildSeriesGate, allowEmbed } from "../../lib/embedGate.js";
 
@@ -1099,6 +1099,46 @@ export default async function handler(req, res) {
 
   const auth = cronAuthorized(req);
   if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
+
+  // ?explain=<kalshiId> — why did this market not pair?
+  //
+  // Search is the review queue, and "9 markets, 0 matched" does not say
+  // which of the three things happened: the score was under the floor,
+  // a gate rejected it, or a better-scoring Kalshi row took the
+  // counterparty. This reads ONE Kalshi row against its category's
+  // Polymarket rows and reports score and gate verdict per candidate.
+  //
+  // Writes nothing, and reads one row on the Kalshi side, so it answers
+  // in seconds where a full politics matchonly does not fit in Vercel's
+  // 300s ceiling at all.
+  const explainId = req.query.explain;
+  if (explainId) {
+    const { data: kRows, error: kErr } = await supabase
+      .from("markets").select("id, title, sport_tag, embedding_v")
+      .eq("id", explainId).limit(1);
+    if (kErr) return res.status(500).json({ error: `kalshi read failed: ${kErr.message}` });
+    const km = (kRows || [])[0];
+    if (!km) return res.status(404).json({ error: `no market with id ${explainId}` });
+    if (!km.embedding_v) {
+      return res.status(200).json({
+        explain: explainId, kalshi: km.title, sportTag: km.sport_tag,
+        // Not a matcher failure: an unembedded row was never a candidate.
+        // The series gate in lib/embedGate.js is the usual reason.
+        error: "this market has no embedding_v, so it was never a match candidate",
+      });
+    }
+    const polyErrors = [];
+    const polyRows = await fetchAllRows(() => supabase
+      .from("markets").select("id, title, sport_tag, embedding_v")
+      .eq("sport_tag", km.sport_tag)
+      .in("platform", POLY_PLATFORMS).not("embedding_v", "is", null),
+      { errors: polyErrors });
+    const limit = Math.min(parseInt(req.query.top, 10) || 10, 50);
+    return res.status(200).json({
+      ...explainKalshiRow(km, polyRows, THRESHOLD, limit),
+      readErrors: polyErrors,
+    });
+  }
 
   try {
     if (matchOnly) {
