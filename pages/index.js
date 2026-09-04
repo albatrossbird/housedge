@@ -786,7 +786,7 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
     <div>
       <div style={{ marginBottom: 26 }}>
         <h1 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 800, color: T.text, letterSpacing: "-0.02em" }}>
-          Same event, different prices
+          Same event, different market
         </h1>
         <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.5, maxWidth: 620 }}>
           {/* "Polymarket and Polymarket US" is a distinction that costs a

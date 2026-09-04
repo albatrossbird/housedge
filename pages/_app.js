@@ -20,7 +20,7 @@ export default function App({ Component, pageProps }) {
         <title>MarketSlap — compare prediction markets across Kalshi and Polymarket</title>
         <meta
           name="description"
-          content="Same event, different prices. Kalshi and Polymarket side by side, with each venue's fees already in the price — so you see what a trade actually costs."
+          content="Same event, different market. Kalshi and Polymarket side by side, with each venue's fees already in the price — so you see what a trade actually costs."
         />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <meta name="theme-color" content="#040F29" />
@@ -32,7 +32,7 @@ export default function App({ Component, pageProps }) {
         <meta property="og:title" content="MarketSlap — compare prediction markets across Kalshi and Polymarket" />
         <meta
           property="og:description"
-          content="Same event, different prices. Kalshi and Polymarket, side by side, with fees already in the price."
+          content="Same event, different market. Kalshi and Polymarket, side by side, with fees already in the price."
         />
         <meta property="og:image" content="https://marketslap.com/og.png" />
         <meta property="og:image:width" content="1200" />
