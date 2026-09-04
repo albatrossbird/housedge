@@ -21,7 +21,7 @@ const CACHE = join(root, "node_modules", ".cache-inter-og.woff2");
 
 // Kept in sync with pages/index.js by hand — a card that disagrees with
 // the page is worse than no card.
-const HEADLINE = "Same event, different prices";
+const HEADLINE = "Same event, different market";
 const SUB = "Kalshi and Polymarket, side by side — with each venue's fees already in the price.";
 
 async function inter() {
