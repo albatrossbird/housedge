@@ -16,7 +16,7 @@ import {
   kalshiGameKey, polyGameKey, NAME_KEYED_LEAGUES,
   nameGameKey, kalshiEventOf, kalshiGameDate, polyGameDate,
 } from "../../lib/sportsKeys.js";
-import { fetchUsGameMarket, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
+import { fetchUsGameMarket, usLeagueFor, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 // Matching lives in lib/ so this route and scripts/match-category.mjs
 // cannot drift — see the note at the top of that file.
 import { matchNonSportsMarkets, assignGreedy, cosineSimilarity, explainKalshiRow } from "../../lib/matcher.js";
@@ -368,6 +368,26 @@ function polyNameKey(pm) {
   return key ? { key, date } : null;
 }
 
+// Both Kalshi sides of a game, grouped by event. Shared by the matcher
+// and the .us fetch so the two cannot key the same game differently.
+function kalshiNamesByEvent(rows) {
+  const out = new Map();
+  for (const km of rows || []) {
+    const ev = kalshiEventOf(km.id);
+    if (!ev || !km.side_label) continue;
+    if (!out.has(ev)) out.set(ev, new Set());
+    out.get(ev).add(km.side_label);
+  }
+  return out;
+}
+
+// The two team codes in a polymarket.com game slug, in slug order.
+// Digits allowed: CFB codes carry them.
+function comSlugCodes(slug) {
+  const m = String(slug || "").match(/^(?:aec-)?[a-z0-9]+-([a-z0-9]+)-([a-z0-9]+)-\d{4}-\d{2}-\d{2}$/);
+  return m ? [m[1], m[2]] : null;
+}
+
 // One Kalshi market plus the set of names seen across its event.
 function kalshiNameKey(km, namesByEvent) {
   const date = kalshiGameDate(km.id);
@@ -431,15 +451,7 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
   // Kalshi market names only its own side — so the two sides are
   // regrouped by event first. Code-keyed leagues skip this entirely and
   // take the path they always took.
-  const namesByEvent = new Map();
-  if (nameKeyed) {
-    for (const km of kalshiMarkets) {
-      const ev = kalshiEventOf(km.id);
-      if (!ev || !km.side_label) continue;
-      if (!namesByEvent.has(ev)) namesByEvent.set(ev, new Set());
-      namesByEvent.get(ev).add(km.side_label);
-    }
-  }
+  const namesByEvent = nameKeyed ? kalshiNamesByEvent(kalshiMarkets) : null;
   for (const km of kalshiMarkets) {
     const kk = nameKeyed ? kalshiNameKey(km, namesByEvent) : kalshiGameKey(km.id);
     if (!kk) {
@@ -933,16 +945,27 @@ const POLY_PLATFORMS = ["polymarket", POLY_US_PLATFORM];
 // book and depth), which is why this is scoped to the games Kalshi
 // actually lists rather than sweeping a schedule.
 async function fetchPolymarketUsGames(kalshiRows, polyRows, sportTag) {
+  // THIS PATH WAS ENTIRELY CODE-KEYED, so a name-keyed league produced
+  // no US legs at all — not because .us lacks the games, but because
+  // nothing here could name one. CFB is 219 pairs and every one of them
+  // was polymarket.com only for this reason.
+  const nameKeyed = NAME_KEYED_LEAGUES.has(sportTag);
+
   const orderByKey = new Map();
   for (const pm of polyRows || []) {
-    const pk = polyGameKey(pm.slug);
-    if (pk) orderByKey.set(pk.key, pk.codes);
+    // The .us slug reuses the .com team codes in the .com order, so the
+    // codes come from the slug even when the KEY comes from names.
+    const codes = comSlugCodes(pm.slug);
+    const pk = nameKeyed ? polyNameKey(pm) : polyGameKey(pm.slug);
+    if (!pk || !codes) continue;
+    orderByKey.set(pk.key, codes);
   }
 
   const wanted = new Map();
   const todayIso = new Date().toISOString().slice(0, 10);
+  const namesByEvent = nameKeyed ? kalshiNamesByEvent(kalshiRows) : null;
   for (const km of kalshiRows || []) {
-    const kk = kalshiGameKey(km.id);
+    const kk = nameKeyed ? kalshiNameKey(km, namesByEvent) : kalshiGameKey(km.id);
     if (!kk || kk.date < todayIso) continue;
     const codes = orderByKey.get(kk.key);
     if (!codes) continue; // no .com listing, so no known slug order
@@ -955,7 +978,7 @@ async function fetchPolymarketUsGames(kalshiRows, polyRows, sportTag) {
   // Sequential rather than parallel: this is a courtesy poll of a
   // venue's public gateway, not a race.
   for (const { codes, date } of wanted.values()) {
-    const row = await fetchUsGameMarket(sportTag, codes, date);
+    const row = await fetchUsGameMarket(usLeagueFor(sportTag), codes, date, { nameKeyed });
     if (row) { out.push({ ...row, sport_tag: sportTag }); diagnostics.listed++; }
     else diagnostics.notListed++;
   }

@@ -565,12 +565,19 @@ where Polymarket has the school ("Central Washington"), plus games
 Polymarket does not list. **Prefix matching would recover some and is
 NOT safe**: "michigan state" starts with "michigan".
 
-**CFB is polymarket.com ONLY — 0 of the 219 pairs are US-tradable.**
-`polymarket.us` returns 404 for every CFB slug shape tried
-(`aec-cfb-…`, `aec-ncaaf-…`, bare `cfb-…`). Since every category tab
-and the home page default to `venue = "us"`, all 148 CFB cards sit
-behind the Global / Both filter until `.us` lists the league. Worth
-knowing before treating the card count as what a US reader sees.
+**polymarket.us DOES list CFB, and two bugs hid it.** `.us` names the
+league **`cfb`** where our sport tag says `ncaaf`, so the slug builder
+produced `aec-ncaaf-…`, every one of which 404s. And
+`fetchPolymarketUsGames` was entirely code-keyed, so a name-keyed
+league could not name a game to ask for. `usLeagueFor()` maps the token
+and the US fetch now takes the name-keyed path.
+
+**Test the gateway with `?slug=`, not a path segment.** A market is
+`/v1/markets?slug=<slug>`; `/v1/markets/<slug>` returns 404 for
+*everything*, including slugs the site renders. That false negative is
+what produced the claim above, and a control — a known-good MLB slug —
+is what caught it. Never conclude "not listed" from a probe that has
+not been run against something known to exist.
 
 **The live tag is `100351`, not `636`.** `636` ("college football") is a
 2025 archive — 53 events, all closed but one futures market — and
