@@ -570,6 +570,53 @@ reads as the same claim and prices 81 points apart. The gates handle
 what the words reveal; the display filter is what makes the rest
 invisible to a reader.
 
+### Why a pair is missing is usually latency, not the matcher
+
+`?explain=<kalshiId>` on `/api/embed` scores one Kalshi row against
+every Polymarket row in its category and reports the score **and** the
+gate verdict per candidate. It writes nothing and reads one row on the
+Kalshi side, so it answers in seconds where a full politics `matchonly`
+does not fit in Vercel's 300s ceiling at all.
+
+**The first thing it found was that the matcher was right.** Searching
+"government shutdown" returned 9 markets and 0 matched;
+`KXGOVTSHUTDOWN-26OCT01` against `gsc-usfedgvmt-by-2026-10-01` scores
+**0.8836**, passes every gate, and appeared in the very next dry run.
+It was simply **not written yet**. Discovery and matching are DAILY, so
+a newly listed market waits up to 24 hours to be paired — measured at
+**135 politics pairs pending** (882 the matcher would write against 747
+stored). Before theorising about a gate, check whether the matcher has
+run since the market was ingested.
+
+Two of the four "gaps" sampled this way were the matcher being
+**correct**: `recession` is Kalshi's US markets against Polymarket's
+Japan and UK ones (the `mentionsNonUsRegion` gate), and `tariff` is
+Kalshi's `at least 10%/20%/30%` ladder against Polymarket's "a tariff
+increase", which states no threshold (`strikePresenceCompatible`).
+**"0 matched" is not evidence of a gap.**
+
+### How someone leaves office is part of the claim
+
+Auditing the pending 882 turned up three wrong pairs of one shape:
+Kalshi counts members who **lose** a primary or a re-election where
+Polymarket counts members who **retire**. "Exactly 6 House Republicans
+lose their primary" was matched against "the number who retire is 44 or
+more".
+
+The numeric gate does not save these. It rejects only when BOTH sides
+parse, and `be 44 or more?` is a phrasing `extractNumericClaim` does not
+read, so two counts a factor of seven apart passed on score alone.
+Teaching it that phrasing would help but would not fix this: six
+retirements and six primary losses are different markets even when the
+number agrees.
+
+`departureModes()` compares them as sets and rejects only on
+disjointness, like `econMetrics` — a title naming both modes or naming
+none blocks nothing, which keeps it inert on the ordinary "will X win"
+races that are most of the category. `lose_primary` drops the generic
+`lose_general` tag, or "lose their primary" would match both patterns
+and the sets would still intersect.
+
 ### Diagnostics convention
 
 Both modes return `matchDiagnostics` with `threshold`, embedded counts, `acceptedPairs` (what was actually paired, post-gate, post-exclusivity), and `topScores` (best candidate per Kalshi row **regardless of threshold or gate**). `topScores` is what distinguishes "real candidates just under threshold" from "nothing close" from "gate correctly rejecting". Write routes return per-stage `writes` counts and real error strings. **Keep this** — nearly every bug this codebase has had was invisible until the relevant counter/error was surfaced in the response.

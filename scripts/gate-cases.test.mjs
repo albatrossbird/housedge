@@ -93,9 +93,29 @@ const REJECT_POL = [
   ["Will Democrats win the House in 2026? — Democratic Party", "2026 Midterms: House Popular Vote Winner? — Democratic Party"],
   ["Will Republicans win the 2026 U.S. House of Representatives national popular vote? — Republicans win", "Will the Republican Party hold below 190 House seats after the 2026 midterm elections?"],
   ["Will Democrats win more than 12 seats in the 2026 U.S. House of Representatives elections in Pennsylvania? — Above 12", "How Many House Seats Will The Democrats Win In Pennsylvania? — 12+"],
+
+  // HOW SOMEONE LEAVES OFFICE IS PART OF THE CLAIM. All three came out of
+// one politics dry run: Kalshi counts members who LOSE a primary or a
+// re-election, Polymarket counts members who RETIRE. The numeric gate
+// does not save these — it rejects only when both sides parse, and
+// "be 44 or more?" is a phrasing extractNumericClaim does not read, so
+// two counts a factor of seven apart passed on score alone.
+  ["Will exactly 6 House Republican members lose their primary in 2026? — 6",
+   "Will the number of Republican House members who retire in 2026 be 44 or more?"],
+  ["Will more than 6 House Republican members lose their primary in 2026? — 7 or more",
+   "Will the number of Republican House members who retire in 2026 be fewer than 24?"],
+  ["Will at least 5 the Senate Republicans lose re-election in 2026? — 5 or more",
+   "Will the number of Republican Senate members who retire in 2026 be exactly 5?"],
 ];
 
 const ACCEPT_POL = [
+  // Found by searching "government shutdown" on the live site, which
+  // returned 9 markets and 0 matched. The matcher DOES accept this at
+  // 0.8836 — it was simply not written yet — so it is pinned here to
+  // stop a future gate from quietly killing a pair nobody would think
+  // to re-check. Both venues quote it at 2%.
+  ["Will the US government be shut down on Oct 1, 2026? — Yes",
+   "Government Shutdown? — By October 1, 2026"],
   // Kalshi labels a district market with its CANDIDATE where Polymarket
   // names the PARTY. Same claim, two levels of description — and the
   // surnames here are the ones an internal capital breaks.
