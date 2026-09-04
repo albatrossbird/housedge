@@ -862,6 +862,22 @@ market and the split is a single pass over the response.
   pushes the product below the fold. They render only when there are no
   cards — a cold cache or a failed read still needs a way into every
   tab.
+- **The home cards show the venue you can trade, and SELECTION MOVES
+  WITH THE FILTER.** Every category tab defaults to `venue = "us"` and
+  the front door did not, so the same market rendered three bars here
+  and two there — `POLY US 16%` above `POLY GLOBAL 14%`, with the
+  untradable row reading as a third opinion. Filtering alone is not
+  enough: crypto's most-traded market is on polymarket.com and **not**
+  on polymarket.us, so dropping its only Polymarket leg leaves a
+  price-*comparison* card with one price. The featured card is
+  therefore the most-traded one in each category **that has a US leg**,
+  falling back to the plain top card if a category has none — its
+  global leg beats an empty slot, and that leg already says "can't
+  trade from the US" on its own line.
+- **No venue toggle here.** Each card header carries `See all N →` into
+  the tab, where the full US / Global / Both control lives with real
+  counts. A venue filter over four cards is a control whose effect the
+  reader cannot yet see the point of.
 - **The list below shows what the cards do not.** `featured` takes the
   first of each category and `rest` takes the remainder, so nothing
   appears twice and the list keeps its own job, which is breadth.
