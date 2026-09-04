@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { polyOutcomeIndex } from "../../lib/sportsKeys.js";
+import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
 import { bestArb, complementBook, realBook } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 
@@ -28,7 +28,7 @@ const supabase = createClient(
 );
 
 const SPORT_TAGS = {
-  sports:    ["soccer", "nba", "nhl", "mlb", "nfl"],
+  sports:    ["soccer", "nba", "nhl", "mlb", "nfl", "ncaaf"],
   economics: ["econ"],
   crypto:    ["crypto"],
   politics:  ["politics"],
@@ -395,6 +395,15 @@ export default async function handler(req, res) {
             // Kalshi price with the other team's Polymarket price, which
             // renders as a large fake arbitrage.
             idx = polyOutcomeIndex(row.kalshi_id, row.p_slug);
+
+            // On a name-keyed league the two venues publish the SAME
+            // school name — Kalshi's side_label against Polymarket's
+            // outcomes — so this is a lookup where the keyword fallback
+            // below would be a guess. Tried before that fallback and
+            // after the identifier path, which is exact where it works.
+            if (idx == null) {
+              idx = outcomeIndexByName(row.k_side_label, outcomes);
+            }
 
             if (idx == null) {
               const titleSide = (row.k_title || "").split("—").pop().trim();

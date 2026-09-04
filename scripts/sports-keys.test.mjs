@@ -4,9 +4,14 @@
 // arbitrage, because one team's Kalshi price ends up beside the other
 // team's Polymarket price. That is why the outcome index is a lookup on
 // the slug rather than a keyword match, and why this file exists.
-import { kalshiGameKey, polyGameKey, polyOutcomeIndex, normalizeTeamCode } from "../lib/sportsKeys.js";
+import {
+  kalshiGameKey, polyGameKey, polyOutcomeIndex, normalizeTeamCode,
+  teamNameKey, nameGameKey, kalshiEventOf, kalshiGameDate, polyGameDate,
+  outcomeIndexByName,
+} from "../lib/sportsKeys.js";
 
 let bad = 0;
+const fail = msg => { console.log(`WRONG ${msg}`); bad++; };
 const eq = (got, want, label) => {
   const g = JSON.stringify(got), w = JSON.stringify(want);
   if (g !== w) { console.log(`WRONG ${label}\n  got:  ${g}\n  want: ${w}`); bad++; }
@@ -55,6 +60,71 @@ eq(polyOutcomeIndex("KXNFLGAME-26SEP21NYGLAR-NYG", "nfl-nyg-la-2026-09-21"), 0, 
 
 // A futures market has no date and must never join a game.
 eq(polyGameKey("nfl-super-bowl-champion-2027"), null, "futures slug does not key");
+
+
+// ── College football: keyed by NAME, not code ──────────────────
+//
+// Every case here is from the live slate. CFB is the league that broke
+// the code-based join: 178 of 275 Kalshi codes disagree with
+// Polymarket's, and three are REUSED for different schools, so no flat
+// alias map can be correct at any size.
+{
+  // The collisions themselves. If these ever normalise to the same
+  // string, two different fixtures key to one game and the matcher
+  // pairs the wrong teams.
+  for (const [a, b] of [
+    ["Colorado St.", "Central State (OH) Marauders"],
+    ["Kansas St.", "Kentucky State Thorobreds"],
+    ["Weber St.", "Webber International Warriors"],
+  ]) {
+    if (teamNameKey(a) === teamNameKey(b)) {
+      fail(`COLLISION: "${a}" and "${b}" normalise to the same key`);
+    }
+  }
+
+  // The two venues abbreviate differently and neither is wrong.
+  eq(teamNameKey("Colorado St."), teamNameKey("Colorado State"), "St. -> State");
+  eq(teamNameKey("Southern University"), teamNameKey("Southern"), "University suffix");
+  eq(teamNameKey("Alabama A&M"), teamNameKey("Alabama A&M"), "ampersand");
+
+  // Near-misses that MUST stay distinct — a fuzzy token matcher paired
+  // all of these wrongly, which is what ruled that approach out.
+  for (const [a, b] of [
+    ["Michigan", "Eastern Michigan"],
+    ["Michigan", "Michigan St."],
+    ["Illinois", "Northern Illinois"],
+    ["Florida", "Florida International"],
+    ["Clemson", "Boston College"],
+    ["Iowa St.", "Northern Iowa"],
+  ]) {
+    if (teamNameKey(a) === teamNameKey(b)) fail(`"${a}" and "${b}" must not collide`);
+  }
+
+  // Both Kalshi sides of one game regroup to the same event and key.
+  eq(kalshiEventOf("KXNCAAFGAME-26SEP17SYRPITT-SYR"), kalshiEventOf("KXNCAAFGAME-26SEP17SYRPITT-PITT"), "event regroup");
+  eq(kalshiGameDate("KXNCAAFGAME-26SEP17SYRPITT-SYR"), "2026-09-17", "kalshi date");
+
+  // CFB codes carry DIGITS ("lcdbfc25"), which the letters-only code
+  // pattern rejects — the date has to come out without them.
+  eq(polyGameDate("cfb-lcdbfc25-nwst-2026-08-27"), "2026-08-27", "poly date, digits in code");
+  eq(polyGameDate("cfb-sjst-emich-2026-09-04"), "2026-09-04", "poly date, plain");
+
+  // Order-independent: Kalshi lists away/home in the ticker blob,
+  // Polymarket in the slug, and they do not always agree.
+  eq(nameGameKey("2026-09-04", "San Jose State", "Eastern Michigan"),
+     nameGameKey("2026-09-04", "Eastern Michigan", "San Jose State"), "key is order independent");
+  eq(nameGameKey("2026-09-04", "San Jose State", "Eastern Michigan"),
+     nameGameKey("2026-09-04", "San Jose St.", "Eastern Michigan"), "same game across venues");
+  eq(nameGameKey("2026-09-05", "San Jose State", "Eastern Michigan") ===
+     nameGameKey("2026-09-04", "San Jose State", "Eastern Michigan"), false, "different date is a different game");
+  eq(nameGameKey("2026-09-04", "Syracuse", "Syracuse"), null, "a team cannot play itself");
+
+  // The read path picks the Polymarket outcome by name, which is exact
+  // where the keyword fallback guesses.
+  eq(outcomeIndexByName("Eastern Michigan", ["San Jose State", "Eastern Michigan"]), 1, "outcome index by name");
+  eq(outcomeIndexByName("Colorado St.", ["Colorado State", "Utah"]), 0, "outcome index, abbreviated side");
+  eq(outcomeIndexByName("Rutgers", ["San Jose State", "Eastern Michigan"]), null, "no match returns null, never a guess");
+}
 
 console.log(bad ? `${bad} failing` : "all sports-key cases correct");
 process.exit(bad ? 1 : 0);
