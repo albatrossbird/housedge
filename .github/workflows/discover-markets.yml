@@ -19,7 +19,7 @@ on:
     inputs:
       categories:
         description: "Space-separated categories to run"
-        default: "mlb nfl nba nhl soccer econ crypto politics"
+        default: "mlb nfl ncaaf nba nhl soccer econ crypto politics"
         required: false
 
 concurrency:
@@ -73,6 +73,25 @@ jobs:
 
             jq -r '"'"$CAT"' fetch: embedded=\(.embedded) remaining=\(.embedRemaining) marketsUpserted=\(.writes.marketsUpserted // "n/a")"' "fetch-$CAT.json"
 
+            # WHERE THE TIME WENT. The politics fetch timed out at 280s
+            # for a day with every counter reporting health, because
+            # none of them measured time. Print the split on every run,
+            # not only when something breaks — a stage that doubles is
+            # only visible against what it used to be.
+            jq -r '(.timingsMs // {}) | to_entries | map("\(.key)=\(.value)ms") | select(length>0) | "  timings: " + join(" ")' "fetch-$CAT.json" || true
+
+            # Series metadata is per-series and changes roughly never,
+            # so a healthy run reads nearly all of it from the store.
+            # `fetched` climbing back toward `series` means the seed
+            # read is failing and the run is about to get slow.
+            jq -r '(.seriesMeta // {}) | select(.series != null) | "  seriesMeta: \(.series) series (\(.fromStore) stored, \(.fetched) fetched)"' "fetch-$CAT.json" || true
+
+            # A sports tag whose Kalshi side is empty is not stored.
+            # Soccer was 9,646 rows a run for zero pairs. Named, because
+            # the day Kalshi lists the league again this line vanishes
+            # and the rows come back on their own.
+            jq -r '(.polyDroppedNoKalshiSide // {}) | to_entries | map("\(.key)=\(.value)") | select(length>0) | "  poly dropped (no Kalshi side): " + join(" ")' "fetch-$CAT.json" || true
+
             # The category sweep paginates ALL open Kalshi events and keeps
             # the ones in the category — Kalshi has no server-side category
             # filter — so anything that ends the pass early drops the tail
@@ -113,7 +132,14 @@ jobs:
             # workflow is already handling. Sports still matches here:
             # it is an exact join, not a similarity sweep, and it is
             # fast.
-            case " mlb nfl nba nhl soccer " in
+            # ncaaf belongs HERE and was in neither workflow: this list
+            # said "mlb nfl nba nhl soccer" and match-markets.yml does
+            # "politics econ crypto", so college football fell through
+            # the gap between them. Its 219 pairs were written by hand
+            # when the league was wired up and nothing has rebuilt them
+            # since — which on a weekly slate means the pairs decay into
+            # finished games while the new fixtures never join.
+            case " mlb nfl ncaaf nba nhl soccer " in
               *" $CAT "*) ;;
               *)
                 echo "$CAT: fetch done — matching runs in match-markets.yml"
