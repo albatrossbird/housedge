@@ -200,8 +200,15 @@ async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000, erro
   // every run and embedRemaining never converged. Say so, in the shape
   // every other read here uses, so a caller that passes `errors` finds
   // out rather than believing the tail does not exist.
-  if (out.length >= maxRows && errors) {
-    errors.push(`fetchAllRows: hit maxRows cap of ${maxRows}; the read is TRUNCATED and rows beyond it are missing, not absent`);
+  if (out.length >= maxRows) {
+    const msg = `fetchAllRows: hit maxRows cap of ${maxRows}; the read is TRUNCATED and rows beyond it are missing, not absent`;
+    // ALWAYS, not only when a caller opted into an errors array. The
+    // read that decided which markets to pay Voyage for did not pass
+    // one, so its truncation was invisible for as long as the catalogue
+    // has been over the cap. A silent cap is not a smaller answer, it
+    // is a wrong one.
+    if (errors) errors.push(msg); else console.warn(msg);
+    truncatedReads.push(msg);
   }
   return out;
 }
@@ -671,6 +678,11 @@ const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v
 // widened poll list took 16 straight 429s.
 const SERIES_META_CONCURRENCY = 8;
 const seriesMetaStats = { series: 0, fromStore: 0, fetched: 0 };
+
+// Every read that hit its row cap this request. A truncated read is a
+// wrong answer wearing a short one's clothes; this is so no call site
+// can hide one by not asking.
+const truncatedReads = [];
 
 // Where a fetch run actually spends its 300s. Guessing at that is how
 // the politics timeout survived a day: every counter in the response
@@ -1309,6 +1321,7 @@ export default async function handler(req, res) {
   seriesMetaStats.fromStore = 0;
   seriesMetaStats.fetched = 0;
   for (const k of Object.keys(seriesMetaStatus)) seriesMetaStatus[k] = 0;
+  truncatedReads.length = 0;
 
   const force     = req.query.force     === "1";
   const matchOnly = req.query.matchonly === "1";
@@ -1786,8 +1799,49 @@ export default async function handler(req, res) {
     // Embed only non-sports markets (sports use structured matching)
     let embedded = 0;
     let embeddingUpsert = { count: 0, errors: [] };
-    if (toEmbed.length > 0) {
-      const titles = toEmbed.map(m => m.title);
+
+    // ── CONFIRM BEFORE SPENDING ─────────────────────────────────────
+    //
+    // Voyage is the only thing this project pays per row for, and the
+    // decision to spend rode entirely on one big unscoped read. When
+    // that read silently truncated at its row cap, every market past
+    // the cap looked never-embedded and was bought AGAIN, every run,
+    // for as long as the catalogue was over 60,000 rows. Politics spent
+    // 1,200 embeddings a run on rows it already had and reported
+    // `embedded: 1200` as if that were work.
+    //
+    // So re-ask, about exactly the rows we are about to pay for and
+    // nothing else. That is one chunked select of two narrow columns
+    // against at most `embedLimit` ids — cheap next to the call it
+    // guards — and it is scoped by ID, so it cannot be truncated by a
+    // cap the way the read it is checking was.
+    //
+    // This is deliberately a SECOND opinion rather than a replacement:
+    // needsEmbedding still does the work, and a disagreement between
+    // the two is the alarm. In steady state `alreadyEmbedded` is 0.
+    const confirmErrors = [];
+    let confirmed = toEmbed;
+    let alreadyEmbedded = 0;
+    if (toEmbed.length > 0 && !force) {
+      const stored = new Map();
+      for (let i = 0; i < toEmbed.length; i += 200) {
+        const ids = toEmbed.slice(i, i + 200).map(m => m.id);
+        const { data, error } = await supabase
+          .from("markets").select("id, title")
+          .not("embedding_v", "is", null).in("id", ids);
+        // A FAILED CHECK MUST NOT SUPPRESS THE WORK. Treating an error
+        // as "already embedded" would silently stop embedding whenever
+        // Supabase hiccuped, which is a worse failure than paying
+        // twice. Fall through and spend.
+        if (error) { confirmErrors.push(error.message || JSON.stringify(error)); continue; }
+        for (const r of data || []) stored.set(String(r.id), r.title);
+      }
+      confirmed = toEmbed.filter(m => stored.get(String(m.id)) !== m.title);
+      alreadyEmbedded = toEmbed.length - confirmed.length;
+    }
+
+    if (confirmed.length > 0) {
+      const titles = confirmed.map(m => m.title);
       const embeddings = await embedTitles(titles);
       // Keep the full row (already in memory from the fetch step above,
       // and just written by the upsert above that) rather than sending
@@ -1805,13 +1859,13 @@ export default async function handler(req, res) {
       //
       // pgvector accepts the bracketed form JSON.stringify produces, so
       // the encoding is unchanged; only the destination is.
-      const records = toEmbed.map((m, i) => ({
+      const records = confirmed.map((m, i) => ({
         ...m,
         embedding_v: JSON.stringify(embeddings[i]),
         updated_at: Math.floor(Date.now() / 1000),
       }));
       embeddingUpsert = await upsertRows("markets", records, "id");
-      embedded = toEmbed.length;
+      embedded = confirmed.length;
     }
     timer.mark("embed");
 
@@ -1841,6 +1895,19 @@ export default async function handler(req, res) {
         // look unembedded, which is a bill in Voyage calls, not a
         // cosmetic gap. Never let it be empty-by-construction.
         ...(existingErrors.length ? { embeddedReadErrors: existingErrors.slice(0, 3) } : {}),
+        // WHAT THIS RUN PAID FOR, and what it declined to pay twice.
+        // `alreadyEmbedded` is 0 in steady state; any other number
+        // means needsEmbedding is working off a read that is lying,
+        // which is what a truncated cap did for months.
+        embedSpend: {
+          asked: toEmbed.length,
+          embedded,
+          alreadyEmbedded,
+          ...(confirmErrors.length ? { confirmErrors: confirmErrors.slice(0, 3) } : {}),
+        },
+        // Any read this request truncated at its row cap, from every
+        // call site, whether or not that site asked to be told.
+        ...(truncatedReads.length ? { truncatedReads: truncatedReads.slice(0, 5) } : {}),
         totalKalshi: kalshiRaw.length,
         // Per series, so a truncated league is visible as a number
         // rather than as a quietly small pair count downstream.

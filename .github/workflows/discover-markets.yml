@@ -123,6 +123,27 @@ jobs:
                    else empty end' "fetch-$CAT.json" || true
             jq -r '((.embedGate // {}).skippedSeries // [])[:8] | select(length>0) | "  gate skipped: " + join(" ")' "fetch-$CAT.json" || true
 
+            # THE ONLY THING THIS PROJECT PAYS PER ROW FOR.
+            # `alreadyEmbedded` is the count of rows the pre-spend check
+            # caught being bought a second time; in steady state it is
+            # 0. Politics quietly re-bought 1,200 a run for months while
+            # reporting them as work done, so this is an ERROR, not a
+            # note — the run should go red the day it comes back.
+            jq -r '(.embedSpend // {}) | select(.asked != null) | "  embed spend: asked=\(.asked) embedded=\(.embedded) alreadyEmbedded=\(.alreadyEmbedded)"' "fetch-$CAT.json" || true
+            if jq -e '((.embedSpend // {}).alreadyEmbedded // 0) > 0' "fetch-$CAT.json" >/dev/null 2>&1; then
+              echo "::error::$CAT: $(jq -r '.embedSpend.alreadyEmbedded' "fetch-$CAT.json") rows were about to be re-embedded — needsEmbedding is reading a stale or truncated set"
+              FAILED=1
+            fi
+            jq -r '(.embedSpend // {}).confirmErrors // [] | .[] | "::warning::embed pre-spend check: " + .' "fetch-$CAT.json" || true
+
+            # A read that hit its row cap returned a WRONG answer, not a
+            # short one. This is what hid the re-embedding.
+            if jq -e '((.truncatedReads // []) | length) > 0' "fetch-$CAT.json" >/dev/null 2>&1; then
+              jq -r '(.truncatedReads // [])[] | "::error::" + .' "fetch-$CAT.json"
+              FAILED=1
+            fi
+            jq -r '(.embeddedReadErrors // [])[] | "::error::embedded-titles read: " + .' "fetch-$CAT.json" || true
+
             REMAINING=$(jq -r '.embedRemaining // 0' "fetch-$CAT.json")
             if [ "$REMAINING" -gt 0 ]; then
               echo "::warning::$CAT: $REMAINING titles still need embedding; next run continues"
@@ -173,6 +194,26 @@ jobs:
               FAILED=1
             else
               jq -r '"'"$CAT"' match: newPairs=\(.newPairs) totalPairs=\(.totalPairs)"' "resp-$CAT.json"
+
+              # BOTH VENUES LIST THIS LEAGUE AND NOTHING JOINED.
+              #
+              # A sports join is exact, so this is never a close call:
+              # it means the two vocabularies disagree, or a venue
+              # changed its identifier format. That is how the MLB
+              # title-format change went unnoticed — 74 open markets
+              # skipped while every counter looked healthy.
+              #
+              # Guarded on polyKeyed too, so a league Kalshi lists and
+              # Polymarket does not (soccer today) stays quiet instead
+              # of failing the run every day for a real absence. NHL
+              # returns in October against codes nobody has been able
+              # to check — Kalshi lists no NHL market in any status
+              # right now — so this is the thing that will say so.
+              if jq -e '(.matchDiagnostics // {}) | (.kalshiKeyed // 0) > 0 and (.polyKeyed // 0) > 0 and (.joined // 0) == 0' "resp-$CAT.json" >/dev/null 2>&1; then
+                echo "::error::$CAT: both venues keyed games and ZERO joined — $(jq -r '"kalshiKeyed=\(.matchDiagnostics.kalshiKeyed) polyKeyed=\(.matchDiagnostics.polyKeyed)"' "resp-$CAT.json"); the team-code vocabularies disagree or an identifier format changed"
+                FAILED=1
+              fi
+              jq -r '(.matchDiagnostics // {}) | select((.joinedNextDay // 0) > 0) | "  joined via next-day retry: \(.joinedNextDay) (Kalshi dates in ET, Polymarket in UTC)"' "resp-$CAT.json" || true
 
               # Write errors are what silently produced empty results for
               # most of this project's history — surface, never swallow.
