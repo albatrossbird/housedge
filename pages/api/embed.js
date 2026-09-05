@@ -163,13 +163,33 @@ async function upsertRows(table, rows, onConflict, batchSize = 50) {
 // matching (only the first 1000 rows are considered) and pair clearing
 // (stale rejected pairs survive because their ids were never in the
 // capped list), and neither reports anything wrong.
-async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000, errors = null } = {}) {
+// KEYSET, AND ORDERED — it was NEITHER, and both halves were bugs.
+//
+// `.range(from, from + size - 1)` is LIMIT/OFFSET, and this issued it
+// with NO ORDER BY at all. Postgres makes no promise about row order
+// without one, and it is free to return a different order for the same
+// query — so consecutive pages could overlap or SKIP rows outright.
+// A skipped row here reads as "never embedded", and the pre-spend check
+// caught exactly that: crypto asked for 1,200 embeddings of which 10
+// already had vectors, on a read that reported no truncation.
+//
+// The OFFSET half is the same O(n^2) problem prune had: an offset makes
+// Postgres scan and discard every row before the window, so the LAST
+// pages are the slowest and a growing table eventually times out.
+//
+// Ordering by the key and seeking `key > last` fixes both: each page is
+// an index seek, and the order is total, so no row can fall between two
+// pages. Halving on error is kept — that is for payload-size failures,
+// which are a different thing.
+async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000, errors = null, key = "id" } = {}) {
   const out = [];
   let size = pageSize;
-  let from = 0;
+  let last = null;
 
-  while (from < maxRows) {
-    const { data, error } = await buildQuery().range(from, from + size - 1);
+  while (out.length < maxRows) {
+    let q = buildQuery().order(key, { ascending: true }).limit(size);
+    if (last != null) q = q.gt(key, last);
+    const { data, error } = await q;
 
     if (error) {
       // A page carrying `embedding` is enormous — roughly 20KB per row,
@@ -183,14 +203,21 @@ async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000, erro
       // Halve and retry before giving up: a smaller page nearly always
       // succeeds, so the read degrades in speed rather than in truth.
       if (size > 100) { size = Math.floor(size / 2); continue; }
-      if (errors) errors.push(`page at ${from} (size ${size}): ${error.message || JSON.stringify(error)}`);
+      if (errors) errors.push(`page after ${last ?? "start"} (size ${size}): ${error.message || JSON.stringify(error)}`);
       break;
     }
 
     if (!data || data.length === 0) break;
     out.push(...data);
     if (data.length < size) break;
-    from += size;
+    last = data[data.length - 1][key];
+    // A key not actually on the row would loop forever on the same page.
+    if (last == null) {
+      const msg = `fetchAllRows: key "${key}" is not in the selected columns; cannot page safely`;
+      if (errors) errors.push(msg); else console.warn(msg);
+      truncatedReads.push(msg);
+      break;
+    }
   }
   // HITTING THE CAP IS A TRUNCATION, NOT AN ANSWER.
   //
@@ -1732,7 +1759,9 @@ export default async function handler(req, res) {
       // Series that have produced a pair. Paged, for the same reason
       // every other read here is: the 1000-row server-side cap.
       const pairRows = await fetchAllRows(() => supabase
-        .from("pairs").select("kalshi_id"));
+        // `id` is selected only so the keyset pager has something to
+        // seek on; only kalshi_id is read below.
+        .from("pairs").select("id, kalshi_id"));
       seriesGate = buildSeriesGate({
         pairKalshiIds: (pairRows || []).map(r => r.kalshi_id),
         // Costs no extra query — the embedded set was already read above.

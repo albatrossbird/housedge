@@ -392,6 +392,24 @@ Three guards, in the order they fire:
    fails the run. A silent cap is not a smaller answer, it is a wrong
    one.
 
+**The guard caught a real bug on its first run, and it was not the cap.**
+Crypto came back `asked=1200 embedded=1190 alreadyEmbedded=10` with no
+truncation reported. `fetchAllRows` paged with `.range()` and **no
+`ORDER BY` at all** — Postgres promises nothing about row order without
+one and may return a different order for the same query, so consecutive
+pages could overlap or **skip rows outright**. A skipped row reads as
+never-embedded and is bought again.
+
+It is keyset now (`order(key)` + `gt(key, last)`), which fixes that and
+the O(n²) OFFSET cost in the same change; `scripts/page-all.test.mjs`
+pins it against a deliberately unstable backend and fails seven ways
+against the old pager. The `pairs` read selects `id` purely to give the
+pager a key.
+
+`fetchAllRows` was the last OFFSET pager on a live path. One remains, in
+`match_candidates` — opt-in behind `?matcher=sql` and off by default —
+and it reads an RPC whose ordering has not been checked.
+
 `force=1` skips the confirmation, because re-embedding everything is
 what it is for.
 
