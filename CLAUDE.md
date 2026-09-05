@@ -355,6 +355,95 @@ Three independent causes, all fixed:
    never joins. Found only by reading the workflow to add logging, not
    by any counter.
 
+### Nothing pays Voyage twice for the same row
+
+Embeddings are the only thing this project pays PER ROW for, and the
+decision to spend rode entirely on one big unscoped read. When that read
+silently truncated at its row cap, every market past it looked
+never-embedded and was bought **again, every run** — politics spent
+1,200 embeddings a run on rows it already had and reported
+`embedded: 1200` as if that were work.
+
+Three guards, in the order they fire:
+
+1. **A pre-spend confirmation.** Immediately before the Voyage call,
+   re-ask about exactly the rows about to be paid for: one chunked
+   select of two narrow columns over at most `embedLimit` ids. It is
+   scoped BY ID, so it cannot be truncated by the kind of cap it exists
+   to catch. It is deliberately a **second opinion**, not a
+   replacement — `needsEmbedding` still does the work, and a
+   disagreement between the two is the alarm.
+
+   **A failed check must not suppress the work.** Treating a Supabase
+   error as "already embedded" would silently stop embedding on any
+   hiccup, which is worse than paying twice, so it falls through and
+   spends.
+
+2. **`embedSpend: { asked, embedded, alreadyEmbedded }`.**
+   `alreadyEmbedded` is **0 in steady state**; anything else means
+   `needsEmbedding` is reading a stale or truncated set. The workflow
+   treats it as an **error**, not a note — the bug it catches ran for
+   months while reporting itself as work done.
+
+3. **`fetchAllRows` reports a cap hit ALWAYS**, not only when a caller
+   passed an `errors` array — the read that decided the spend did not
+   pass one, which is exactly why its truncation was invisible.
+   `truncatedReads` collects them per request from every call site and
+   fails the run. A silent cap is not a smaller answer, it is a wrong
+   one.
+
+`force=1` skips the confirmation, because re-embedding everything is
+what it is for.
+
+### Soccer: the two venues barely list the same games
+
+**Measured 2026-09-05, and it decides the question.** Kalshi lists 135
+open soccer games across five leagues — `KXMLSGAME` 144 markets,
+`KXLALIGAGAME` 90, `KXSERIEAGAME` 63, `KXEPLGAME` 54, `KXUCLGAME` 54.
+Polymarket lists 116 game-shaped soccer events across **39 leagues that
+are almost entirely different ones**: Azerbaijan, Bolivia, Georgia,
+Latvia, Kazakhstan, Chile, Colombia, Slovakia, Romania.
+
+**The exact join produces 6 pairs. All MLS, all on one date.**
+
+- Polymarket has **no EPL, La Liga, Serie A or UCL games at all**. There
+  is no Premier League tag on the exchange; `Serie A` (100618) and
+  `Champions League` (1234) hold futures and outrights, not fixtures.
+- Its MLS coverage is 17 games on **4 dates, three of them back in
+  April**. That is a coverage gap, not a listing horizon — the one
+  shared date has Kalshi at 14 games and Polymarket at 6.
+
+So the three-way matcher is **not worth building yet**, and the reason
+is not the matcher. Both venues model a soccer game the same way — one
+Yes/No market per outcome, home/draw/away — so the work is
+straightforward; there is simply almost nothing to join. Wiring
+`KXMLSGAME` in would also **re-enable ingesting ~10,000 Polymarket
+soccer rows**, since the Kalshi side would stop being empty, to win six
+pairs that expire the same night.
+
+Re-measure before building: this is a fact about Polymarket's current
+coverage, not about the leagues.
+
+### NHL has no Kalshi side to check against yet
+
+`KXNHLGAME` returns **zero markets in every status** — open, unopened,
+closed and settled — so the season is not listed at all. Polymarket
+already lists **80 games, 2026-09-19 to 2026-10-02**.
+
+That means the team-code vocabulary **cannot be verified in advance**,
+and Polymarket's NHL codes are not the standard ones: `cal`, `mon`,
+`las`, `nj`, `sj`, `tb`, `utah` where the league writes CGY, MTL, VGK,
+NJD, SJS, TBL, UTA. `TEAM_CODE_ALIASES` is flat across leagues, so
+these have to be checked against the existing entries when Kalshi does
+list, not just against hockey.
+
+Nothing to build until then — but the day it lists, a mismatch would
+produce **zero pairs with every counter healthy**, which is the exact
+failure that hid the MLB title-format change. So the workflow now fails
+when **both venues keyed games and none joined**. Guarded on `polyKeyed`
+too, so a league Kalshi lists and Polymarket does not — soccer today —
+stays quiet rather than going red every day for a real absence.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
