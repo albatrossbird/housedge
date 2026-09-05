@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { cronAuthorized } from "../../lib/cronAuth.js";
+import { cronAuthorized, effectiveIfStale } from "../../lib/cronAuth.js";
 import { seriesTickerOf } from "../../lib/kalshiTicker.js";
 import { fetchUsBbo } from "../../lib/polymarketUs.js";
 
@@ -271,9 +271,32 @@ async function applyUpdates(updates) {
   return { updated, skipped, errors, warnings: [...new Set(warnings)] };
 }
 
+// The page's own on-demand refresh floor, mirroring
+// ON_DEMAND_AFTER_SECONDS in pages/index.js. An unauthenticated caller
+// cannot ask for anything more aggressive than this.
+const ON_DEMAND_FLOOR_SECONDS = 180;
+
 export default async function handler(req, res) {
+  // REFRESH IS NOT GATED THE WAY THE OTHER JOB ROUTES ARE, and the
+  // reason is that the browser calls it.
+  //
+  // /api/embed spends Voyage credits, /api/v2/extract spends Anthropic
+  // credits, /api/prune deletes rows — a stranger running those costs
+  // real money, so they 401 the moment CRON_SECRET is set. This route
+  // reads two public venues and writes prices, and pages/index.js calls
+  // it on every visit where what is on screen is over three minutes
+  // old. Gating it identically would have turned CRON_SECRET on and
+  // silently taken price freshness from ~20 seconds back to whatever
+  // the throttled cron manages, which is 45 minutes to 3.5 hours.
+  //
+  // So an unauthenticated caller is ALLOWED, and pays the cooldown:
+  // ifStale is floored at ON_DEMAND_FLOOR_SECONDS, which is exactly
+  // what the page asks for anyway. Only an authenticated caller can
+  // force a read with ifStale=0 — the ↻ button therefore refreshes
+  // when the prices are genuinely stale and cannot be used to hammer
+  // the venues in a loop.
   const auth = cronAuthorized(req);
-  if (!auth.ok) return res.status(401).json({ error: "unauthorized" });
+  const floorCooldown = auth.enforced && !auth.ok;
 
   try {
     // ?ifStale=<seconds> — do the work only if the stored prices are
@@ -291,7 +314,11 @@ export default async function handler(req, res) {
     // timer in. `markets.updated_at` is written by this job and by
     // discovery, so "something wrote prices N seconds ago" is exactly
     // the question worth asking.
-    const ifStale = parseInt(req.query.ifStale, 10);
+    const requested = parseInt(req.query.ifStale, 10);
+    // An unauthenticated caller gets the floor whether or not it asked
+    // for one — otherwise omitting ifStale entirely would buy an
+    // unconditional venue sweep, which is the thing being bounded.
+    const ifStale = effectiveIfStale(auth, requested, ON_DEMAND_FLOOR_SECONDS);
     if (Number.isFinite(ifStale) && ifStale >= 0) {
       const { data, error } = await restFetch(
         "markets?select=updated_at&order=updated_at.desc&limit=1"
@@ -302,6 +329,7 @@ export default async function handler(req, res) {
         if (ageSeconds < ifStale) {
           return res.status(200).json({
             skipped: true, reason: "prices already fresh", ageSeconds, ifStale,
+            ...(floorCooldown ? { cooldownFloored: ON_DEMAND_FLOOR_SECONDS } : {}),
           });
         }
       }
