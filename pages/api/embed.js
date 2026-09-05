@@ -542,26 +542,71 @@ function slugifySeriesTitle(title) {
   return t || null;
 }
 
+// WHY A LOOKUP CAME BACK EMPTY, not just that it did.
+//
+// This returned silent nulls for every non-2xx, so a throttle and a
+// genuinely unknown series were the same answer — the exact shape of
+// bug that froze 79 politics series for 8.3 hours behind counters that
+// all read healthy. The seed added in the fix above should have taken
+// politics to near-zero fetches on its second run and took it from 600
+// to 519, which is only explicable if most of those lookups return no
+// slug; without a status breakdown that is a guess.
+//
+// A null slug is not cosmetic: markets.js falls back to a Kalshi
+// SEARCH url without one, so a throttled series loses its direct link
+// for every market under it.
+const seriesMetaStatus = { ok: 0, noTitle: 0, notFound: 0, throttled: 0, serverError: 0, networkError: 0 };
+
+// Modest, because this runs over hundreds of series inside a 300s
+// budget that politics already spends 86s of. 429 and 5xx are worth
+// another go; a 404 is a real answer and retrying it only burns time.
+const SERIES_META_ATTEMPTS = 3;
+
 async function seriesMeta(seriesTicker) {
   if (!seriesTicker) return { feeMultiplier: null, slug: null };
   if (seriesMetaCache.has(seriesTicker)) return seriesMetaCache.get(seriesTicker);
 
   let meta = { feeMultiplier: null, slug: null };
-  try {
-    const r = await fetch(
-      `https://api.elections.kalshi.com/trade-api/v2/series/${encodeURIComponent(seriesTicker)}`
-    );
-    if (r.ok) {
-      const d = await r.json();
-      const m = d.series?.fee_multiplier;
-      // A missing multiplier means the standard rate, i.e. 1 - not
-      // "no fee". Defaulting it to 0 would price every Kalshi leg as
-      // free and manufacture edges.
-      let mult = m == null ? 1 : Number(m);
-      if (!isFinite(mult)) mult = 1;
-      meta = { feeMultiplier: mult, slug: slugifySeriesTitle(d.series?.title) };
+  for (let attempt = 0; attempt < SERIES_META_ATTEMPTS; attempt++) {
+    const last = attempt === SERIES_META_ATTEMPTS - 1;
+    let waitMs = 500 * Math.pow(2, attempt);
+    try {
+      const r = await fetch(
+        `https://api.elections.kalshi.com/trade-api/v2/series/${encodeURIComponent(seriesTicker)}`
+      );
+      if (r.ok) {
+        const d = await r.json();
+        const m = d.series?.fee_multiplier;
+        // A missing multiplier means the standard rate, i.e. 1 - not
+        // "no fee". Defaulting it to 0 would price every Kalshi leg as
+        // free and manufacture edges.
+        let mult = m == null ? 1 : Number(m);
+        if (!isFinite(mult)) mult = 1;
+        const slug = slugifySeriesTitle(d.series?.title);
+        // A 200 carrying no title is its own outcome: the series is
+        // real, we simply cannot build a url for it, and no amount of
+        // retrying changes that.
+        if (slug) seriesMetaStatus.ok++; else seriesMetaStatus.noTitle++;
+        meta = { feeMultiplier: mult, slug };
+        break;
+      }
+      if (r.status !== 429 && r.status < 500) { seriesMetaStatus.notFound++; break; }
+      if (r.status === 429) {
+        // A rate limiter does not relent in 500ms — the same lesson
+        // /api/refresh learned when widening its poll list drew 16
+        // straight 429s.
+        const retryAfter = Number(r.headers.get("retry-after"));
+        waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1000, 8000)
+          : 1000 * Math.pow(2, attempt);
+      }
+      if (last) { (r.status === 429 ? seriesMetaStatus.throttled++ : seriesMetaStatus.serverError++); break; }
+    } catch {
+      // Leave nulls; fees treat null as 1, the url falls back to search.
+      if (last) { seriesMetaStatus.networkError++; break; }
     }
-  } catch { /* leave nulls; fees treat null as 1, URL falls back to search */ }
+    await new Promise(res => setTimeout(res, waitMs));
+  }
 
   seriesMetaCache.set(seriesTicker, meta);
   return meta;
@@ -655,6 +700,7 @@ async function attachKalshiSeriesMeta(rows, sport = "all") {
   seriesMetaStats.series = series.length;
   seriesMetaStats.fromStore = series.length - toFetch.length;
   seriesMetaStats.fetched = toFetch.length;
+  seriesMetaStats.status = { ...seriesMetaStatus };
 
   for (const r of rows) {
     const m = metas.get(String(r.id).split("-")[0]) || {};
