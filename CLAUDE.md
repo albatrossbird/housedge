@@ -708,8 +708,13 @@ Two further guards, both load-bearing:
 
 `joinedNextDay` in `matchDiagnostics` counts them, so a venue changing
 convention shows up as a number rather than as a quietly smaller slate.
-Verified: NFL 25 exact + 7 next-day = **32/32**, MLB **41 exact, 0
-next-day**, unchanged.
+
+**Verified in production 2026-09-05.** NFL `joined` went 50 -> **57**
+with `joinedNextDay: 7` and an EMPTY `unjoinedKalshiKeys`; the recovered
+seven are all on polymarket.com, which took that venue 25 -> 32. MLB
+came back `joinedNextDay: 0`, `unjoinedKalshiKeys: []`, 76 pairs — the
+retry never fired, which is the guard working rather than the guard
+being untested.
 
 ### An unscoped read hit the row cap and re-embedded forever
 
@@ -733,6 +738,12 @@ now says so through the `errors` channel it already had —
 `embeddedReadErrors` in the response. A read that cannot distinguish
 "the tail does not exist" from "I stopped looking" is the same class as
 the `Set` that collapsed 79 frozen series into one null.
+
+**Verified in production 2026-09-05: politics went from 4,384 stuck to
+`embedded=79 remaining=0`.** The backlog was never a backlog — it was
+the same rows being bought again every run. `embed` fell from 15-21s to
+**1.5s**, and the series gate went from holding back ~5,000 rows to
+**567**, because it is now reading a set that means what it says.
 
 ### Implausible pairs are hidden, not just unflagged
 
