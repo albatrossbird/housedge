@@ -1687,25 +1687,36 @@ export default async function handler(req, res) {
     // filter below assumes, and re-embeds anything that lost or never
     // got one. Sports rows are excluded regardless, so they do not churn.
     //
-    // SCOPED TO THE CATEGORY, and that is not an optimisation.
+    // NOT SCOPED BY sport_tag, AND THAT WAS TRIED AND IS WRONG.
     //
-    // This read was unscoped, so it asked for every embedded row on the
-    // exchange — econ 28,797 + politics 26,239 + crypto 22,684 — while
-    // fetchAllRows stops at maxRows and returns what it has, silently.
-    // Past that cap every remaining row reads as "never embedded", so
-    // it is re-embedded, and which rows fall past it moves with page
-    // order. That is exactly the shape politics showed: embedRemaining
-    // went 4233 -> 3692 -> 4384 across three consecutive runs, spending
-    // 1,200 Voyage embeddings each time and converging on nothing.
+    // An embedding belongs to an (id, title). A row's CATEGORY has
+    // nothing to do with whether its vector is valid, and scoping this
+    // read by it made a market invisible here whenever the category it
+    // is stored under differs from the one being fetched. Kalshi files
+    // its crypto series under Financials, which the econ run sweeps —
+    // so rows stored as `crypto` came back as never-embedded under
+    // `econ`, every run, forever. Measured: econ asked for 76
+    // embeddings of which 73 already had vectors.
     //
-    // A category run only ever asks needsEmbedding() about rows in that
-    // category, so the other 50,000 were bought to be looked up never.
+    // That scoping was a fix for the wrong thing. The original bug was
+    // that this read TRUNCATED SILENTLY at fetchAllRows' row cap, so
+    // every market past it looked never-embedded and was bought again —
+    // politics burning 1,200 Voyage calls a run while `embedRemaining`
+    // wandered 4233 -> 3692 -> 4384 instead of falling. The cure for a
+    // silent truncation is to stop truncating and to say so when it
+    // happens, not to read less and hope.
+    //
+    // So: read every embedded row, keyset-paged so no row can fall
+    // between two pages, with a cap set above the whole catalogue and a
+    // loud report if it is ever reached.
     const existingErrors = [];
-    const existing = await fetchAllRows(() => {
-      let q = supabase.from("markets").select("id, title").not("embedding_v", "is", null);
-      if (sport !== "all") q = q.eq("sport_tag", sport);
-      return q;
-    }, { errors: existingErrors });
+    const existing = await fetchAllRows(
+      () => supabase.from("markets").select("id, title").not("embedding_v", "is", null),
+      // The non-sports catalogue is ~81,000 rows and growing; this is
+      // headroom, not a guess at the size, and hitting it now fails the
+      // run rather than quietly re-embedding the tail.
+      { errors: existingErrors, maxRows: 250000 },
+    );
     const embeddedTitles = new Map((existing || []).map(r => [r.id, r.title]));
     // An embedding belongs to a TITLE, so a row whose title changed has
     // a stale one. Keying only on id meant a corrected title kept the

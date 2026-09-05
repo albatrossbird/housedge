@@ -410,6 +410,25 @@ pager a key.
 `match_candidates` — opt-in behind `?matcher=sql` and off by default —
 and it reads an RPC whose ordering has not been checked.
 
+**Then it caught a second one, in the fix itself.** Econ came back
+`asked=76 embedded=3 alreadyEmbedded=73`. The pre-filter read was scoped
+by `sport_tag` and the confirmation by id, so the two disagreed for
+every market **stored under one category and fetched under another** —
+Kalshi files its crypto series under Financials, which the econ run
+sweeps, so rows stored as `crypto` read as never-embedded under `econ`.
+
+**An embedding belongs to an (id, title); the row's category has nothing
+to do with whether its vector is valid.** The scoping was a fix aimed at
+the wrong thing: the original bug was a SILENT TRUNCATION, and the cure
+for that is to stop truncating and to say so when it happens, not to
+read less and hope. The read is unscoped again, keyset-paged, capped
+above the whole catalogue, and loud if it ever reaches the cap.
+
+Worth keeping as a shape: that defect would have re-fired **every run
+forever** while costing nothing, because the confirmation was already
+stopping the spend. A daily alarm nobody can clear is the same failure
+as a counter that can only be non-zero — it teaches you to ignore it.
+
 `force=1` skips the confirmation, because re-embedding everything is
 what it is for.
 
