@@ -132,7 +132,14 @@ jobs:
             # workflow is already handling. Sports still matches here:
             # it is an exact join, not a similarity sweep, and it is
             # fast.
-            case " mlb nfl nba nhl soccer " in
+            # ncaaf belongs HERE and was in neither workflow: this list
+            # said "mlb nfl nba nhl soccer" and match-markets.yml does
+            # "politics econ crypto", so college football fell through
+            # the gap between them. Its 219 pairs were written by hand
+            # when the league was wired up and nothing has rebuilt them
+            # since — which on a weekly slate means the pairs decay into
+            # finished games while the new fixtures never join.
+            case " mlb nfl ncaaf nba nhl soccer " in
               *" $CAT "*) ;;
               *)
                 echo "$CAT: fetch done — matching runs in match-markets.yml"
