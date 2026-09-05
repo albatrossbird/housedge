@@ -697,9 +697,16 @@ async function attachKalshiSeriesMeta(rows, sport = "all") {
     }
   }
 
-  seriesMetaStats.series = series.length;
-  seriesMetaStats.fromStore = series.length - toFetch.length;
-  seriesMetaStats.fetched = toFetch.length;
+  // ACCUMULATE, do not overwrite. Politics fetches TWO Kalshi
+  // categories (Politics and Elections) and so calls this twice, and
+  // assigning here meant the reported split was whichever category ran
+  // last while `status` counted both — which is how a run reported 368
+  // fetched beside 386 successes, a total larger than its own input.
+  // Same class as the Set that collapsed 79 frozen series into one
+  // null: a diagnostic that cannot represent N is worse than none.
+  seriesMetaStats.series += series.length;
+  seriesMetaStats.fromStore += series.length - toFetch.length;
+  seriesMetaStats.fetched += toFetch.length;
   seriesMetaStats.status = { ...seriesMetaStatus };
 
   for (const r of rows) {
@@ -1248,6 +1255,15 @@ async function clearPairsForKalshiIds(kalshiIds) {
 
 // ── Main handler ───────────────────────────────────────────────
 export default async function handler(req, res) {
+  // Module scope survives a warm serverless container, so counters that
+  // accumulate within a request would double across two. Reset at the
+  // door rather than at each call site, which is what let them be
+  // overwritten instead of summed in the first place.
+  seriesMetaStats.series = 0;
+  seriesMetaStats.fromStore = 0;
+  seriesMetaStats.fetched = 0;
+  for (const k of Object.keys(seriesMetaStatus)) seriesMetaStatus[k] = 0;
+
   const force     = req.query.force     === "1";
   const matchOnly = req.query.matchonly === "1";
   // Fetch, store and embed, then stop before matching.

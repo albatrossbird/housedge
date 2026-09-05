@@ -274,6 +274,24 @@ Every counter in the response was healthy, because **none of them
 measured time**. `timingsMs` in the fetchonly response exists so the
 next one is a reading rather than a theory.
 
+**Verified 2026-09-05** on a `soccer nfl ncaaf politics` run plus
+prune: the whole job took **5m31s**, politics fetch **86-109s** against
+the 280s that used to time out, prune scanned **106,729 rows in 38s**,
+soccer upserted **0** (`poly dropped (no Kalshi side): soccer=9660`),
+and ncaaf wrote **317 pairs**. Politics splits as roughly
+`venueFetch=16-27s shape=27-57s marketsUpsert=28-35s embed=15-21s` —
+nothing near the ceiling, on a complete sweep.
+
+**The store seed converges over runs, not in one.** Measured across
+three: `99 -> 180 -> 331` series read from the store. Every lookup
+succeeds — `seriesMeta status: ok=386`, no 404s and no throttling —
+so the slow climb is not failures being retried. **Do not theorise
+from the split alone**: the counter was assigned rather than summed,
+and politics calls the attach twice (Politics and Elections are two
+Kalshi categories), so the reported `fetched` was one category's while
+`status` counted both. A run reporting `368 fetched` beside `386 ok`
+is that bug, not a fact about Kalshi.
+
 Three independent causes, all fixed:
 
 1. **2,298 HTTP calls for facts we already had.** `series_slug` and
@@ -326,6 +344,16 @@ Three independent causes, all fixed:
    `fetchAllRows` in `embed.js` still pages by OFFSET. It is the same
    latent bug and has not bitten yet only because its reads are
    narrower.
+
+4. **College football was matched by neither workflow.**
+   `discover-markets.yml` ran its sports match stage for
+   `mlb nfl nba nhl soccer` and `match-markets.yml` runs
+   `politics econ crypto`, so `ncaaf` fell through the gap between the
+   two lists. Its pairs were written by hand when the league was wired
+   up and nothing had rebuilt them since — on a weekly slate that means
+   the stored pairs decay into finished games while each new fixture
+   never joins. Found only by reading the workflow to add logging, not
+   by any counter.
 
 ### Retention
 
