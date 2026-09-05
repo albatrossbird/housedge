@@ -855,6 +855,33 @@ lines at 86px on a 375px screen. The "widest book" caption's
 `paddingLeft` tracks that width plus the row gap, or it stops lining up
 with where the bars start.
 
+### /api/refresh is the exception, and deliberately so
+
+Every other job route 401s the moment `CRON_SECRET` is set. This one
+does not, because **the browser calls it**: `pages/index.js` requests
+an on-demand read whenever what is on screen is over
+`ON_DEMAND_AFTER_SECONDS` old. Gating it identically would have flipped
+price freshness from ~20 seconds to whatever the throttled cron
+manages — 45 minutes to 3.5 hours — the moment the secret was set, and
+silently, because on-demand failure is silent by design.
+
+So an unauthenticated caller is **allowed and pays the cooldown**:
+`effectiveIfStale()` floors `ifStale` at 180s for them. The ↻ button
+still refreshes whenever the prices are genuinely stale; what it cannot
+do is force a venue read in a loop. Only a credentialed caller gets
+`ifStale=0`.
+
+**The floor applies whether or not one was asked for.** Omitting
+`ifStale` entirely would otherwise buy an unconditional venue sweep,
+which is precisely the thing being bounded — and it is the case a naive
+implementation gets wrong. `scripts/cron-auth.test.mjs` pins it, along
+with the requirement that nothing changes at all while `CRON_SECRET` is
+unset.
+
+The routes that spend money have no such exception: `/api/embed`
+(Voyage), `/api/v2/extract` and `/api/v2/extract-eval` (Anthropic), and
+the destructive `/api/prune` all close completely.
+
 ### Job routes are gated, including the ones that spend money
 
 `lib/cronAuth.js` covered `/api/refresh`, `/api/embed` and `/api/prune`
