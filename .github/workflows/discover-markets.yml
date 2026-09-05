@@ -85,6 +85,11 @@ jobs:
             # `fetched` climbing back toward `series` means the seed
             # read is failing and the run is about to get slow.
             jq -r '(.seriesMeta // {}) | select(.series != null) | "  seriesMeta: \(.series) series (\(.fromStore) stored, \(.fetched) fetched)"' "fetch-$CAT.json" || true
+            # WHY a lookup came back empty. `throttled` is the one that
+            # means the run is fighting a rate limit and losing Kalshi
+            # links for every market under those series; `notFound` and
+            # `noTitle` are real answers that no retry can improve.
+            jq -r '((.seriesMeta // {}).status // {}) | to_entries | map(select(.value > 0)) | select(length>0) | "  seriesMeta status: " + (map("\(.key)=\(.value)") | join(" "))' "fetch-$CAT.json" || true
 
             # A sports tag whose Kalshi side is empty is not stored.
             # Soccer was 9,646 rows a run for zero pairs. Named, because
