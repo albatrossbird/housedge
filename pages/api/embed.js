@@ -15,6 +15,7 @@ import { scalarSignaturesCompatible } from "../../lib/v2/claims.js";
 import {
   kalshiGameKey, polyGameKey, NAME_KEYED_LEAGUES,
   nameGameKey, kalshiEventOf, kalshiGameDate, polyGameDate,
+  WEEKLY_LEAGUES, nextDayGameKey,
 } from "../../lib/sportsKeys.js";
 import { fetchUsGameMarket, usLeagueFor, fetchPolymarketUs, fetchUsEventSlugs, toMarketRow, POLY_US_PLATFORM } from "../../lib/polymarketUs.js";
 // Matching lives in lib/ so this route and scripts/match-category.mjs
@@ -190,6 +191,17 @@ async function fetchAllRows(buildQuery, { pageSize = 1000, maxRows = 60000, erro
     out.push(...data);
     if (data.length < size) break;
     from += size;
+  }
+  // HITTING THE CAP IS A TRUNCATION, NOT AN ANSWER.
+  //
+  // This returned a short list indistinguishable from a complete one,
+  // and the embedded-titles read walked straight into it: past 60,000
+  // rows every market read as never-embedded, so it was re-embedded
+  // every run and embedRemaining never converged. Say so, in the shape
+  // every other read here uses, so a caller that passes `errors` finds
+  // out rather than believing the tail does not exist.
+  if (out.length >= maxRows && errors) {
+    errors.push(`fetchAllRows: hit maxRows cap of ${maxRows}; the read is TRUNCATED and rows beyond it are missing, not absent`);
   }
   return out;
 }
@@ -471,13 +483,47 @@ function matchSportsMarkets(kalshiMarkets, polyMarkets, sportTag) {
 
   const matched = [];
   diagnostics.joinedByVenue = {};
+
+  // EXACT FIRST, EVERY GAME, BEFORE ANY RETRY.
+  //
+  // The one-day retry below is only sound against Polymarket rows that
+  // no exact key wants. Interleaving the two passes would let an early
+  // Kalshi row's retry claim the game a later row matches exactly —
+  // which on a daily sport is Monday's ticket paired to Tuesday's book.
+  const claimed = new Set();
+  for (const [key] of bySide) {
+    for (const venue of ["polymarket", POLY_US_PLATFORM]) {
+      if (polyByKey.has(`${key}|${venue}`)) claimed.add(`${key}|${venue}`);
+    }
+  }
+
+  const weekly = WEEKLY_LEAGUES.has(sportTag);
+  diagnostics.joinedNextDay = 0;
+
   for (const [key, km] of bySide) {
     let any = false;
     for (const venue of ["polymarket", POLY_US_PLATFORM]) {
-      const pm = polyByKey.get(`${key}|${venue}`);
+      let pm = polyByKey.get(`${key}|${venue}`);
+      let nextDay = false;
+
+      // Kalshi dates a game in US Eastern, Polymarket (for these
+      // leagues) in UTC, so a prime-time kickoff lands a day apart —
+      // see WEEKLY_LEAGUES. Only for a league that plays weekly, only
+      // when the exact key found nothing, and only against a row no
+      // exact key claims.
+      if (!pm && weekly) {
+        const alt = nextDayGameKey(key);
+        const altMapKey = alt ? `${alt}|${venue}` : null;
+        if (altMapKey && !claimed.has(altMapKey)) {
+          pm = polyByKey.get(altMapKey);
+          if (pm) { nextDay = true; claimed.add(altMapKey); }
+        }
+      }
+
       if (!pm) continue;
       any = true;
       diagnostics.joined++;
+      if (nextDay) diagnostics.joinedNextDay++;
       diagnostics.joinedByVenue[venue] = (diagnostics.joinedByVenue[venue] || 0) + 1;
       matched.push({
         kalshi_id:     km.id,
@@ -1600,8 +1646,26 @@ export default async function handler(req, res) {
     // Selecting on embedding IS NOT NULL makes the set mean what the
     // filter below assumes, and re-embeds anything that lost or never
     // got one. Sports rows are excluded regardless, so they do not churn.
-    const existing = await fetchAllRows(() => supabase
-      .from("markets").select("id, title").not("embedding_v", "is", null));
+    //
+    // SCOPED TO THE CATEGORY, and that is not an optimisation.
+    //
+    // This read was unscoped, so it asked for every embedded row on the
+    // exchange — econ 28,797 + politics 26,239 + crypto 22,684 — while
+    // fetchAllRows stops at maxRows and returns what it has, silently.
+    // Past that cap every remaining row reads as "never embedded", so
+    // it is re-embedded, and which rows fall past it moves with page
+    // order. That is exactly the shape politics showed: embedRemaining
+    // went 4233 -> 3692 -> 4384 across three consecutive runs, spending
+    // 1,200 Voyage embeddings each time and converging on nothing.
+    //
+    // A category run only ever asks needsEmbedding() about rows in that
+    // category, so the other 50,000 were bought to be looked up never.
+    const existingErrors = [];
+    const existing = await fetchAllRows(() => {
+      let q = supabase.from("markets").select("id, title").not("embedding_v", "is", null);
+      if (sport !== "all") q = q.eq("sport_tag", sport);
+      return q;
+    }, { errors: existingErrors });
     const embeddedTitles = new Map((existing || []).map(r => [r.id, r.title]));
     // An embedding belongs to a TITLE, so a row whose title changed has
     // a stale one. Keying only on id meant a corrected title kept the
@@ -1773,6 +1837,10 @@ export default async function handler(req, res) {
         // them measured time.
         timingsMs: { ...timer.get() },
         seriesMeta: { ...seriesMetaStats },
+        // A truncated embedded-titles read makes every row past the cap
+        // look unembedded, which is a bill in Voyage calls, not a
+        // cosmetic gap. Never let it be empty-by-construction.
+        ...(existingErrors.length ? { embeddedReadErrors: existingErrors.slice(0, 3) } : {}),
         totalKalshi: kalshiRaw.length,
         // Per series, so a truncated league is visible as a number
         // rather than as a quietly small pair count downstream.

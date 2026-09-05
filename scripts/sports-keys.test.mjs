@@ -126,5 +126,42 @@ eq(polyGameKey("nfl-super-bowl-champion-2027"), null, "futures slug does not key
   eq(outcomeIndexByName("Rutgers", ["San Jose State", "Eastern Michigan"]), null, "no match returns null, never a guess");
 }
 
+// ── Weekly-league next-day retry ────────────────────────────────────
+//
+// Kalshi dates an NFL game in US Eastern, Polymarket in UTC, so a
+// prime-time kickoff (8:15pm ET = 00:15 UTC next day) lands a day
+// apart on the two venues. Measured on the live slate: 7 of 32 NFL
+// games, every one +1 day, every one a night kickoff.
+//
+// The retry must NOT be generalisable, and these cases are why: MLB
+// joins 41/41 on the ticker date today, and its teams play the same
+// opponent on consecutive days, so a +1 retry there could pair
+// Monday's ticket with Tuesday's book.
+{
+  const { WEEKLY_LEAGUES, nextIsoDate, nextDayGameKey } = await import("../lib/sportsKeys.js");
+
+  eq(nextIsoDate("2026-09-21"), "2026-09-22", "next day, ordinary");
+  eq(nextIsoDate("2026-12-31"), "2027-01-01", "next day across a year");
+  eq(nextIsoDate("2026-02-28"), "2026-03-01", "next day across a month");
+  eq(nextIsoDate("not-a-date"), null, "next day rejects nonsense");
+  // Built with Date.UTC, so it cannot shift on a DST changeover.
+  eq(nextIsoDate("2026-03-08"), "2026-03-09", "next day across US DST start");
+  eq(nextIsoDate("2026-11-01"), "2026-11-02", "next day across US DST end");
+
+  eq(nextDayGameKey("2026-09-21|LA+NYG"), "2026-09-22|LA+NYG", "game key rolls the date, keeps the teams");
+  eq(nextDayGameKey("2026-09-13|DAL+NYG"), "2026-09-14|DAL+NYG", "SNF key rolls forward");
+  eq(nextDayGameKey("garbage"), null, "game key with no date separator");
+  eq(nextDayGameKey("|LA+NYG"), null, "empty date is not a date");
+
+  eq(WEEKLY_LEAGUES.has("nfl"), true, "nfl plays weekly");
+  eq(WEEKLY_LEAGUES.has("ncaaf"), true, "college football plays weekly");
+  // The three that would be unsafe. A series against the same opponent
+  // on consecutive days is normal in all of them.
+  eq(WEEKLY_LEAGUES.has("mlb"), false, "MLB must NOT retry a day out");
+  eq(WEEKLY_LEAGUES.has("nba"), false, "NBA must NOT retry a day out");
+  eq(WEEKLY_LEAGUES.has("nhl"), false, "NHL must NOT retry a day out");
+}
+console.log("weekly-league next-day cases correct");
+
 console.log(bad ? `${bad} failing` : "all sports-key cases correct");
 process.exit(bad ? 1 : 0);

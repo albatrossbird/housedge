@@ -675,6 +675,65 @@ reading it is how this league was first, wrongly, written off as
 unlisted by Polymarket. `scripts/sports-keys.test.mjs` pins the three
 collisions and the near-misses a fuzzy matcher paired wrongly.
 
+### Prime-time games date a day apart on the two venues
+
+**Kalshi dates a game by its US EASTERN date; Polymarket dates the same
+game by its UTC one.** An afternoon kickoff agrees. A 8:15pm ET kickoff
+is 00:15 UTC the NEXT DAY, so Thursday Night, Sunday Night and Monday
+Night Football were unjoinable as a class — measured on the live slate,
+**7 of 32 NFL games**, every one +1 day, every one with a UTC kickoff
+between 00:15 and 00:35, while all 25 that joined kick off between
+17:00 and 20:25 UTC. They are also the most-watched games of the week.
+
+**Do not "fix the timezone properly" — the measurement says it breaks
+MLB.** MLB joins **41 of 41** on the ticker date as it stands. Rebuilding
+the key from Kalshi's own `occurrence_datetime` scores 39/41 and from
+`close_time - 48h` scores 23/41, so either principled-looking rule
+*loses* games that work today. Polymarket's date convention differs per
+league — a fact about their sports feeds, not something derivable.
+
+So `WEEKLY_LEAGUES` (nfl, ncaaf) get a **one-day retry**, and the list
+is the safety argument: a retry is only sound where a fixture cannot be
+adjacent to another meeting of the same two teams. NFL and college
+football play once a week; **MLB, NBA and NHL play series on
+consecutive days**, where +1 could pair Monday's ticket with Tuesday's
+book. `scripts/sports-keys.test.mjs` pins all three exclusions.
+
+Two further guards, both load-bearing:
+
+- **Every exact key is claimed before any retry runs.** Interleaving the
+  passes would let an early Kalshi row's retry take the game a later row
+  matches exactly.
+- **A retry only takes a Polymarket row no exact key wants.**
+
+`joinedNextDay` in `matchDiagnostics` counts them, so a venue changing
+convention shows up as a number rather than as a quietly smaller slate.
+Verified: NFL 25 exact + 7 next-day = **32/32**, MLB **41 exact, 0
+next-day**, unchanged.
+
+### An unscoped read hit the row cap and re-embedded forever
+
+`embedRemaining` for politics went **4233 -> 3692 -> 4384** across three
+consecutive runs, spending 1,200 Voyage embeddings each time and
+converging on nothing.
+
+The embedded-titles read — the one that decides `needsEmbedding` — had
+**no `sport_tag` filter**, so it asked for every embedded row on the
+exchange (econ 28,797 + politics 26,239 + crypto 22,684) against
+`fetchAllRows`'s `maxRows` of 60,000. Past the cap it returned what it
+had **silently**, so every row beyond read as never-embedded, was
+re-embedded, and *which* rows fell past it moved with page order — hence
+a number that wanders instead of falling.
+
+A category run only ever asks about rows in its own category, so the
+other ~50,000 were paid for and never looked up. It is scoped now.
+
+**Hitting the cap is a truncation, not an answer**, and `fetchAllRows`
+now says so through the `errors` channel it already had —
+`embeddedReadErrors` in the response. A read that cannot distinguish
+"the tail does not exist" from "I stopped looking" is the same class as
+the `Set` that collapsed 79 frozen series into one null.
+
 ### Implausible pairs are hidden, not just unflagged
 
 **Two venues do not disagree by 15 points on the same claim.** The
