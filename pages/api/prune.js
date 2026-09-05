@@ -36,13 +36,26 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const DEFAULT_DAYS = 14;
 const CHUNK = 200;
 
-async function pageAll(build, { pageSize = 1000, maxRows = 200000 } = {}) {
+// KEYSET, NOT OFFSET. `.range(from, from+size)` is LIMIT/OFFSET, and an
+// OFFSET makes Postgres scan and discard every row before the window —
+// so paging a 63,000-row table costs O(n²) in total and the last pages
+// are the slowest. That is why this read worked for months and then
+// started returning `canceling statement due to statement timeout`: the
+// table grew past what the final offsets could do inside the limit.
+//
+// Ordering by the key and asking for `key > last` reads each page from
+// an index seek instead, so page 60 costs what page 1 costs. Halving on
+// error is kept for payload-size failures, which are a different thing
+// and were the original reason it exists.
+async function pageAll(build, { key = "id", pageSize = 1000, maxRows = 200000 } = {}) {
   const out = [];
   let size = pageSize;
-  let from = 0;
+  let last = null;
   const errors = [];
-  while (from < maxRows) {
-    const { data, error } = await build().range(from, from + size - 1);
+  while (out.length < maxRows) {
+    let q = build().order(key, { ascending: true }).limit(size);
+    if (last != null) q = q.gt(key, last);
+    const { data, error } = await q;
     if (error) {
       if (size > 100) { size = Math.floor(size / 2); continue; }
       errors.push(error.message || JSON.stringify(error));
@@ -51,7 +64,12 @@ async function pageAll(build, { pageSize = 1000, maxRows = 200000 } = {}) {
     if (!data || data.length === 0) break;
     out.push(...data);
     if (data.length < size) break;
-    from += size;
+    last = data[data.length - 1][key];
+    // A key that is not actually on the row would loop forever.
+    if (last == null) {
+      errors.push(`pageAll: key "${key}" missing from row; cannot page safely`);
+      break;
+    }
   }
   return { rows: out, errors };
 }
@@ -67,7 +85,9 @@ export default async function handler(req, res) {
   try {
     // Everything the site renders. Read first and in full — a partial
     // read here would put live rows in the delete set.
-    const pairsRead = await pageAll(() => supabase.from("pairs").select("kalshi_id, polymarket_id"));
+    // `id` is selected only so the keyset pager has something to seek
+    // on; the protection set is built from the other two columns.
+    const pairsRead = await pageAll(() => supabase.from("pairs").select("id, kalshi_id, polymarket_id"));
     if (pairsRead.errors.length) {
       return res.status(500).json({ error: "could not read pairs; refusing to prune", details: pairsRead.errors });
     }
