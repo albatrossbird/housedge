@@ -21,6 +21,7 @@ import { fetchUsGameMarket, usLeagueFor, fetchPolymarketUs, fetchUsEventSlugs, t
 // cannot drift — see the note at the top of that file.
 import { matchNonSportsMarkets, assignGreedy, cosineSimilarity, explainKalshiRow } from "../../lib/matcher.js";
 import { cronAuthorized } from "../../lib/cronAuth.js";
+import { seriesTickerOf } from "../../lib/kalshiTicker.js";
 import { buildSeriesGate, allowEmbed } from "../../lib/embedGate.js";
 
 const supabase = createClient(
@@ -572,11 +573,89 @@ const num = v => (v == null || v === "" ? null : (isFinite(Number(v)) ? Number(v
 // finished rows rather than inside the row builders so the /series
 // lookups happen once per distinct series instead of once per market —
 // KXMLBGAME alone is 74 markets behind one series.
-async function attachKalshiSeriesMeta(rows) {
+// BOUNDED, because this is one HTTP call per distinct series and
+// politics has 2,298 of them against economics' 793. Promise.all over
+// that many is an unbounded burst at an API that rate-limits datacenter
+// IPs — the same mistake /api/refresh already fixed once, where a
+// widened poll list took 16 straight 429s.
+const SERIES_META_CONCURRENCY = 8;
+const seriesMetaStats = { series: 0, fromStore: 0, fetched: 0 };
+
+// Where a fetch run actually spends its 300s. Guessing at that is how
+// the politics timeout survived a day: every counter in the response
+// looked healthy and none of them measured time.
+function makeTimer() {
+  const t = {};
+  let last = Date.now();
+  return {
+    mark(name) { t[name] = (t[name] || 0) + (Date.now() - last); last = Date.now(); },
+    get() { return t; },
+  };
+}
+
+// What we already know, so a run does not re-ask Kalshi 2,298 times.
+//
+// `series_slug` and `fee_multiplier` are per-SERIES facts that we store
+// on every market row, and they change roughly never — a series title
+// is renamed about as often as the series is created. Politics carries
+// 2,298 distinct series against economics' 793, so a cold run there is
+// 2,298 HTTP calls to /series/<ticker> at an endpoint that rate-limits
+// datacenter IPs, and that is where the 280s fetch timeout went.
+//
+// One paged select of three narrow columns replaces nearly all of them.
+// It is keyed on a NON-NULL slug: a series we asked about and got
+// nothing for is retried next run rather than cached as absent, so a
+// series that was missing its slug heals instead of staying broken.
+// Both values are taken from the SAME stored row, or a series could end
+// up with one run's slug and another's fee multiplier.
+async function storedSeriesMeta(sport) {
+  const rows = await fetchAllRows(() => {
+    let q = supabase.from("markets")
+      .select("id, series_slug, fee_multiplier")
+      .eq("platform", "kalshi")
+      .not("series_slug", "is", null);
+    if (sport && sport !== "all") q = q.eq("sport_tag", sport);
+    return q;
+  });
+  const out = new Map();
+  for (const r of rows || []) {
+    const t = seriesTickerOf(r.id);
+    if (t && !out.has(t)) out.set(t, { feeMultiplier: r.fee_multiplier ?? null, slug: r.series_slug });
+  }
+  return out;
+}
+
+async function attachKalshiSeriesMeta(rows, sport = "all") {
   const series = [...new Set(rows.map(r => String(r.id).split("-")[0]).filter(Boolean))];
-  const metas = new Map(
-    await Promise.all(series.map(async t => [t, await seriesMeta(t)]))
-  );
+
+  // A failure here must cost speed, not correctness: fall through to
+  // asking Kalshi for everything, which is what this did before.
+  let known = new Map();
+  try { known = await storedSeriesMeta(sport); } catch { known = new Map(); }
+
+  const metas = new Map();
+  const toFetch = [];
+  for (const t of series) {
+    const k = known.get(t);
+    if (k) metas.set(t, k);
+    else toFetch.push(t);
+  }
+
+  // BOUNDED, because this is one HTTP call per distinct series against
+  // an API that rate-limits datacenter IPs. Promise.all over 2,298 of
+  // them is an unbounded burst — the same mistake /api/refresh already
+  // fixed once.
+  for (let i = 0; i < toFetch.length; i += SERIES_META_CONCURRENCY) {
+    const chunk = toFetch.slice(i, i + SERIES_META_CONCURRENCY);
+    for (const [t, m] of await Promise.all(chunk.map(async t => [t, await seriesMeta(t)]))) {
+      metas.set(t, m);
+    }
+  }
+
+  seriesMetaStats.series = series.length;
+  seriesMetaStats.fromStore = series.length - toFetch.length;
+  seriesMetaStats.fetched = toFetch.length;
+
   for (const r of rows) {
     const m = metas.get(String(r.id).split("-")[0]) || {};
     r.fee_multiplier = m.feeMultiplier ?? null;
@@ -777,7 +856,7 @@ async function fetchKalshiByCategory(kalshiCategory, sportTag) {
     }
   }
 
-  await attachKalshiSeriesMeta(out);
+  await attachKalshiSeriesMeta(out, sportTag);
   kalshiSweep.push({
     category: kalshiCategory,
     pages: sweep.pages,
@@ -920,7 +999,7 @@ async function fetchKalshiMarkets(sportFilter = "all") {
         }));
     })
   );
-  return attachKalshiSeriesMeta(results.flat());
+  return attachKalshiSeriesMeta(results.flat(), sportFilter);
 }
 
 // Both Polymarket exchanges. Reads that filter platform = 'polymarket'
@@ -1377,10 +1456,42 @@ export default async function handler(req, res) {
     }
 
     // NORMAL MODE: fetch markets, store in Supabase, then match
+    const timer = makeTimer();
     const [kalshiRaw, polyRaw] = await Promise.all([
       fetchKalshiMarkets(sport),
       fetchPolymarkets(sport),
     ]);
+    timer.mark("venueFetch");
+
+    // ── A sport with no Kalshi side is not ingested ────────────────
+    //
+    // Soccer stored 9,646 Polymarket rows on every run and produced
+    // ZERO pairs, because `KXWCGAME` — the only soccer series wired up
+    // — has no open markets and the leagues that do (KXMLSGAME,
+    // KXEPLGAME, KXLALIGAGAME, KXSERIEAGAME) are three-way and
+    // unmatched by the two-team join. A fifth of the catalogue was
+    // paying storage against a side that does not exist.
+    //
+    // The rule is general rather than a soccer special case, so NHL
+    // out of season costs nothing either and BOTH resume on their own
+    // the day Kalshi lists a game: sports are matched by an exact join
+    // on the game identifier, so a Polymarket row with no Kalshi
+    // counterpart is not a candidate for anything. That is what makes
+    // this safe HERE and wrong for the non-sports categories, where the
+    // unpaired rows ARE the pool the embedding matcher draws from.
+    //
+    // Skipping is not deleting: the rows already stored keep their
+    // titles and stay searchable, they simply stop having `updated_at`
+    // refreshed — so /api/prune reclaims them on the "not seen in 14
+    // days" rule that already exists, rather than this route deleting
+    // anything.
+    const kalshiSportTags = new Set(kalshiRaw.map(r => r.sport_tag));
+    const droppedNoKalshiSide = {};
+    const polyKept = polyRaw.filter(r => {
+      if (!SPORTS_TAGS.has(r.sport_tag) || kalshiSportTags.has(r.sport_tag)) return true;
+      droppedNoKalshiSide[r.sport_tag] = (droppedNoKalshiSide[r.sport_tag] || 0) + 1;
+      return false;
+    });
 
     // Polymarket US is a separate exchange with its own books, and a US
     // account can only trade that one — so its games are fetched
@@ -1388,7 +1499,7 @@ export default async function handler(req, res) {
     // against whichever venues list it.
     let usGames = { markets: [], diagnostics: null };
     if (SPORTS_TAGS.has(sport)) {
-      usGames = await fetchPolymarketUsGames(kalshiRaw, polyRaw, sport);
+      usGames = await fetchPolymarketUsGames(kalshiRaw, polyKept, sport);
     } else if (sport !== "all") {
       // Non-sports US markets DO come back from the list endpoints, so
       // these arrive in bulk rather than one slug at a time. They are
@@ -1410,7 +1521,7 @@ export default async function handler(req, res) {
       };
     }
 
-    const allMarkets = [...kalshiRaw, ...polyRaw, ...usGames.markets];
+    const allMarkets = [...kalshiRaw, ...polyKept, ...usGames.markets];
 
     // Find markets not yet in Supabase
     // Paged. As a plain select this capped at 1000 ids, so every market
@@ -1542,7 +1653,9 @@ export default async function handler(req, res) {
     // on every non-force run. The follow-up embedding upsert below sets
     // it for whichever rows are actually being (re-)embedded this run.
     const toUpsert = allMarkets;
+    timer.mark("shape");
     const marketsUpsert = await upsertRows("markets", toUpsert, "id");
+    timer.mark("marketsUpsert");
 
     // Embed only non-sports markets (sports use structured matching)
     let embedded = 0;
@@ -1574,6 +1687,7 @@ export default async function handler(req, res) {
       embeddingUpsert = await upsertRows("markets", records, "id");
       embedded = toEmbed.length;
     }
+    timer.mark("embed");
 
     // Run matching
     const clearErrors = [];
@@ -1592,11 +1706,21 @@ export default async function handler(req, res) {
         embedRemaining,
         embedGate,
         kalshiSweep: [...kalshiSweep],
+        // WHERE THE 300s WENT. The politics fetch timed out for a day
+        // with every other counter reporting health, because none of
+        // them measured time.
+        timingsMs: { ...timer.get() },
+        seriesMeta: { ...seriesMetaStats },
         totalKalshi: kalshiRaw.length,
         // Per series, so a truncated league is visible as a number
         // rather than as a quietly small pair count downstream.
         kalshiPerSeries: { ...kalshiPages },
-        totalPoly: polyRaw.length,
+        totalPoly: polyKept.length,
+        // Both numbers, named. A counter that quietly shrinks teaches
+        // you to distrust it; one that says what it dropped and why is
+        // how a league coming back into season stays visible.
+        polyFetched: polyRaw.length,
+        polyDroppedNoKalshiSide: droppedNoKalshiSide,
         totalPolyUs: usGames.markets.length,
         writes: {
           marketsUpserted: marketsUpsert.count,
@@ -1701,7 +1825,9 @@ export default async function handler(req, res) {
       embedGate,
       newPairs:    newPairs.length,
       totalKalshi: kalshiRaw.length,
-      totalPoly:   polyRaw.length,
+      totalPoly:   polyKept.length,
+      polyFetched: polyRaw.length,
+      polyDroppedNoKalshiSide: droppedNoKalshiSide,
       totalPolyUs: usGames.markets.length,
       ...(usGames.diagnostics ? { polyUsDiagnostics: usGames.diagnostics } : {}),
       totalPairs:  count || 0,

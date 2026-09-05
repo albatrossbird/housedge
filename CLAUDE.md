@@ -265,6 +265,68 @@ is blocked — `lib/matcher.js` reads `m.embedding` and is the live
 matching path for both the route and the Actions workflow. Dropping it
 today stops every non-sports category from matching.
 
+### The discovery job, and why it took 280 seconds
+
+The daily run failed outright on 2026-09-04: politics returned
+`curl: (28) Operation timed out after 280002 ms with 0 bytes received`,
+and prune answered `canceling statement due to statement timeout`.
+Every counter in the response was healthy, because **none of them
+measured time**. `timingsMs` in the fetchonly response exists so the
+next one is a reading rather than a theory.
+
+Three independent causes, all fixed:
+
+1. **2,298 HTTP calls for facts we already had.** `series_slug` and
+   `fee_multiplier` are per-SERIES and change roughly never, but the
+   cache is module-scoped and a serverless invocation handles one
+   request — so politics re-asked `/series/<ticker>` for all 2,298 of
+   its series on every run, against an API that rate-limits datacenter
+   IPs, and fired them through an unbounded `Promise.all`. It is now
+   bounded at `SERIES_META_CONCURRENCY = 8` **and** seeded from
+   `storedSeriesMeta()`, one paged select of three narrow columns.
+   Keyed on a **non-null** slug, so a series we asked about and got
+   nothing for is retried rather than cached as absent.
+   `seriesMeta: { series, fromStore, fetched }` reports the split.
+
+2. **Soccer ingested 9,646 Polymarket rows per run for ZERO pairs.**
+   `KXWCGAME` is the only soccer series wired up and has no open
+   markets; the leagues that do (`KXMLSGAME`, `KXEPLGAME`,
+   `KXLALIGAGAME`, `KXSERIEAGAME`) are three-way and unmatched by the
+   two-team join. A fifth of the catalogue was paying storage against a
+   Kalshi side that does not exist. A sports tag whose Kalshi side comes
+   back empty is now not stored at all.
+
+   **The rule is general, not a soccer special case** — NHL out of
+   season costs nothing either, and both resume on their own the day
+   Kalshi lists a game. It is safe *here* and would be wrong for the
+   non-sports categories: sports match by an exact join on the game
+   identifier, so a Polymarket row with no Kalshi counterpart is a
+   candidate for nothing, whereas in econ/crypto/politics the unpaired
+   rows **are** the pool the embedding matcher draws from.
+
+   **Skipping is not deleting.** Rows already stored keep their titles
+   and stay searchable; they simply stop having `updated_at` refreshed,
+   so `/api/prune` reclaims them on the existing "not seen in 14 days"
+   rule. This route deletes nothing.
+
+   `polyFetched` and `polyDroppedNoKalshiSide` are reported beside
+   `totalPoly`, because a counter that quietly shrinks teaches you to
+   distrust it.
+
+3. **`pageAll` in prune was OFFSET paging.** `.range(from, from+size)`
+   is LIMIT/OFFSET, and an OFFSET makes Postgres scan and discard every
+   row before the window — so paging a 63,000-row table costs O(n²) and
+   the LAST pages are the slowest. That is why the read worked for
+   months and then began timing out: the table grew past what the final
+   offsets could do inside the limit. Keyset paging (`order(key)` +
+   `gt(key, last)`) reads each page from an index seek, so page 60
+   costs what page 1 costs. Halving on error is kept — it is for
+   payload-size failures, which are a different thing.
+
+   `fetchAllRows` in `embed.js` still pages by OFFSET. It is the same
+   latent bug and has not bitten yet only because its reads are
+   narrower.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
