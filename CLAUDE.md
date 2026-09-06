@@ -546,6 +546,27 @@ Schema is `supabase/migrations/0016_m15_recorder.sql`. Writes need
 which credential they are using, because an anon run is rejected by RLS
 and would otherwise look like a run with nothing to write.
 
+**First backfill, 2026-09-06: 73,718 settled markets in 23 seconds.**
+Crypto series carry ~6,440 each back to 2026-06-30; gold, silver and WTI
+carry 2,493; copper and natgas 628.
+
+**11 of the 26 returned nothing, and that is not a failure.** Kalshi
+registers a series before it ever trades: `KXINX15M`, `KXNDQ15M`,
+`KXEURUSD15M`, `KXADA15M`, `KXPLATINUM15M` and six more return zero
+markets in EVERY status — open, unopened, closed and settled — which is
+the state `KXNHLGAME` sits in out of season. Checked directly rather
+than assumed, and the log now labels them `(not yet listed)` so the next
+reader does not mistake it for a broken fetch. `withHistory` /
+`notYetListed` report the split.
+
+**First live run, same day: `ticks=20 polls=322 quotesWritten=142
+marketsSeen=380 seriesLive=15/26 errors=0`** over four minutes at a 12s
+cadence. The 15 live were the ten 24/7 crypto series plus gold, silver,
+WTI, copper and natgas — commodities open Sunday 22:00 UTC, so a
+weekend run catching them is the schedule working, not a fluke. At that
+rate write-on-change produces roughly 50k rows/day, against ~150k if
+every tick were stored.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
