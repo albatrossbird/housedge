@@ -1127,6 +1127,45 @@ old  min(0.53, 0.545) + min(0.47, 0.455) = 0.9850  -> flagged ARB
 new  0.5388 + 0.4724                     = 1.0112  -> -1.1c, not a trade
 ```
 
+### The edge is priced at a size you could actually fill
+
+`DEFAULT_ORDER_SIZE` (100) is a modelling convention: it exists so
+Kalshi's per-order cent rounding is not charged in full against a single
+contract. It stops being realistic the moment the book holds less than
+that, and on live data that is **302 of 669 legs**.
+
+The error is not academic. The rounded-up cent amortises over the size
+actually traded, so a 4-contract book pays it over 4 rather than 100 —
+measured at up to **0.92¢ per pair**, and enough to flip a real market:
+an econ pair quoted **99.979¢ at the convention size and 100.149¢ at the
+four contracts on offer**. The site was badging that as an arb, and
+there was no size at which it was one.
+
+`tradeableArb()` prices at `min(DEFAULT_ORDER_SIZE, maxContracts)`.
+Only ever **smaller** — past ~100 contracts the rounding is already
+amortised to nothing, so modelling a bigger order changes nothing and
+`maxContracts` above 100 leaves the figure untouched.
+
+- **Live effect: profitable legs 53 -> 52, 284 legs repriced.** Losing
+  one is the point, not a cost — precision over recall, and an edge that
+  exists only at a size nobody can fill is not an edge.
+- **It is less optimistic, not a guarantee.** `maxContracts` is itself an
+  upper bound wherever Polymarket publishes no depth, so `depthKnown`
+  still has to be read.
+- `edgeDollars` multiplies by `maxContracts`, so it was compounding the
+  error: a per-contract edge computed at 100 contracts, scaled by a
+  ceiling of 4. It now scales a figure that is true at the size on offer.
+- `pricedAt` is reported, so the card and the calculator can be **seen**
+  to agree rather than differing by a rounding artefact a reader cannot
+  place. Two prices for one trade, ten pixels apart, costs more trust
+  than the hundredth of a cent between them is worth.
+
+**The rounding penalty is lumpy, not monotonic** — on one fixture it is
++0.25¢ at 1-3 contracts, **exactly 0 at 4**, and +0.107¢ at 7. A test
+fixture that lands on a cent boundary passes while proving nothing;
+`scripts/position-size.test.mjs` therefore asserts the strict case at 7
+and the weak case (`never cheaper`) across a range.
+
 ### Naming the venue is the whole point of the row
 
 The bars read `KALSHI` / `POLY US` / `POLY`. Two labels differing by two

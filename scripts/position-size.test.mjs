@@ -6,7 +6,7 @@
 // cost really does move with size, and it moves most at the sizes a
 // first-time reader types.
 import {
-  positionAtSize, bestArb, kalshiTakerFee, DEFAULT_ORDER_SIZE,
+  positionAtSize, bestArb, tradeableArb, kalshiTakerFee, DEFAULT_ORDER_SIZE,
 } from "../lib/fees.js";
 
 let bad = 0;
@@ -95,6 +95,60 @@ const P = { yesAsk: 0.44, noAsk: 0.46, yesAskSize: null, yesBidSize: null,
   const a = bestArb(K, P);
   const b = bestArb(K, P, { size: DEFAULT_ORDER_SIZE });
   eq(a.r.total, b.r.total, "default size still means DEFAULT_ORDER_SIZE");
+}
+
+// ── tradeableArb: the headline priced at a fillable size ────────────
+{
+  // A THIN book must be priced at what it holds, not at the convention.
+  // n=7, not n=4: at 4 contracts this fixture's fee lands exactly on a
+  // cent boundary and the two sizes agree, so the assertion would pass
+  // while proving nothing. The rounding penalty is real but lumpy —
+  // +0.25c at 1-3 contracts here, 0 at 4, +0.107c at 7.
+  const kThin = { ...K, yesAskSize: 7, yesBidSize: 7 };
+  const at100 = bestArb(kThin, P);
+  const tr = tradeableArb(kThin, P);
+  eq(tr.pricedAt, 7, "thin book is priced at the seven contracts on offer");
+  eq(tr.r.total > at100.r.total, true, "and that costs MORE per pair than the convention size");
+  // Weakly true for EVERY thin book, lumpiness or not: amortising a
+  // rounded-up cent over fewer contracts can never be cheaper.
+  for (const n of [1, 2, 3, 4, 7, 11, 50]) {
+    const kn = { ...K, yesAskSize: n, yesBidSize: n };
+    eq(tradeableArb(kn, P).r.total >= bestArb(kn, P).r.total, true,
+       `a ${n}-contract book is never cheaper per pair than the convention size`);
+  }
+  // The calculator's default and the headline must land on one number,
+  // or the panel shows two prices for the same trade a few pixels apart.
+  const pos = positionAtSize(kThin, P, DEFAULT_ORDER_SIZE);
+  near(pos.costPerPair, tr.r.total, "headline and calculator agree at the tradeable size");
+}
+{
+  // A DEEP book keeps the convention: past ~100 the rounding is already
+  // amortised, so modelling a larger order would change nothing.
+  const kDeep = { ...K, yesAskSize: 50000, yesBidSize: 50000 };
+  eq(tradeableArb(kDeep, P).pricedAt, DEFAULT_ORDER_SIZE, "deep book still priced at the convention");
+  near(tradeableArb(kDeep, P).r.total, bestArb(kDeep, P).r.total, "deep book price is unchanged");
+}
+{
+  // No known ceiling -> nothing to clamp to, so the convention stands.
+  const kNoSize = { ...K, yesAskSize: null, yesBidSize: null };
+  const tr = tradeableArb(kNoSize, P);
+  eq(tr.pricedAt, DEFAULT_ORDER_SIZE, "unknown depth keeps the convention size");
+  eq(tr.maxContracts, null, "and reports no ceiling");
+}
+{
+  // The real case this change exists for: a pair that clears at the
+  // convention size and does NOT clear at the size actually on offer.
+  // Measured live on an econ pair: 99.979c -> 100.149c at 4 contracts.
+  const kEdge = { yesAsk: 0.40, noAsk: 0.99, yesAskSize: 3, yesBidSize: 3, feeMultiplier: 1 };
+  const pEdge = { yesAsk: 0.99, noAsk: 0.57, yesAskSize: null, yesBidSize: null,
+                  feeSchedule: { rate: 0.05, exponent: 1 } };
+  const a = bestArb(kEdge, pEdge), t = tradeableArb(kEdge, pEdge);
+  eq(a.r.profitable && !t.r.profitable, true,
+     "an edge that only exists at unfillable size is no longer called profitable");
+}
+{
+  // An untakeable pair stays null rather than becoming a priced one.
+  eq(tradeableArb({ ...K, yesAsk: null, noAsk: null }, P), null, "no ask yields null");
 }
 
 console.log(bad ? `${bad} failing` : "position-size: all cases pass");
