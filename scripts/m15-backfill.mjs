@@ -59,13 +59,18 @@ const perSeries = [];
 for (const s of series) {
   const rows = [];
   let cursor = "";
+  // PAGES READ, not loop iterations completed. `for (; pages < MAX; pages++)`
+  // left this at 0 for a series that fitted in one page, so copper
+  // reported `settled=628 pages=0` — a counter contradicting the number
+  // beside it, which is worse than no counter.
   let pages = 0;
   let truncated = false;
-  for (; pages < MAX_PAGES; pages++) {
+  for (let i = 0; i < MAX_PAGES; i++) {
     const q = `/markets?status=settled&limit=1000&series_ticker=${encodeURIComponent(s.ticker)}` +
               (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "");
     const r = await kalshiGet(q);
     if (!r.ok) { console.log(`::warning::${s.ticker} page ${pages}: ${r.status || r.error}`); break; }
+    pages++;
     const got = r.body.markets || [];
     for (const m of got) { const row = toM15Row(m, s.ticker); if (row) rows.push(row); }
     cursor = r.body.cursor || "";
@@ -81,10 +86,16 @@ for (const s of series) {
     totalRows += res.written;
   }
   perSeries.push({ ticker: s.ticker, rows: rows.length, pages, truncated });
-  console.log(`  ${s.ticker.padEnd(18)} settled=${String(rows.length).padStart(5)} pages=${pages}${truncated ? " TRUNCATED" : ""}`);
+  // A series with no settled markets is usually NOT a failure: Kalshi
+  // registers a series before it ever trades, so 11 of the 26 return
+  // nothing in ANY status — the state KXNHLGAME sits in out of season.
+  // Labelled, so it does not read as a broken fetch.
+  const note = rows.length === 0 ? "  (not yet listed)" : truncated ? "  TRUNCATED" : "";
+  console.log(`  ${s.ticker.padEnd(18)} settled=${String(rows.length).padStart(5)} pages=${pages}${note}`);
   if (truncated) console.log(`::warning::${s.ticker} hit the ${MAX_PAGES}-page cap; older history was not read`);
 }
 
-console.log(`\nseries=${series.length} rowsWritten=${totalRows}`);
+const withData = perSeries.filter(p => p.rows > 0).length;
+console.log(`\nseries=${series.length} withHistory=${withData} notYetListed=${series.length - withData} rowsWritten=${totalRows}`);
 if (failed) { console.error("::error::at least one upsert failed"); process.exit(1); }
 if (totalRows === 0) { console.error("::error::no rows written — a backfill that writes nothing is not a success"); process.exit(1); }
