@@ -1,0 +1,43 @@
+name: Backfill 15-minute settled history
+
+# The half of the dataset that is NOT perishable.
+#
+# Kalshi keeps settled markets queryable with their `result` — 6,458 for
+# KXBTC15M alone, back to 2026-06-30 — so outcomes, volumes and
+# settlement distributions do not have to be waited for. Only the
+# intra-window price path has to be recorded live, which is what
+# record-15m.yml is for.
+#
+# Daily rather than continuous: a window that settled is settled, and
+# re-reading history every hour would be thousands of pages of pure
+# duplication. Upserts on ticker, so a re-run is a no-op.
+
+on:
+  schedule:
+    - cron: "40 8 * * *"
+  workflow_dispatch:
+    inputs:
+      maxPages:
+        description: "Cursor pages per series (1000 markets each)"
+        default: "12"
+        required: false
+
+concurrency:
+  group: backfill-15m
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Backfill settled 15-minute markets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          M15_MAX_PAGES: ${{ github.event.inputs.maxPages || '12' }}
+        run: node scripts/m15-backfill.mjs
