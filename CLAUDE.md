@@ -481,6 +481,71 @@ when **both venues keyed games and none joined**. Guarded on `polyKeyed`
 too, so a league Kalshi lists and Polymarket does not — soccer today —
 stays quiet rather than going red every day for a real absence.
 
+### Kalshi's 15-minute markets
+
+A different family from everything else here: **exactly one open market
+per series at a time, alive for fifteen minutes**, settling on a
+sixty-second average of an index. **26 series**, found by suffix rather
+than a hand-written list because Kalshi keeps adding to it —
+`KXBTC15M`, `KXETH15M`, `KXSOL15M`, `KXXRP15M`, `KXDOGE15M` and 8 more
+crypto; `KXGOLD15M`, `KXSILVER15M`, `KXWTI15M`, `KXNATGAS15M`,
+`KXCOPPER15M`, `KXPLATINUM15M`, `KXPALLADIUM15M`; `KXINX15M`,
+`KXNDQ15M`, `KXEURUSD15M`, `KXGBPUSD15M`, `KXUSDJPY15M`.
+
+Crypto runs 24/7; commodities, FX and equities are closed out of hours,
+so a weekend snapshot shows ~10 of 26 live and that is not a fault.
+
+**They are liquid.** `KXBTC15M` carried **1.26M contracts of volume** on
+a single fifteen-minute window.
+
+#### The outcome half does NOT have to be waited for
+
+**Settled markets stay queryable with their `result`** — 6,458 for
+`KXBTC15M` alone, paging back to **2026-06-30**, cursor-exhausted. So
+base rates, volume profiles and settlement distributions are available
+on day one. `backfill-15m.yml` pulls them daily and upserts on ticker,
+so a re-run is a no-op.
+
+This corrects an earlier claim in this file's history that "you cannot
+backtest what you never recorded". True of the price PATH, wrong of
+outcomes.
+
+#### The price path is the perishable half
+
+A settled market reports only its last price, so *"what was this quoted
+at with seven minutes left"* exists nowhere unless something was
+watching. That is `record-15m.yml`, and a day not recorded is lost for
+good.
+
+- **It does not run on Vercel.** Polling every ~15s is ~240 invocations
+  an hour; against Hobby's 4 CPU-hours a MONTH, one day of data would
+  cost a month of budget. The loop runs in the Actions runner and talks
+  to Kalshi and Supabase directly, like `match-markets.yml`.
+- **Runs overlap on purpose.** GitHub does not honour short crons —
+  45 minutes to 3.5 hours of drift on this repo — so each run covers 55
+  minutes against a schedule asking for 30. A late start still lands
+  inside the previous window. Writes are append-only and
+  write-on-change, so overlap costs duplicate rows, never a gap.
+- **Write-on-change, with a 60s heartbeat.** Unconditional rows would be
+  ~150k/day of mostly duplicates. The heartbeat is what keeps a flat
+  market distinguishable from a stopped recorder.
+- **A dry series is rested for 2 minutes, not dropped.** Out-of-hours
+  series would otherwise burn requests every tick at an API that
+  rate-limits datacenter IPs — but rest for long and a fifteen-minute
+  window is missed entirely.
+- **Kalshi publishes NO depth on this family**: `yes_bid_size` and
+  `yes_ask_size` are null. Stored as null, never 0 — `Number(null)` is
+  `0` and a fabricated zero reads as "nothing offered", which is a claim
+  about the book rather than about our data. That coercion was in the
+  first version and `scripts/m15.test.mjs` caught it.
+- `result` arrives as **`""`** on a live market, not null. Stored as
+  null, or every open window would look settled with a blank outcome.
+
+Schema is `supabase/migrations/0016_m15_recorder.sql`. Writes need
+`SUPABASE_SERVICE_ROLE_KEY` as a repository secret; both scripts print
+which credential they are using, because an anon run is rejected by RLS
+and would otherwise look like a run with nothing to write.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
@@ -1305,6 +1370,28 @@ list is people who will trade.
 
 So the page says what it is, next to the prices. Muted and small — a
 warning that shouts on every visit stops being read by the third one.
+
+### The stat row leads with the price gap, not the arb count
+
+Measured across all four tabs: **sports is 160 cards and ZERO arbs** —
+and sports is the front door, the category chosen precisely because an
+exact join cannot pair the wrong fixture. So the row's first number
+greeted most visitors with **"Arb signals 0"**, on the tab we most want
+judged. Across the whole site, 575 cards produce **9 US-tradable arb
+legs**.
+
+The gap is the thing that is always there — median **5.0pt** on sports,
+3.8 econ, 3.1 crypto, 2.4 politics — and it answers the question a
+reader actually arrives with: *I am about to bet this, where should I
+do it.* Being 5 points cheaper on the right venue is real money on every
+card; arbitrage is real money on nine of them.
+
+- **Median, not mean.** The distribution has a long right tail, so an
+  average reports a gap most cards do not have.
+- **The arb count is coloured only when it is non-zero.** An accent on a
+  zero draws the eye to the absence.
+- The arb machinery is unchanged — it stops being the promise, not the
+  product.
 
 ### The card says which sport it is
 

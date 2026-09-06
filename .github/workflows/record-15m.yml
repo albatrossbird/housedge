@@ -1,0 +1,57 @@
+name: Record 15-minute markets
+
+# Kalshi lists exactly ONE open market per 15-minute series at a time,
+# and it lives for fifteen minutes. That single fact decides everything
+# about this job.
+#
+# WHY IT DOES NOT RUN ON VERCEL. A useful sample of a fifteen-minute
+# market needs polling every ~15 seconds. Through a serverless function
+# that is ~240 invocations an hour against the Hobby plan's 4 CPU-hours
+# a MONTH — a day of data would cost a month of budget. Actions minutes
+# are free and unmetered on a public repo and a job may run six hours,
+# so the loop lives in the runner and talks to Kalshi and Supabase
+# directly, the same way match-markets.yml already does.
+#
+# WHY IT OVERLAPS ON PURPOSE. GitHub does not honour short cron
+# intervals — measured gaps on this repo run 45 minutes to 3.5 hours —
+# so a schedule that assumes punctuality would leave holes exactly as
+# long as the delay. Each run therefore covers 55 minutes and the
+# schedule asks for every 30, so a late start still lands inside the
+# previous run's window. Writes are append-only and write-on-change, so
+# two overlapping recorders cost duplicate rows at worst, never a gap.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to record for"
+        default: "55"
+        required: false
+      pollSeconds:
+        description: "Seconds between polls"
+        default: "15"
+        required: false
+
+# Deliberately NOT cancel-in-progress: killing the running recorder to
+# start a fresh one would open a gap at every schedule tick.
+concurrency:
+  group: record-15m-${{ github.run_id }}
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Record live 15-minute quotes
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          M15_RUN_MINUTES: ${{ github.event.inputs.minutes || '55' }}
+          M15_POLL_SECONDS: ${{ github.event.inputs.pollSeconds || '15' }}
+        run: node scripts/m15-record.mjs

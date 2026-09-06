@@ -122,6 +122,19 @@ function widestSpread(m) {
   const gaps = legsOf(m).map(l => Math.abs(m.kalshi.yes - l.poly.yes));
   return gaps.length ? Math.max(...gaps) : 0;
 }
+
+// THE TYPICAL GAP, not the average one.
+//
+// The distribution has a long right tail — a handful of pairs sit 10-15
+// points apart — so a mean reports a gap most cards do not have. The
+// median is the number a reader can expect to see on the card in front
+// of them, which is what the headline is claiming.
+function medianSpread(list) {
+  const g = list.map(widestSpread).filter(v => v > 0).sort((a, b) => a - b);
+  if (!g.length) return null;
+  const mid = Math.floor(g.length / 2);
+  return g.length % 2 ? g[mid] : (g[mid - 1] + g[mid]) / 2;
+}
 // The leg a reader would act on: cheapest to own both sides. Legs with
 // no executable price sink rather than sorting as a zero-cost trade.
 function bestLeg(m) {
@@ -1758,10 +1771,28 @@ export default function HouseEdge() {
             filter is hiding. */}
         {!loading && visible.length > 0 && (
           <div style={{ display: "flex", gap: 24, marginBottom: 24, padding: "14px 18px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, flexWrap: "wrap" }}>
+            {/* THE PRICE GAP LEADS, NOT THE ARB COUNT.
+                Measured across all four tabs: sports is 160 cards and
+                ZERO arbs — and sports is the front door, the category
+                chosen precisely because an exact join cannot pair the
+                wrong fixture. So the old first number greeted most
+                visitors with "Arb signals 0", which reads as a broken
+                product, on the tab we most want judged.
+                The gap is the thing that is always there: a median of
+                ~5pt on sports, ~2-4pt elsewhere. It also answers the
+                question a reader actually arrives with — "I am about to
+                bet this, where should I do it" — where arbitrage
+                answers one they can act on nine times across 575 cards. */}
             {[
-              { label: "Markets matched", value: visible.length },
-              { label: "Arb signals", value: arbCount, color: T.arb },
-              { label: "Avg spread", value: visible.length ? `${Math.round(visible.reduce((s, m) => s + widestSpread(m), 0) / visible.length * 100)}pt` : "—" },
+              {
+                label: "Typical price gap",
+                value: medianSpread(visible) != null ? `${(medianSpread(visible) * 100).toFixed(1)}pt` : "—",
+                color: T.text,
+              },
+              { label: "Markets compared", value: visible.length },
+              // Coloured ONLY when there is something to point at. An
+              // accent on a zero draws the eye to the absence.
+              { label: "Arb signals", value: arbCount, color: arbCount > 0 ? T.arb : T.muted },
               { label: "Kalshi contracts", value: `${compact(visible.reduce((s, m) => s + kalshiContracts(m), 0))}` },
             ].map(({ label, value, color }) => (
               <div key={label}>
