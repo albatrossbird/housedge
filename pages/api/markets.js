@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
-import { bestArb, complementBook, realBook } from "../../lib/fees.js";
+import { tradeableArb, complementBook, realBook } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
@@ -459,7 +459,7 @@ export default async function handler(req, res) {
         if (pYesShown !== pYes) priceFromBook.poly++;
         if (kYesShown !== row.k_yes_price) priceFromBook.kalshi++;
 
-        const arb = bestArb(
+        const arb = tradeableArb(
           {
             yesAsk: kBook.ask,
             noAsk:  kNoBook.ask,
@@ -610,9 +610,16 @@ export default async function handler(req, res) {
                 feeSchedule: row.p_fee_schedule || null,
               },
             },
+            // The edge is now priced AT `pricedAt`, so this multiplies a
+            // per-contract figure that is true at the size on offer
+            // rather than at a 100-contract order the book cannot fill.
             edgeDollars: arb.maxContracts != null
               ? Math.round(arb.r.edge * arb.maxContracts * 100) / 100
               : null,
+            // What size the headline figures were priced at, so the
+            // card and the calculator can be seen to agree instead of
+            // differing by a rounding artefact the reader cannot place.
+            pricedAt: arb.pricedAt,
             ...(implausible ? { implausible: true, spreadPts: Math.round(spreadPts * 10) / 10 } : {}),
           } : null,
           trending: ((row.k_volume || 0) + (row.p_volume || 0)) > 5000,
