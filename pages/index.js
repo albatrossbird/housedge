@@ -1,5 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/router";
+// The SAME function /api/markets prices with. Importing it rather than
+// reimplementing "edge x contracts" here is deliberate: the arb maths
+// living in two places is precisely how the implausible-spread guard
+// came to suppress a bad pair on the page while the API went on
+// publishing `profitable: true` for it.
+import { positionAtSize } from "../lib/fees.js";
 
 // Brand palette, sampled from the MarketSlap logo artwork rather than
 // eyeballed: the wordmark's two inks and the app-icon tile.
@@ -325,6 +331,103 @@ function Resolution({ label, color, text }) {
   );
 }
 
+// ── "So what do I make?" ────────────────────────────────────────────
+//
+// The card reports an edge per contract, which is the wrong unit for
+// the question a reader actually has. It is also not something they can
+// multiply: Kalshi rounds its taker fee UP TO THE CENT PER ORDER, so
+// cost per pair really does change with size, and it changes most at
+// the small sizes someone tries first. positionAtSize() re-prices the
+// whole trade at the requested size — same module the API uses.
+//
+// Two things this must never do, both of which a naive calculator does:
+// quote a profit on size the book cannot absorb, and present an upper
+// bound as a fill. The size is clamped to `maxContracts` and says so,
+// and where Polymarket publishes no depth that ceiling is itself only
+// a bound taken from the Kalshi leg.
+function ProfitCalculator({ leg }) {
+  const ceiling = leg.arb.maxContracts != null ? Math.floor(leg.arb.maxContracts) : null;
+  // Default to what is actually on offer rather than a round number:
+  // the honest first answer to "what do I make" is "on how much?", and
+  // the book has already answered that.
+  const [raw, setRaw] = useState(String(ceiling && ceiling > 0 ? Math.min(ceiling, 100) : 100));
+
+  const pos = useMemo(() => {
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return positionAtSize(leg.arb.inputs.kalshi, leg.arb.inputs.poly, n);
+  }, [raw, leg.arb.inputs]);
+
+  const money = v => `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(2)}`;
+
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${T.border}` }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, letterSpacing: "0.04em", marginBottom: 5 }}>
+        IF YOU TRADED IT
+      </div>
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted }}>
+        <span>Contracts</span>
+        <input
+          type="number" min="1" step="1" value={raw}
+          onChange={e => setRaw(e.target.value)}
+          // 16px or iOS zooms the whole page on focus.
+          style={{
+            width: 88, padding: "4px 6px", fontSize: 16, fontVariantNumeric: "tabular-nums",
+            border: `1px solid ${T.border}`, borderRadius: 6, background: T.bg, color: T.text,
+          }}
+        />
+        {ceiling != null && (
+          <button
+            type="button" onClick={() => setRaw(String(ceiling))}
+            style={{
+              fontSize: 11, padding: "3px 7px", borderRadius: 6, cursor: "pointer",
+              border: `1px solid ${T.border}`, background: "transparent", color: T.muted,
+            }}
+          >
+            max {leg.arb.depthKnown ? "" : "≤"}{ceiling}
+          </button>
+        )}
+      </label>
+
+      {pos ? (
+        <div style={{ marginTop: 6 }}>
+          {[
+            [`Cost, fees included`, money(pos.totalCost)],
+            [`Pays out`, money(pos.payout)],
+          ].map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.muted, padding: "1px 0" }}>
+              <span>{k}</span>
+              <span style={{ color: T.text, fontVariantNumeric: "tabular-nums" }}>{v}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, borderTop: `1px solid ${T.border}`, marginTop: 4, paddingTop: 4 }}>
+            <span style={{ color: T.text }}>{pos.profit >= 0 ? "Profit" : "Loss"} on {pos.contracts} contract{pos.contracts === 1 ? "" : "s"}</span>
+            <span style={{ color: pos.profitable ? T.arb : T.text, fontVariantNumeric: "tabular-nums" }}>
+              {money(pos.profit)}
+            </span>
+          </div>
+
+          {/* Answering a different question from the one asked, silently,
+              is worse than refusing. */}
+          {pos.clamped && (
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>
+              Sized down from {pos.asked} — the book holds {leg.arb.depthKnown ? "" : "at most "}{pos.contracts} at this price.
+            </div>
+          )}
+          {/* The reason this is not edge x contracts, said once, where
+              someone comparing two sizes will notice it. */}
+          <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>
+            {(pos.costPerPair * 100).toFixed(2)}¢ per pair at this size · Kalshi rounds its fee up per order, so small orders cost more each.
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: T.muted, marginTop: 6 }}>Enter a whole number of contracts.</div>
+      )}
+    </div>
+  );
+}
+
 function Details({ market, legs }) {
   const anyResolution = market.resolution || legs.some(l => l.resolution);
   return (
@@ -364,6 +467,8 @@ function Details({ market, legs }) {
               Size is an upper bound — {leg.poly.venue} publishes no depth.
             </div>
           )}
+
+          {leg.arb.inputs && <ProfitCalculator leg={leg} />}
         </div>
       ))}
 
