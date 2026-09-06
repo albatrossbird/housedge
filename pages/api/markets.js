@@ -577,6 +577,39 @@ export default async function handler(req, res) {
                 ? { venue: polyVenue, side: "NO", cost: Math.round(arb.r.costB * 10000) / 10000 }
                 : { venue: "Kalshi", side: "NO", cost: Math.round(arb.r.costB * 10000) / 10000 },
             ],
+            // THE CALCULATOR'S INPUTS, not its answers.
+            //
+            // A reader who sees an edge asks what they would make, and
+            // that cannot be `edge x contracts`: Kalshi rounds its fee
+            // up to the cent PER ORDER, so cost per pair genuinely
+            // moves with size, and the cheaper of the two directions
+            // can differ between a small order and a large one. The
+            // client therefore re-runs positionAtSize() from
+            // lib/fees.js — the same function this route uses — over
+            // these inputs, rather than scaling a number.
+            //
+            // Sending inputs instead of a precomputed table is what
+            // keeps one copy of the maths. A second implementation in
+            // the client is a second place for it to drift, which is
+            // exactly how the implausible-spread guard ended up
+            // suppressing a bad pair on the page while this route went
+            // on publishing `profitable: true` for it.
+            //
+            // Only sent when the pair is takeable at all; a leg with no
+            // executable price has nothing to size.
+            inputs: {
+              kalshi: {
+                yesAsk: kBook.ask, noAsk: kNoBook.ask,
+                yesAskSize: row.k_ask_size, yesBidSize: row.k_bid_size,
+                feeMultiplier: row.k_fee_multiplier,
+              },
+              poly: {
+                yesAsk: polyBook.ask, noAsk: polyOtherBook.ask,
+                yesAskSize: isPolyUs ? row.p_ask_size : null,
+                yesBidSize: isPolyUs ? row.p_bid_size : null,
+                feeSchedule: row.p_fee_schedule || null,
+              },
+            },
             edgeDollars: arb.maxContracts != null
               ? Math.round(arb.r.edge * arb.maxContracts * 100) / 100
               : null,
