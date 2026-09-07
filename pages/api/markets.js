@@ -389,32 +389,82 @@ export default async function handler(req, res) {
     // combined view was short. It needs no migration and makes `all`
     // the sum of the tabs by construction.
     //
-    // The cliff is still there, one category further out, so a group
-    // that comes back EXACTLY at the cap is reported rather than
-    // trusted — that is the day this needs real pagination, which in
-    // turn needs a deterministic ORDER BY in get_pairs, since its
-    // similarity sort has no tiebreaker and OFFSET paging over an
-    // unstable order skips rows.
+    // The cliff was still there one category further out, and it
+    // ARRIVED: the first run of that alarm reported
+    // `pairsTruncated: ["politics: 1000"]`. So each group is PAGED.
+    //
+    // Paging needs a TOTAL order, and the caller has to state it on the
+    // OUTER query — an ORDER BY inside a set-returning function is not
+    // guaranteed to survive into an outer LIMIT/OFFSET. Ordering by
+    // `similarity` alone is the untied sort the tiebreaker exists to
+    // fix, since every sports pair carries 1.0, so this reads
+    // `pair_id` — which only exists once
+    // supabase/migrations/0017_get_pairs_pageable.sql has run.
+    //
+    // Before that migration lands the ordered read 400s on the unknown
+    // column, so the whole request falls back to ONE capped call per
+    // group — exactly what shipped before — and says so through the
+    // same `pairsTruncated` field. A deploy landing ahead of a
+    // hand-run migration is the normal case here (see 0004).
     const PAGE_CAP = 1000;
+    const MAX_PAGES = 40;
     const groups = category === "all"
       ? Object.entries(SPORT_TAGS).filter(([c]) => c !== "all")
       : [[category, tags]];
 
+    async function readGroupPaged(groupTags) {
+      const out = [];
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const from = page * PAGE_CAP;
+        const { data, error } = await supabase
+          .rpc("get_pairs", { sport_tags: groupTags })
+          .order("similarity", { ascending: false })
+          .order("pair_id", { ascending: true })
+          .range(from, from + PAGE_CAP - 1);
+        // Only a FIRST-page failure means "this deployment cannot page"
+        // — that is the missing-column case. A later page failing is a
+        // short answer, not a reason to throw away the pages that
+        // worked and re-read the group capped, so it keeps what it has
+        // and reports the group as short.
+        if (error) return page === 0 ? { error } : { rows: out, partial: error };
+        const got = data || [];
+        out.push(...got);
+        if (got.length < PAGE_CAP) return { rows: out };
+      }
+      return { rows: out, hitPageLimit: true };
+    }
+
     const rows = [];
     const cappedGroups = [];
+    let canPage = true;
     for (const [name, groupTags] of groups) {
+      if (canPage) {
+        const paged = await readGroupPaged(groupTags);
+        if (!paged.error) {
+          if (paged.hitPageLimit) cappedGroups.push(`${name}: ${paged.rows.length} (page limit)`);
+          if (paged.partial) cappedGroups.push(`${name}: ${paged.rows.length} (read failed mid-page: ${paged.partial.message || paged.partial})`);
+          rows.push(...paged.rows);
+          continue;
+        }
+        // One failure disables paging for the whole request, so a
+        // pre-migration deploy pays one wasted call, not one per tab.
+        canPage = false;
+        console.error(`get_pairs paged read failed (${paged.error.message || paged.error}) — falling back to a single capped call. Run supabase/migrations/0017_get_pairs_pageable.sql`);
+      }
       const { data: part, error: partErr } = await supabase
         .rpc("get_pairs", { sport_tags: groupTags });
       if (partErr) throw partErr;
       const got = part || [];
-      if (got.length >= PAGE_CAP) cappedGroups.push(`${name}: ${got.length}`);
+      if (got.length >= PAGE_CAP) cappedGroups.push(`${name}: ${got.length} (unpaged — needs migration 0017)`);
       rows.push(...got);
     }
     if (cappedGroups.length) {
-      console.error(`get_pairs hit the ${PAGE_CAP}-row server cap for: ${cappedGroups.join(", ")} — the response is TRUNCATED`);
+      console.error(`get_pairs returned a SHORT result for: ${cappedGroups.join(", ")}`);
     }
     // Defensive: the groups are disjoint today, but a tag added to two
-    // of them would silently double a card's legs.
+    // of them would silently double a card's legs. Paging makes this
+    // load-bearing rather than defensive — an OFFSET page boundary that
+    // shifts under a concurrent write can repeat a row.
     const seenPair = new Set();
     const data = rows.filter(r => {
       const k = `${r.kalshi_id}\u0000${r.polymarket_id}`;
