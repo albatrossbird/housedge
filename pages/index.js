@@ -904,14 +904,28 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
       rest.push(m);
     }
   }
-  // A category with nothing US-tradable in its top three still needs a
-  // card, and its global leg beats an empty slot or a lone Kalshi bar —
-  // the leg already says "can't trade from the US" on its own line.
+  // THE LAST RESORT, AND IT SHOULD ALMOST NEVER FIRE NOW.
+  //
+  // /api/markets sorts US-tradable cards ahead of global-only ones
+  // BEFORE applying perCategory, so a category with any US market at
+  // all leads with it. This used to fire on politics and ncaaf not
+  // because they had no US markets — politics has 38 — but because the
+  // three-card window could not reach the first one.
+  //
+  // It still has to exist: crypto is 3 US-tradable of 15, and prices
+  // move enough that a category can genuinely have none on a given
+  // read. When that happens the global card beats an empty slot, since
+  // the header still carries the category's count and the way into its
+  // tab. But it is FLAGGED rather than left for the reader to infer
+  // from a venue label — a card you cannot act on, unannounced beside
+  // three you can, teaches them the site does not know the difference.
+  const globalOnly = new Set();
   for (const m of cards) {
     const tab = CATEGORY_OF_CARD[m.category] || m.category;
     if (taken.has(tab)) continue;
     taken.add(tab);
     featured.push(m);
+    globalOnly.add(m.kalshiId ?? m.kalshi_id ?? m.id);
     const i = rest.indexOf(m);
     if (i >= 0) rest.splice(i, 1);
   }
@@ -1061,6 +1075,22 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
                     {counts[tab] == null ? "See all" : `See all ${counts[tab]}`} →
                   </button>
                 </div>
+                {/* SAY SO, do not leave it to a venue label.
+                    Three cards a US reader can trade beside one they
+                    cannot, distinguished only by the word GLOBAL on a
+                    bar, reads as an oversight. It is a real state — the
+                    category has no US-tradable market on this read — so
+                    it is stated. */}
+                {globalOnly.has(m.kalshiId ?? m.kalshi_id ?? m.id) && (
+                  <div style={{
+                    fontSize: 11, lineHeight: 1.4, color: T.muted,
+                    border: `1px solid ${T.border}`, borderRadius: 8,
+                    padding: "6px 9px", background: T.bg,
+                  }}>
+                    Nothing in {CATEGORIES[tab]?.label || tab} is on Polymarket US right now —
+                    this one is <strong>global only</strong>, so a US account can't trade it.
+                  </div>
+                )}
                 {/* No onPin: see MarketCard. */}
                 <MarketCard market={m} showTrending={false} />
               </div>

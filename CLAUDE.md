@@ -1479,6 +1479,48 @@ pairs it took.
   because one Kalshi market yielded two rows; merging removes the
   collision at its source.
 
+### The 1000-row cap reached the front door
+
+**`?category=all` returned `pairCount: 501` and `hidden.total: 499` —
+exactly 1000** of the 1,418 rows in `pairs`. PostgREST caps an RPC at
+1000 rows and `get_pairs` was never given a limit; every `.select()` in
+this codebase carries one for that reason, and the RPC path was missed.
+
+`get_pairs` orders by `similarity DESC`, so sports — an exact join, so
+similarity 1.0 — filled the front and the rest was cut by score:
+**politics came back 228 cards of 376, economics 8 of 29.**
+
+**The symptom was on the home page, and it did not look like
+truncation.** A Kalshi market listed on both Polymarket venues is TWO
+rows, and the cut landed BETWEEN them, so the same card returned two
+legs under `?category=politics` and a lone **global-only** leg under
+`?category=all`. The front door was therefore featuring markets a US
+account cannot trade while 38 US-tradable politics cards sat outside the
+window — which reads as a product decision about jurisdictions and is
+actually a row cap.
+
+**The first diagnosis was wrong.** It looked like the home page's
+three-card window being too narrow to contain a US-tradable card
+(politics' first sits at index 4, crypto's at index 8). That is real and
+worth fixing, but it is not why the legs were missing: they never
+arrived.
+
+Two fixes, and only the first is the bug:
+
+- **`.limit(PAIRS_ROW_CAP)` on the RPC**, set well above the table, with
+  the run reporting `pairsTruncated` if it is ever reached. A cap hit is
+  a wrong answer, not a smaller one — the lesson `fetchAllRows` had to
+  learn twice.
+- **US-tradable cards sort ahead of global-only ones BEFORE
+  `perCategory` is applied**, so the home page's per-category window
+  cannot exclude the only card its reader can act on. Ranking before the
+  cap rather than widening the window and hoping.
+
+A category with genuinely no US-tradable market still shows its global
+card — crypto is 3 of 15 and can hit zero on a given read — but it now
+**says so on the card** rather than leaving the reader to infer it from
+a venue label.
+
 ### The front door leads with the category we can prove
 
 Ranked by Kalshi contracts, the four home cards came out **politics,
