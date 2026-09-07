@@ -359,11 +359,36 @@ export default async function handler(req, res) {
 
     // Use RPC function which runs a direct SQL join — bypasses all
     // the JS client query issues we've been hitting
-    const { data, error } = await supabase.rpc("get_pairs", {
-      sport_tags: tags,
-    });
+    // POSTGREST CAPS AN RPC AT 1000 ROWS, AND THIS ONE WAS NEVER TOLD
+    // OTHERWISE.
+    //
+    // Every `.select()` in this codebase carries an explicit limit
+    // because of that cap; the RPC path did not, and nothing checked.
+    // Measured 2026-09-07 on ?category=all: `pairCount: 501` and
+    // `hidden.total: 499` — exactly 1000 rows of the 1,418 in `pairs`.
+    // get_pairs orders by similarity DESC, so sports (an exact join, so
+    // similarity 1.0) filled the front and politics came back 228 cards
+    // of 376, economics 8 of 29.
+    //
+    // The visible symptom was on the FRONT DOOR. A Kalshi market listed
+    // on both Polymarket venues is TWO rows, and the cut landed between
+    // them — so the same card returned two legs under ?category=politics
+    // and a lone global-only leg under ?category=all, and the home page
+    // featured markets a US account cannot trade while 38 US-tradable
+    // politics cards sat outside the window.
+    const PAIRS_ROW_CAP = 20000;
+    const { data, error } = await supabase
+      .rpc("get_pairs", { sport_tags: tags })
+      .limit(PAIRS_ROW_CAP);
 
     if (error) throw error;
+    // A cap hit is a WRONG answer, not a smaller one — the lesson
+    // fetchAllRows had to learn twice. Say so rather than serving a
+    // silently partial catalogue.
+    const pairsTruncated = (data?.length || 0) >= PAIRS_ROW_CAP;
+    if (pairsTruncated) {
+      console.error(`get_pairs returned ${data.length} rows and hit the ${PAIRS_ROW_CAP} cap; the response is TRUNCATED`);
+    }
     if (!data || data.length === 0) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
@@ -697,11 +722,37 @@ export default async function handler(req, res) {
     // ordering honest while making the page representative.
     const perCategory = Math.max(0, parseInt(req.query.perCategory, 10) || 0);
 
+    // US-TRADABLE FIRST, AND THAT DECISION BELONGS HERE.
+    //
+    // The home page shows one card per category and wants the
+    // most-traded market its reader can ACT on, so it looked for the
+    // first US-tradable card in what this route returned. With
+    // perCategory=3 that search ran over a three-card window — and
+    // measured 2026-09-07, the first US-tradable politics card sits at
+    // index 4 and crypto's at index 8. Neither window could contain
+    // one, so the page fell back to an untradable card on categories
+    // that have 38 and 3 US-tradable markets respectively.
+    //
+    // That is a selection made over a pre-truncated set and reported as
+    // if it were made over the whole set — the same shape as the
+    // embedding read that decided a spend from a capped query. The cure
+    // is to rank BEFORE the cap, not to widen the window and hope.
+    //
+    // Volume still orders within each group, so the caption ("most
+    // traded on Kalshi") stays true of what leads each category; US
+    // legs simply sort ahead of global-only ones.
+    const hasUsLeg = c => (c.legs || []).some(l => l?.poly?.usTradable);
+    const usFirstThenVolume = (a, b) => {
+      const ua = hasUsLeg(a), ub = hasUsLeg(b);
+      if (ua !== ub) return ua ? -1 : 1;
+      return byVolume(a, b);
+    };
+
     let cards = allCards;
     if (perCategory) {
       const kept = {};
       cards = [...allCards]
-        .sort(byVolume)
+        .sort(usFirstThenVolume)
         .filter(c => {
           const tab = CATEGORY_OF_TAG[c.category] || c.category;
           kept[tab] = (kept[tab] || 0) + 1;
@@ -744,6 +795,7 @@ export default async function handler(req, res) {
       // What the reader is looking at versus what exists, so a trimmed
       // response can never be mistaken for the whole set.
       cardCount: allCards.length,
+      ...(pairsTruncated ? { pairsTruncated: PAIRS_ROW_CAP } : {}),
       trimmedTo: top || null,
       perCategory: perCategory || null,
       needsEmbed: cards.length === 0,
