@@ -23,7 +23,15 @@ on:
     # throttle has something to throttle. The reliable ways to get a real
     # interval are an external cron hitting /api/refresh (cron-job.org
     # runs every minute, free) or Vercel Pro, whose crons have a 1-minute
-    # minimum. The page also asks for a refresh of its own when what it
+    # minimum.
+    #
+    # THE JOB NO LONGER RUNS ON VERCEL. It used to curl /api/refresh,
+    # which made every tick a serverless invocation — measured
+    # 2026-09-07 as the dominant consumer of the Hobby plan's 4 Fluid
+    # Active CPU-hours a month, at 3 of 4 used, on cron traffic hitting
+    # our own API with essentially no visitors. The loop runs here now,
+    # like match-markets.yml and the m15 jobs. The ROUTE is untouched
+    # and still serves the browser's on-demand refresh. The page also asks for a refresh of its own when what it
     # is showing is over three minutes old, which covers the case that
     # actually matters: someone is looking at it.
     - cron: "*/5 * * * *"   # UTC
@@ -40,65 +48,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Hit /api/refresh
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Refresh prices
         env:
-          # Optional. Set as a repository secret to lock the endpoint
-          # down; lib/cronAuth.js ignores it until CRON_SECRET is also
-          # set on Vercel, so this is safe to leave unset.
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          set -euo pipefail
-
-          curl -sS --max-time 240 \
-            ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
-            "https://housedge.vercel.app/api/refresh" -o response.json
-
-          head -c 2000 response.json; echo
-
-          # Fail loudly rather than silently doing nothing for weeks —
-          # which is exactly how the original stale-price bug survived.
-          if ! jq -e . response.json >/dev/null 2>&1; then
-            echo "::error::response was not valid JSON"
-            exit 1
-          fi
-
-          if jq -e '.error' response.json >/dev/null 2>&1; then
-            echo "::error::refresh returned: $(jq -r '.error' response.json)"
-            exit 1
-          fi
-
-          K=$(jq -r '.kalshiUpdated // 0' response.json)
-          P=$(jq -r '.polyUpdated // 0' response.json)
-          KF=$(jq -r '.kalshiFetched // 0' response.json)
-          PF=$(jq -r '.polyFetched // 0' response.json)
-          echo "kalshi updated: $K/$KF fetched, polymarket updated: $P/$PF fetched"
-
-          jq -r '(.errors // [])[:3][] | "::error::" + .' response.json || true
-
-          # Per-venue, not combined. This was `$K -eq 0 && $P -eq 0`, so
-          # polyUpdated sat at 0 while kalshiUpdated carried the run --
-          # every global Polymarket price on the site frozen, and a
-          # green tick on every run saying so.
-          if [ "$K" -eq 0 ] && [ "$KF" -gt 0 ]; then
-            echo "::error::fetched $KF Kalshi markets and wrote none"
-            exit 1
-          fi
-          if [ "$P" -eq 0 ] && [ "$PF" -gt 0 ]; then
-            echo "::error::fetched $PF Polymarket markets and wrote none"
-            exit 1
-          fi
-
-          # A throttled Kalshi series returns no markets and used to be
-          # indistinguishable from a series with none open, so its rows
-          # just stopped updating. Named here so the next occurrence is
-          # loud.
-          FAILED=$(jq -r '(.kalshiSeriesFailed // []) | length' response.json)
-          if [ "$FAILED" -gt 0 ]; then
-            jq -r '(.kalshiSeriesFailed // [])[] | "::error::kalshi series failed: " + .' response.json
-            exit 1
-          fi
-
-          if [ "$K" -eq 0 ] && [ "$P" -eq 0 ]; then
-            echo "::error::refresh updated 0 rows on both venues"
-            exit 1
-          fi
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node scripts/refresh-prices.mjs

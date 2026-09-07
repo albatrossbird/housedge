@@ -148,6 +148,42 @@ A 429 now honours `Retry-After` and backs off 1.5/3/6/12s over five
 attempts, because a series that exhausts its tries freezes until the
 next run, which is 45 minutes to 3.5 hours away.
 
+### The scheduled refresh runs in the runner, not on Vercel
+
+**Measured 2026-09-07: Fluid Active CPU at 3 of the Hobby plan's 4
+CPU-hours a month** — spent almost entirely on cron traffic hitting our
+own API, with essentially no visitors on the site.
+
+`refresh-prices.yml` used to curl `https://housedge.vercel.app/api/refresh`,
+so every tick was a serverless invocation: ~8-12 a day at ~90 seconds
+each. Nothing about reading two public venues and writing Supabase needs
+a serverless function, and Actions minutes are free and unmetered on a
+public repo, so the loop moved to the runner — the same move
+`match-markets.yml` and the m15 jobs already made.
+
+- **The job is `lib/refreshPrices.js`, not the route.** `runRefresh()`
+  is called by both `scripts/refresh-prices.mjs` (scheduled) and
+  `/api/refresh` (the browser), so the two cannot drift. Same reason
+  `lib/matcher.js` is shared with `match-category.mjs`.
+- **The route is untouched and still matters.** `pages/index.js` asks
+  for a refresh whenever what is on screen is over three minutes old,
+  and that on-demand path is what keeps freshness at ~3 minutes rather
+  than the 45 minutes to 3.5 hours the throttled cron manages. Deleting
+  the route to "finish the move" would undo the freshness work.
+- **`ifStale` is resolved by the CALLER.** The route floors an
+  unauthenticated request at `ON_DEMAND_FLOOR_SECONDS`; the runner
+  passes 0 and always reads. The job itself has no opinion.
+- Every alarm the workflow's shell used to run moved into the script
+  unchanged — per-venue write checks, named `kalshiSeriesFailed`, and
+  `kalshiSeriesUnpolled`, which must stay empty.
+- Needs `SUPABASE_URL` and `SUPABASE_ANON_KEY` as repository secrets.
+  They were already set for `match-markets.yml`.
+
+**What this does not fix.** `discover-markets.yml` still calls
+`/api/embed` and `/api/prune` on Vercel — roughly 6-10 minutes of
+function time a day, the next largest consumer. Same refactor if the
+budget is still tight.
+
 ### Price freshness
 
 Three layers, because the scheduled job alone cannot deliver what a
