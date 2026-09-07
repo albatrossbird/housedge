@@ -7,10 +7,22 @@ name: Discover and match markets
 # does full re-matching. New sports fixtures appear daily, which sets the
 # useful floor; econ/crypto/politics move far slower than that.
 #
-# Categories run SEQUENTIALLY with a pause between them. Each /api/embed
-# call is a long-running serverless function, and firing all seven at once
-# risks Vercel concurrency and duration limits — the failure mode being a
-# half-written match set, which is worse than a slow job.
+# THE JOB NO LONGER RUNS ON VERCEL. It used to curl /api/embed twice per
+# category plus /api/prune; politics alone spends 86-109s of that, and
+# measured 2026-09-07 the job was the second largest consumer of the
+# Hobby plan's 4 Fluid Active CPU-hours a month, after the price
+# refresh. Reading two venues, calling Voyage and writing Supabase does
+# not need a serverless function. The ROUTES are kept so the endpoints
+# stay hittable by hand, and both callers run the same functions.
+#
+# Categories still run SEQUENTIALLY: firing them concurrently at Kalshi
+# and Polymarket would draw the rate limiting both venues apply to
+# datacenter IPs, and a half-written match set is worse than a slow job.
+#
+# This one DOES need `npm ci` where the m15 and refresh scripts do not:
+# lib/discover.js reads through supabase-js in a dozen places, and
+# rewriting all of them as REST would be a large change to the most
+# heavily commented file in the repo. Once a day, ~20s, is a fair price.
 
 on:
   schedule:
@@ -31,225 +43,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Run /api/embed per category
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --omit=dev --ignore-scripts
+      - name: Discover, match and prune
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
           CATEGORIES: ${{ github.event.inputs.categories || 'mlb nfl ncaaf nba nhl soccer econ crypto politics' }}
-        run: |
-          set -uo pipefail
-          FAILED=0
-
-          # TWO STAGES PER CATEGORY, not one call.
-          #
-          # Politics cannot do fetch + embed + match inside Vercel's 300s
-          # ceiling: matching that category alone takes over two minutes,
-          # and the combined run returned no body at all, so the category
-          # could not be rebuilt. Fetching and matching read different
-          # things -- the venues, then Supabase -- so they split cleanly
-          # across two invocations.
-          #
-          # The fetch stage is also re-runnable on its own: embedding is
-          # capped per call and `embedRemaining` says what is left, so a
-          # category with thousands of changed titles converges over
-          # repeated runs instead of dying.
-          for CAT in $CATEGORIES; do
-            echo "::group::$CAT"
-
-            if ! curl -sS --max-time 280 \
-                ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
-                "https://housedge.vercel.app/api/embed?fetchonly=1&sport=$CAT" -o "fetch-$CAT.json"; then
-              echo "::error::$CAT: fetch stage curl failed"
-              FAILED=1
-              echo "::endgroup::"
-              continue
-            fi
-
-            if ! jq -e . "fetch-$CAT.json" >/dev/null 2>&1; then
-              echo "::error::$CAT: fetch stage response was not valid JSON"
-              FAILED=1
-              echo "::endgroup::"
-              continue
-            fi
-
-            jq -r '"'"$CAT"' fetch: embedded=\(.embedded) remaining=\(.embedRemaining) marketsUpserted=\(.writes.marketsUpserted // "n/a")"' "fetch-$CAT.json"
-
-            # WHERE THE TIME WENT. The politics fetch timed out at 280s
-            # for a day with every counter reporting health, because
-            # none of them measured time. Print the split on every run,
-            # not only when something breaks — a stage that doubles is
-            # only visible against what it used to be.
-            jq -r '(.timingsMs // {}) | to_entries | map("\(.key)=\(.value)ms") | select(length>0) | "  timings: " + join(" ")' "fetch-$CAT.json" || true
-
-            # Series metadata is per-series and changes roughly never,
-            # so a healthy run reads nearly all of it from the store.
-            # `fetched` climbing back toward `series` means the seed
-            # read is failing and the run is about to get slow.
-            jq -r '(.seriesMeta // {}) | select(.series != null) | "  seriesMeta: \(.series) series (\(.fromStore) stored, \(.fetched) fetched)"' "fetch-$CAT.json" || true
-            # WHY a lookup came back empty. `throttled` is the one that
-            # means the run is fighting a rate limit and losing Kalshi
-            # links for every market under those series; `notFound` and
-            # `noTitle` are real answers that no retry can improve.
-            jq -r '((.seriesMeta // {}).status // {}) | to_entries | map(select(.value > 0)) | select(length>0) | "  seriesMeta status: " + (map("\(.key)=\(.value)") | join(" "))' "fetch-$CAT.json" || true
-
-            # A sports tag whose Kalshi side is empty is not stored.
-            # Soccer was 9,646 rows a run for zero pairs. Named, because
-            # the day Kalshi lists the league again this line vanishes
-            # and the rows come back on their own.
-            jq -r '(.polyDroppedNoKalshiSide // {}) | to_entries | map("\(.key)=\(.value)") | select(length>0) | "  poly dropped (no Kalshi side): " + join(" ")' "fetch-$CAT.json" || true
-
-            # The category sweep paginates ALL open Kalshi events and keeps
-            # the ones in the category — Kalshi has no server-side category
-            # filter — so anything that ends the pass early drops the tail
-            # of the catalogue while every other counter reports success.
-            #
-            # `complete` is true ONLY on an exhausted cursor. It replaced
-            # `truncated`, which was computed as `pages >= maxPages` and so
-            # read FALSE when the sweep died on an HTTP error: econ shipped
-            # 600 of 12,356 events and reported a clean run, which is how
-            # six KXGDP markets kept a null resolution through a run that
-            # upserted 1,729 markets. An incomplete sweep fails the job.
-            jq -r '(.kalshiSweep // [])[] | select(.complete | not) | "::error::" + .category + ": Kalshi sweep INCOMPLETE after " + (.pages|tostring) + " pages (" + (.eventsSeen|tostring) + " events seen) — " + (.failure // "no reason reported") + " — the tail of the catalogue was not fetched"' "fetch-$CAT.json" || true
-            jq -r '(.kalshiSweep // [])[] | "  sweep \(.category): pages=\(.pages) events=\(.eventsSeen) kept=\(.marketsKept) complete=\(.complete)\(if .failure then " failure=\(.failure)" else "" end)"' "fetch-$CAT.json" || true
-            if jq -e '(.kalshiSweep // []) | map(select(.complete | not)) | length > 0' "fetch-$CAT.json" >/dev/null 2>&1; then
-              FAILED=1
-            fi
-
-            # What the series gate held back. A series is embedded in
-            # full the first time it is seen and after that only if it
-            # has produced a pair, so a NAMED series here that ought to
-            # be matching is the signal to re-open it with ?reprobe=1.
-            jq -r 'if (.embedGate // {}).enabled then
-                     "  gate: skipped \(.embedGate.skipped) in tried-but-unproven series (proven \(.embedGate.seriesProven), tried \(.embedGate.seriesTried))"
-                   else empty end' "fetch-$CAT.json" || true
-            jq -r '((.embedGate // {}).skippedSeries // [])[:8] | select(length>0) | "  gate skipped: " + join(" ")' "fetch-$CAT.json" || true
-
-            # THE ONLY THING THIS PROJECT PAYS PER ROW FOR.
-            # `alreadyEmbedded` is the count of rows the pre-spend check
-            # caught being bought a second time; in steady state it is
-            # 0. Politics quietly re-bought 1,200 a run for months while
-            # reporting them as work done, so this is an ERROR, not a
-            # note — the run should go red the day it comes back.
-            jq -r '(.embedSpend // {}) | select(.asked != null) | "  embed spend: asked=\(.asked) embedded=\(.embedded) alreadyEmbedded=\(.alreadyEmbedded)"' "fetch-$CAT.json" || true
-            if jq -e '((.embedSpend // {}).alreadyEmbedded // 0) > 0' "fetch-$CAT.json" >/dev/null 2>&1; then
-              echo "::error::$CAT: $(jq -r '.embedSpend.alreadyEmbedded' "fetch-$CAT.json") rows were about to be re-embedded — needsEmbedding is reading a stale or truncated set"
-              FAILED=1
-            fi
-            jq -r '(.embedSpend // {}).confirmErrors // [] | .[] | "::warning::embed pre-spend check: " + .' "fetch-$CAT.json" || true
-
-            # A read that hit its row cap returned a WRONG answer, not a
-            # short one. This is what hid the re-embedding.
-            if jq -e '((.truncatedReads // []) | length) > 0' "fetch-$CAT.json" >/dev/null 2>&1; then
-              jq -r '(.truncatedReads // [])[] | "::error::" + .' "fetch-$CAT.json"
-              FAILED=1
-            fi
-            jq -r '(.embeddedReadErrors // [])[] | "::error::embedded-titles read: " + .' "fetch-$CAT.json" || true
-
-            REMAINING=$(jq -r '.embedRemaining // 0' "fetch-$CAT.json")
-            if [ "$REMAINING" -gt 0 ]; then
-              echo "::warning::$CAT: $REMAINING titles still need embedding; next run continues"
-            fi
-
-            sleep 10
-
-            # Non-sports matching now runs in match-markets.yml, on a
-            # runner with no 300s ceiling. Politics does not fit here any
-            # more (12,210 x 5,458 comparisons), and keeping the call
-            # would fail this job every day for a category another
-            # workflow is already handling. Sports still matches here:
-            # it is an exact join, not a similarity sweep, and it is
-            # fast.
-            # ncaaf belongs HERE and was in neither workflow: this list
-            # said "mlb nfl nba nhl soccer" and match-markets.yml does
-            # "politics econ crypto", so college football fell through
-            # the gap between them. Its 219 pairs were written by hand
-            # when the league was wired up and nothing has rebuilt them
-            # since — which on a weekly slate means the pairs decay into
-            # finished games while the new fixtures never join.
-            case " mlb nfl ncaaf nba nhl soccer " in
-              *" $CAT "*) ;;
-              *)
-                echo "$CAT: fetch done — matching runs in match-markets.yml"
-                echo "::endgroup::"
-                sleep 20
-                continue
-                ;;
-            esac
-
-            if ! curl -sS --max-time 280 \
-                ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
-                "https://housedge.vercel.app/api/embed?matchonly=1&sport=$CAT" -o "resp-$CAT.json"; then
-              echo "::error::$CAT: match stage curl failed"
-              FAILED=1
-              echo "::endgroup::"
-              continue
-            fi
-
-            head -c 1200 "resp-$CAT.json"; echo
-
-            if ! jq -e . "resp-$CAT.json" >/dev/null 2>&1; then
-              echo "::error::$CAT: response was not valid JSON"
-              FAILED=1
-            elif jq -e '.error' "resp-$CAT.json" >/dev/null 2>&1; then
-              echo "::error::$CAT: $(jq -r '.error' "resp-$CAT.json")"
-              FAILED=1
-            else
-              jq -r '"'"$CAT"' match: newPairs=\(.newPairs) totalPairs=\(.totalPairs)"' "resp-$CAT.json"
-
-              # BOTH VENUES LIST THIS LEAGUE AND NOTHING JOINED.
-              #
-              # A sports join is exact, so this is never a close call:
-              # it means the two vocabularies disagree, or a venue
-              # changed its identifier format. That is how the MLB
-              # title-format change went unnoticed — 74 open markets
-              # skipped while every counter looked healthy.
-              #
-              # Guarded on polyKeyed too, so a league Kalshi lists and
-              # Polymarket does not (soccer today) stays quiet instead
-              # of failing the run every day for a real absence. NHL
-              # returns in October against codes nobody has been able
-              # to check — Kalshi lists no NHL market in any status
-              # right now — so this is the thing that will say so.
-              if jq -e '(.matchDiagnostics // {}) | (.kalshiKeyed // 0) > 0 and (.polyKeyed // 0) > 0 and (.joined // 0) == 0' "resp-$CAT.json" >/dev/null 2>&1; then
-                echo "::error::$CAT: both venues keyed games and ZERO joined — $(jq -r '"kalshiKeyed=\(.matchDiagnostics.kalshiKeyed) polyKeyed=\(.matchDiagnostics.polyKeyed)"' "resp-$CAT.json"); the team-code vocabularies disagree or an identifier format changed"
-                FAILED=1
-              fi
-              jq -r '(.matchDiagnostics // {}) | select((.joinedNextDay // 0) > 0) | "  joined via next-day retry: \(.joinedNextDay) (Kalshi dates in ET, Polymarket in UTC)"' "resp-$CAT.json" || true
-
-              # Write errors are what silently produced empty results for
-              # most of this project's history — surface, never swallow.
-              jq -r '[(.writes.marketsErrors // []), (.writes.embeddingErrors // []), (.writes.pairsErrors // [])] | add[:3][]? | "::warning::" + .' "resp-$CAT.json" || true
-            fi
-
-            echo "::endgroup::"
-            sleep 20   # space out long serverless calls
-          done
-
-          # Retention, after discovery rather than before: discovery
-          # refreshes updated_at on everything the venues still list, so
-          # running it first is what makes "not seen in N days" mean
-          # "delisted" instead of "not fetched yet".
-          echo "::group::prune"
-          if curl -sS --max-time 280 \
-              ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
-              "https://housedge.vercel.app/api/prune" -o prune.json; then
-            head -c 600 prune.json; echo
-            if jq -e '.error' prune.json >/dev/null 2>&1; then
-              echo "::warning::prune: $(jq -r '.error' prune.json)"
-            else
-              jq -r '"pruned \(.deleted) of \(.marketsScanned) markets, \(.pairsProtecting) protected"' prune.json
-              # Resolution text is stored for every market and readable
-              # only on paired ones, which was ~168MB of TOAST. Nulling
-              # it stops the growth; it does not shrink the reported
-              # database size until the table is rewritten.
-              jq -r 'if .resolutionCleared != null then
-                       "  resolution: cleared \(.resolutionCleared) unreadable of \(.resolutionRowsCarrying // 0) carrying"
-                     else empty end' prune.json || true
-              jq -r '(.resolutionErrors // [])[:3][] | "::warning::prune resolution: " + .' prune.json || true
-              jq -r '(.errors // [])[:3][] | "::warning::prune: " + .' prune.json || true
-            fi
-          else
-            echo "::warning::prune: curl failed"
-          fi
-          echo "::endgroup::"
-
-          exit $FAILED
+        run: node scripts/discover.mjs
