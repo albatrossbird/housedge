@@ -178,6 +178,17 @@ public repo, so the loop moved to the runner — the same move
   `kalshiSeriesUnpolled`, which must stay empty.
 - Needs `SUPABASE_URL` and `SUPABASE_ANON_KEY` as repository secrets.
   They were already set for `match-markets.yml`.
+- **A runner has no `node_modules`.** The first run died with
+  `ERR_MODULE_NOT_FOUND` on `@supabase/supabase-js`, which this file
+  used in exactly one place — every other read already went through
+  `restFetch`. That query is REST now, so the script needs no install
+  step, like `match-category.mjs` and the m15 scripts.
+- **The pairs read was the last OFFSET pager on a live path.**
+  `.range(from, from + 999)` with no `ORDER BY` — the same defect that
+  let the embedding read skip rows and buy them again. It is keyset now,
+  and a failed read THROWS rather than returning an empty pairs list,
+  because refreshing nothing because the read broke is the silent no-op
+  this job keeps being rewritten to stop.
 
 **What this does not fix.** `discover-markets.yml` still calls
 `/api/embed` and `/api/prune` on Vercel — roughly 6-10 minutes of

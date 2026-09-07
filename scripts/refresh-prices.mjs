@@ -26,7 +26,16 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
 // ifStale=0: the scheduled run always reads the venues. The cooldown
 // exists to bound what the BROWSER can ask for, and the runner is the
 // credentialed caller the route would have let through anyway.
-const r = await runRefresh({ ifStale: 0 });
+let r;
+try {
+  r = await runRefresh({ ifStale: 0 });
+} catch (err) {
+  // A clean one-line failure, not a stack trace. The workflow log is
+  // where this job is read from, and an unhandled rejection buries the
+  // reason under twelve frames of node internals.
+  console.error(`::error::refresh threw: ${err.message}`);
+  process.exit(1);
+}
 
 console.log(JSON.stringify(r, null, 1).slice(0, 2000));
 
