@@ -33,7 +33,17 @@ check("poly long numeric", seriesTickerOf("2174263314346390629056905015582624153
 
 // A ticker with no dash has no series to extract — a bare series name
 // is not a market id.
-check("no dash", seriesTickerOf("KXHOUSERACE"), null);
+// A DASHLESS TICKER IS ITS OWN SERIES, not a parse failure.
+//
+// Verified against the live exchange 2026-09-07: /series/KXTRUMPRESIGN
+// exists ("Trump resign") and /markets?series_ticker=KXTRUMPRESIGN
+// returns one ACTIVE market whose ticker is the same string. Both it
+// and KXTRUMPREMOVE are paired and rendered, and returning null here
+// meant /api/refresh could never poll them — the same freeze the
+// KX-prefix assumption caused, two markets wide instead of 79 series.
+check("single-market series", seriesTickerOf("KXTRUMPRESIGN"), "KXTRUMPRESIGN");
+check("single-market series 2", seriesTickerOf("KXTRUMPREMOVE"), "KXTRUMPREMOVE");
+check("dashless is its own series", seriesTickerOf("KXHOUSERACE"), "KXHOUSERACE");
 check("lowercase slug", seriesTickerOf("mlb-mil-nym-2026-08-27"), null);
 check("empty", seriesTickerOf(""), null);
 check("null", seriesTickerOf(null), null);
