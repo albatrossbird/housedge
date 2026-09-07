@@ -15,7 +15,17 @@ ok(seriesTickerOf("KXMLBGAME-26AUG271910MILNYM-NYM") === "KXMLBGAME", "sports ti
 ok(seriesTickerOf("512345") === null, "Polymarket numeric id has no series");
 ok(seriesTickerOf("") === null, "empty id");
 ok(seriesTickerOf(null) === null, "null id");
-ok(seriesTickerOf("KXGDP") === null, "bare series with no event is not a market ticker");
+// A DASHLESS TICKER IS ITS OWN SERIES. This asserted null on the
+// assumption that a bare series ticker never appears as a market id,
+// and live data disproves it: KXTRUMPRESIGN and KXTRUMPREMOVE are
+// single-market series whose one active market carries the same
+// string, and both are paired and rendered.
+//
+// It matters HERE too, not just in refresh. allowEmbed treats a null
+// series as "never gate" — that path exists for Polymarket, the scarce
+// side — so a dashless Kalshi market was escaping the series gate
+// entirely and being re-embedded whether or not it had ever paired.
+ok(seriesTickerOf("KXGDP") === "KXGDP", "a dashless ticker is its own series");
 
 // ── the gate ────────────────────────────────────────────────────
 const gate = buildSeriesGate({

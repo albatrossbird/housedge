@@ -195,6 +195,30 @@ public repo, so the loop moved to the runner — the same move
 function time a day, the next largest consumer. Same refactor if the
 budget is still tight.
 
+### Some Kalshi markets have no dash, because the market IS the series
+
+`seriesTickerOf` required a dash — `<SERIES>-<event>-<outcome>` — and
+returned null otherwise. **`KXTRUMPRESIGN` and `KXTRUMPREMOVE` are
+single-market series**: `/series/KXTRUMPRESIGN` exists ("Trump resign")
+and `/markets?series_ticker=KXTRUMPRESIGN` returns one ACTIVE market
+whose ticker is that same string. Both are paired and rendered, and
+both derived to null, so `/api/refresh` could never poll them.
+
+Same freeze as the KX-prefix assumption, two markets wide instead of 79
+series — and found the same way: by an alarm that names what it cannot
+derive rather than counting it. `kalshiUnderivableIds` had been in the
+response all along; nothing checked it until the job moved to the runner.
+
+A dashless ticker is now its own series. Safe in the other direction
+too: a multi-market series ticker stored as a market id would poll that
+series, match no market, and land in `kalshiPairedMissed` — visible,
+rather than silently unrefreshable.
+
+**It also mattered in `lib/embedGate.js`**, where `allowEmbed` treats a
+null series as "never gate" — a path that exists for Polymarket, the
+scarce side. So a dashless Kalshi market was escaping the series gate
+entirely and being re-embedded whether or not it had ever paired.
+
 ### Price freshness
 
 Three layers, because the scheduled job alone cannot deliver what a
