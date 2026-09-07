@@ -362,33 +362,68 @@ export default async function handler(req, res) {
     // POSTGREST CAPS AN RPC AT 1000 ROWS, AND THIS ONE WAS NEVER TOLD
     // OTHERWISE.
     //
-    // Every `.select()` in this codebase carries an explicit limit
-    // because of that cap; the RPC path did not, and nothing checked.
     // Measured 2026-09-07 on ?category=all: `pairCount: 501` and
     // `hidden.total: 499` — exactly 1000 rows of the 1,418 in `pairs`.
     // get_pairs orders by similarity DESC, so sports (an exact join, so
     // similarity 1.0) filled the front and politics came back 228 cards
     // of 376, economics 8 of 29.
     //
-    // The visible symptom was on the FRONT DOOR. A Kalshi market listed
-    // on both Polymarket venues is TWO rows, and the cut landed between
-    // them — so the same card returned two legs under ?category=politics
-    // and a lone global-only leg under ?category=all, and the home page
-    // featured markets a US account cannot trade while 38 US-tradable
-    // politics cards sat outside the window.
-    const PAIRS_ROW_CAP = 20000;
-    const { data, error } = await supabase
-      .rpc("get_pairs", { sport_tags: tags })
-      .limit(PAIRS_ROW_CAP);
+    // The visible symptom was on the FRONT DOOR, and it did not look
+    // like truncation. A Kalshi market listed on both Polymarket venues
+    // is TWO rows, and the cut landed BETWEEN them — so the same card
+    // returned two legs under ?category=politics and a lone global-only
+    // leg under ?category=all, and the home page featured markets a US
+    // account cannot trade while 38 US-tradable politics cards sat
+    // outside the window.
+    //
+    // A CLIENT `.limit()` DOES NOT LIFT THIS. `db-max-rows` is a
+    // server-side maximum in PostgREST: a client may ask for fewer rows
+    // than it, never more. Raising the limit to 20000 changed nothing —
+    // the response stayed at exactly 1000 — and worse, a truncation
+    // check written against that number could never fire, which is the
+    // same defect as a counter that can only be non-zero.
+    //
+    // So `all` FANS OUT: one call per tab, each comfortably under the
+    // cap (the largest, politics, is ~940 pairs), concatenated. That is
+    // why the per-category tabs were always correct and only the
+    // combined view was short. It needs no migration and makes `all`
+    // the sum of the tabs by construction.
+    //
+    // The cliff is still there, one category further out, so a group
+    // that comes back EXACTLY at the cap is reported rather than
+    // trusted — that is the day this needs real pagination, which in
+    // turn needs a deterministic ORDER BY in get_pairs, since its
+    // similarity sort has no tiebreaker and OFFSET paging over an
+    // unstable order skips rows.
+    const PAGE_CAP = 1000;
+    const groups = category === "all"
+      ? Object.entries(SPORT_TAGS).filter(([c]) => c !== "all")
+      : [[category, tags]];
 
-    if (error) throw error;
-    // A cap hit is a WRONG answer, not a smaller one — the lesson
-    // fetchAllRows had to learn twice. Say so rather than serving a
-    // silently partial catalogue.
-    const pairsTruncated = (data?.length || 0) >= PAIRS_ROW_CAP;
-    if (pairsTruncated) {
-      console.error(`get_pairs returned ${data.length} rows and hit the ${PAIRS_ROW_CAP} cap; the response is TRUNCATED`);
+    const rows = [];
+    const cappedGroups = [];
+    for (const [name, groupTags] of groups) {
+      const { data: part, error: partErr } = await supabase
+        .rpc("get_pairs", { sport_tags: groupTags });
+      if (partErr) throw partErr;
+      const got = part || [];
+      if (got.length >= PAGE_CAP) cappedGroups.push(`${name}: ${got.length}`);
+      rows.push(...got);
     }
+    if (cappedGroups.length) {
+      console.error(`get_pairs hit the ${PAGE_CAP}-row server cap for: ${cappedGroups.join(", ")} — the response is TRUNCATED`);
+    }
+    // Defensive: the groups are disjoint today, but a tag added to two
+    // of them would silently double a card's legs.
+    const seenPair = new Set();
+    const data = rows.filter(r => {
+      const k = `${r.kalshi_id}\u0000${r.polymarket_id}`;
+      if (seenPair.has(k)) return false;
+      seenPair.add(k);
+      return true;
+    });
+    const pairsTruncated = cappedGroups.length ? cappedGroups : null;
+
     if (!data || data.length === 0) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
@@ -795,7 +830,11 @@ export default async function handler(req, res) {
       // What the reader is looking at versus what exists, so a trimmed
       // response can never be mistaken for the whole set.
       cardCount: allCards.length,
-      ...(pairsTruncated ? { pairsTruncated: PAIRS_ROW_CAP } : {}),
+      // NAMED, not a boolean and not the cap number. Which category hit
+      // the wall is the whole question — and referencing a constant that
+      // no longer existed would have thrown at exactly the moment this
+      // needed to report something.
+      ...(pairsTruncated ? { pairsTruncated } : {}),
       trimmedTo: top || null,
       perCategory: perCategory || null,
       needsEmbed: cards.length === 0,
