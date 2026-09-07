@@ -100,6 +100,12 @@ for (const cat of CATEGORIES) {
       console.log(`  gate: skipped ${g.skipped} in tried-but-unproven series (proven ${g.seriesProven}, tried ${g.seriesTried})`);
       if (g.skippedSeries?.length) console.log(`  gate skipped: ${g.skippedSeries.slice(0, 8).join(" ")}`);
     }
+    // Rows a venue handed us twice. Expected and non-zero on econ,
+    // whose Polymarket side is five overlapping tags; a WRITE ERROR
+    // beside it would mean the dedupe missed a shape.
+    if (n(f.writes?.duplicateIdsDropped) > 0) {
+      console.log(`  duplicate ids dropped before write: ${f.writes.duplicateIdsDropped}`);
+    }
     for (const e of (f.writes?.marketsErrors || []).slice(0, 3)) warn(e);
     for (const e of (f.writes?.embeddingErrors || []).slice(0, 3)) warn(e);
     if (n(f.embedRemaining) > 0) warn(`${cat}: ${f.embedRemaining} titles still need embedding; next run continues`);

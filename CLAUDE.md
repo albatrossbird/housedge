@@ -214,6 +214,33 @@ Same move, same reasons, applied to the second largest consumer.
   incomplete Kalshi sweeps, `embedSpend.alreadyEmbedded`,
   `truncatedReads`, and the both-venues-keyed-but-zero-joined check.
 
+**The first non-sports runner run exposed a long-standing write bug.**
+Econ came back green with `marketsUpserted: 12949` and a warning nobody
+had ever seen:
+
+```
+21000  ON CONFLICT DO UPDATE command cannot affect row a second time
+```
+
+Postgres refuses a statement naming the same row twice, and PostgREST
+fails the **whole batch** — 50 markets unwritten, reported only as a
+smaller `marketsUpserted`. Econ hits it because its Polymarket side is
+**five overlapping tags** (federal reserve, interest rates, CPI,
+recession, GDP) and a Fed market carrying two of them is fetched twice
+and concatenated into `allMarkets`.
+
+It had been happening on Vercel too. The old shell workflow printed
+`writes.*Errors` only in the MATCH stage, never the fetch stage, so the
+fetch stage's write failures had no surface at all.
+
+`upsertRows` now dedupes on the **conflict target** — keyed on
+`onConflict` rather than on `"id"`, so the pairs table's
+`(kalshi_id, polymarket_id)` is covered by the same rule — and reports
+`duplicateIdsDropped`. Done at the choke point every write passes
+through, so no future caller has to remember.
+`scripts/upsert-dedupe.test.mjs` pins last-wins, the composite target,
+and that a clean batch is passed through untouched.
+
 ### Some Kalshi markets have no dash, because the market IS the series
 
 `seriesTickerOf` required a dash — `<SERIES>-<event>-<outcome>` — and
