@@ -190,10 +190,29 @@ public repo, so the loop moved to the runner — the same move
   because refreshing nothing because the read broke is the silent no-op
   this job keeps being rewritten to stop.
 
-**What this does not fix.** `discover-markets.yml` still calls
-`/api/embed` and `/api/prune` on Vercel — roughly 6-10 minutes of
-function time a day, the next largest consumer. Same refactor if the
-budget is still tight.
+### Discovery runs in the runner too
+
+Same move, same reasons, applied to the second largest consumer.
+`discover-markets.yml` curled `/api/embed` twice per category plus
+`/api/prune`; politics alone spends 86-109s of that.
+
+- **`lib/discover.js` / `lib/pruneMarkets.js`** hold the jobs as
+  `runEmbed()` / `runPrune()`, returning `{ status, body }` so the route
+  maps it to HTTP and `scripts/discover.mjs` reads the body. The routes
+  are KEPT — every hand-hittable mode (`?fetchonly=1`, `?matchonly=1`,
+  `?dry=1`, `?explain=`, `?reprobe=1`) still works, and both callers run
+  the same function.
+- **This one needs `npm ci`** where the refresh and m15 scripts do not:
+  `lib/discover.js` reads through supabase-js in a dozen places, and
+  rewriting all of them as REST would be a large change to the most
+  heavily commented file in the repo. Once a day at ~20s is a fair price.
+- **`VOYAGE_API_KEY` is now needed as a REPOSITORY secret**, not just in
+  Vercel. Sports categories never embed, so a sports-only run does not
+  need it; the script warns up front rather than leaving you to decode a
+  Voyage 401 from a runner that never needed a key before.
+- Every alarm the workflow's shell ran moved into the script unchanged —
+  incomplete Kalshi sweeps, `embedSpend.alreadyEmbedded`,
+  `truncatedReads`, and the both-venues-keyed-but-zero-joined check.
 
 ### Some Kalshi markets have no dash, because the market IS the series
 
