@@ -1505,12 +1505,24 @@ three-card window being too narrow to contain a US-tradable card
 worth fixing, but it is not why the legs were missing: they never
 arrived.
 
+**A CLIENT `.limit()` DOES NOT LIFT THIS, and trying it was the first
+wrong fix.** `db-max-rows` is a server-side maximum in PostgREST: a
+client may ask for fewer rows than it, never more. Raising the limit to
+20,000 left the response at exactly 1000 — and the truncation check
+written against that number could never fire, which is the same defect
+as a counter that can only be non-zero.
+
 Two fixes, and only the first is the bug:
 
-- **`.limit(PAIRS_ROW_CAP)` on the RPC**, set well above the table, with
-  the run reporting `pairsTruncated` if it is ever reached. A cap hit is
-  a wrong answer, not a smaller one — the lesson `fetchAllRows` had to
-  learn twice.
+- **`?category=all` FANS OUT**: one `get_pairs` call per tab, each
+  comfortably under the cap (the largest, politics, is ~940 pairs),
+  concatenated and deduped on `(kalshi_id, polymarket_id)`. That is why
+  the per-category tabs were always correct and only the combined view
+  was short, and it makes `all` the sum of the tabs by construction with
+  no migration. A group returning EXACTLY the cap is reported by name —
+  that is the day this needs real pagination, which in turn needs a
+  deterministic `ORDER BY` in `get_pairs`, since its similarity sort has
+  no tiebreaker and OFFSET paging over an unstable order skips rows.
 - **US-tradable cards sort ahead of global-only ones BEFORE
   `perCategory` is applied**, so the home page's per-category window
   cannot exclude the only card its reader can act on. Ranking before the
