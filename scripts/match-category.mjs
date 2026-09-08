@@ -49,11 +49,39 @@ async function rest(path) {
 // A read that fails must not look like an empty table: that mistake
 // once made a category read as zero stored markets while the live site
 // was serving pairs built from those very rows.
+//
+// KEYSET, AND ORDERED — it was NEITHER, and both halves were bugs. This
+// was the last OFFSET pager on a live path, and it broke on 2026-09-08:
+//
+//   GET markets?select=id,title,platform,sport_tag,embedding_v
+//       -> 500 {"code":"57014","message":"canceling statement due to
+//                statement timeout"}
+//
+// so POLITICS COULD NOT MATCH AT ALL. `offset=N` makes Postgres scan
+// and discard every row before the window, so paging a category costs
+// O(n^2) and the LAST pages are the slowest — which is why this worked
+// for months and then stopped: `markets` went from 63,000 rows to
+// 133,000 when the polymarket.us page cap was lifted, and the final
+// offsets stopped fitting inside the statement timeout. Keyset paging
+// reads each page from an index seek, so page 60 costs what page 1
+// costs.
+//
+// It also had NO `order` at all. Postgres promises nothing about row
+// order without one and may return a different order for the same
+// query, so consecutive pages could overlap or SKIP rows outright — a
+// skipped Kalshi row is a market that silently cannot pair, and a
+// skipped Polymarket row is a candidate nothing can match against.
+//
+// The halving retry is kept but demoted: it is for payload-size
+// failures, and it could never have fixed this one — the cost was the
+// offset scan, not the bytes.
 async function readAll(select, extra) {
   const out = [];
   let size = 500;
-  for (let from = 0; from < 200000; ) {
-    const path = `markets?select=${select}&${extra}&offset=${from}&limit=${size}`;
+  let last = null;
+  for (let page = 0; page < 1000; page++) {
+    const after = last == null ? "" : `&id=gt.${encodeURIComponent(last)}`;
+    const path = `markets?select=${select}&${extra}${after}&order=id.asc&limit=${size}`;
     let rows;
     try {
       rows = await rest(path);
@@ -62,10 +90,15 @@ async function readAll(select, extra) {
       throw err;
     }
     out.push(...rows);
-    if (rows.length < size) break;
-    from += rows.length;
+    if (rows.length < size) return out;
+    last = rows[rows.length - 1].id;
   }
-  return out;
+  // Falling out of the loop means the page cap was reached without a
+  // short page, which is a TRUNCATION, not an answer — and a short read
+  // here silently drops candidates the matcher then reports as
+  // unmatched. The halving retry can shrink `size`, so the cap is not a
+  // fixed row count and must be checked rather than assumed generous.
+  throw new Error(`readAll hit its page cap at ${out.length} rows (page size ${size}) — the read is TRUNCATED`);
 }
 
 const t0 = Date.now();
