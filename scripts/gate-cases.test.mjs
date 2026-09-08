@@ -20,6 +20,37 @@ const REJECT = [
 // Politics: Kalshi's Elections category against Polymarket's. Every
 // REJECT here was accepted by a real dry run and read wrong by hand.
 const REJECT_POL = [
+  // ── From the implausible-spread audit, 2026-09-08 ─────────────
+  // The largest single family in it: a STATE CHAMBER against a
+  // CONGRESSIONAL DISTRICT. Nothing already in the gate separated
+  // them — districtCodes rejects only on mutual disagreement and the
+  // chamber side names no district, statesNamed sees the same state on
+  // both, officesNamed sees "house" on both.
+  ["Who will win the Florida House of Representatives? — Republican party",
+   "Will the Republican Party win the FL-23 House seat?"],
+  ["Who will win the Iowa State House? — Democratic party",
+   "Will the Democratic Party win the IA-01 House seat?"],
+  ["Who will win the Arizona State House? — Republican party",
+   "Will the Republican Party win the AZ-04 House seat?"],
+  ["Who will win the North Carolina State House? — Republican party",
+   "Will the Republican Party win the NC-01 House seat?"],
+  ["Who will win the Pennsylvania State House election? — Democratic party",
+   "Will the Democratic Party win the PA-01 House seat?"],
+  // A state assembly against a governorship: the assembly stated no
+  // office at all before, so the office check could not fire.
+  ["Who will win the Wisconsin State Assembly? — Democratic party",
+   "Will the Democrats win the Wisconsin governor race in 2026?"],
+  // Kalshi runs FOMC dissent as one question per governor; Polymarket
+  // runs it as a headcount. A named individual dissenting and NOBODY
+  // dissenting are near-complements, and hasNegation does not fire
+  // because "no one" is deliberately not an inverter.
+  ["Who will dissent at the September 2026 FOMC meeting? — Beth Hammack",
+   "Will no one dissent the September Fed decision?"],
+  ["Who will dissent at the September 2026 FOMC meeting? — Michael Barr",
+   "Will three people dissent the September Fed decision?"],
+  ["Who will dissent at the September 2026 FOMC meeting? — Neel Kashkari",
+   "Will two people dissent the December Fed decision?"],
+
   // ── Live on the site until it was measured ────────────────────
   // Each of these was RENDERING as a card, with the two venues shown
   // disagreeing by 35 to 86 points. The gap was the evidence; the
