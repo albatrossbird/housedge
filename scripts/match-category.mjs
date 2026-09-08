@@ -41,7 +41,19 @@ async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
     headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
   });
-  if (!r.ok) throw new Error(`GET ${path.slice(0, 60)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 200);
+    // 57014 on this query means the predicate has no index, not that
+    // the page is too big — the pager's halving retry shrank the page
+    // to 62 rows and still timed out, because the LAST page has to walk
+    // the rest of the table to prove there are no more matches. Name
+    // the migration rather than leaving the next reader to rediscover
+    // it from a bare Postgres code.
+    const hint = body.includes("57014")
+      ? " — run supabase/migrations/0018_markets_category_index.sql"
+      : "";
+    throw new Error(`GET ${path.slice(0, 60)} -> ${r.status} ${body}${hint}`);
+  }
   return r.json();
 }
 
