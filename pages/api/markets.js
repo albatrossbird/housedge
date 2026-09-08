@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
 import { tradeableArb, complementBook, realBook } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
+import { fetchTokenIdsBySlug, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -165,6 +166,85 @@ async function verifyKalshiDepth(pairs) {
   }
 
   return { checked, corrected };
+}
+
+// Re-check the touch size for the POLYMARKET leg of pairs that look
+// profitable, live, from the CLOB order book.
+//
+// This is the other half of verifyKalshiDepth, and it closes the gap
+// that made most of the site's arb signal unverifiable. Gamma — which
+// every other read here uses — publishes `liquidity` (a pooled
+// aggregate) and best prices, but no size at the touch, so a
+// polymarket.com leg has always passed null into the maths and left
+// `maxContracts` an upper bound set by the Kalshi side alone.
+//
+// That mattered more than it sounds: 45 of the 54 profitable legs the
+// site shows are polymarket.com only, so the majority of the arb
+// signal had no size behind it at all — and an edge without a size is
+// not a finding.
+//
+// Scoped exactly like the Kalshi check: only pairs the maths already
+// calls profitable, which is a handful, and only their Polymarket leg.
+// It is two round trips (slug -> token id, token id -> book) rather
+// than one because the token id is not stored; both are batched, and
+// the whole thing runs concurrently with the Kalshi check.
+//
+// polymarket.us is NOT handled here — it publishes bidDepth/askDepth on
+// its own /bbo endpoint and already arrives with real sizes.
+async function verifyPolyDepth(pairs) {
+  const profitable = pairs.filter(
+    p => p.arb && p.arb.profitable && p._polySlug && p.poly && !p.poly.usTradable
+  );
+  if (!profitable.length) return { checked: 0, corrected: 0 };
+
+  const errors = [];
+  const { tokensBySlug, errors: tokErrors } = await fetchTokenIdsBySlug(
+    profitable.map(p => p._polySlug)
+  );
+  errors.push(...tokErrors);
+
+  // One book per market: a binary CLOB's two tokens are exact
+  // complements in size as well as price, so token[0] backs both sides
+  // and reading the second would be a second copy of the same numbers.
+  const wanted = [];
+  for (const p of profitable) {
+    const ids = tokensBySlug.get(p._polySlug);
+    if (ids && ids[0]) wanted.push(ids[0]);
+  }
+  const { books, errors: bookErrors } = await fetchClobBooks(wanted);
+  errors.push(...bookErrors);
+
+  let checked = 0, corrected = 0;
+  for (const p of profitable) {
+    const ids = tokensBySlug.get(p._polySlug);
+    const touch = ids && ids[0] ? books.get(String(ids[0])) : null;
+    if (!touch) { p.arb.polyDepthVerified = false; continue; }
+
+    const { yesBidSize, yesAskSize } = sizesForOutcome(touch, p._polyIdx);
+
+    // Which Polymarket queue backs this trade. Taking the poly YES side
+    // lifts its ask; taking poly NO is the same trade as selling YES,
+    // so the YES bid queue is what backs it — the identity Kalshi's
+    // book already relies on, and one this venue's own numbers confirm
+    // (token[1].ask size equals token[0].bid size, exactly).
+    const takesPolyYes = String(p.arb.side || "").startsWith("poly-yes");
+    const liveSize = takesPolyYes ? yesAskSize : yesBidSize;
+    if (liveSize == null) { p.arb.polyDepthVerified = false; continue; }
+    checked++;
+
+    const before = p.arb.maxContracts;
+    const next = before == null ? liveSize : Math.min(before, liveSize);
+    if (before != null && Math.abs(next - before) > 0.01) corrected++;
+
+    p.arb.maxContracts = next;
+    p.arb.edgeDollars = Math.round(p.arb.edge * next * 100) / 100;
+    p.arb.polyDepthVerified = true;
+    // Both legs now have a real size behind them, so this is no longer
+    // an upper bound taken from one side.
+    if (p.arb.depthVerified) p.arb.depthKnown = true;
+  }
+
+  return { checked, corrected, errors: errors.slice(0, 3) };
 }
 
 // Age of the stalest timestamp given, in seconds.
@@ -619,6 +699,13 @@ export default async function handler(req, res) {
           // identity as well.
           _implausible: implausible,
           _spreadPts: spreadPts,
+          // Carried only so the live depth re-check can ask the CLOB
+          // for this leg's book: the slug names the market and the
+          // outcome index says which side of the binary the leg is.
+          // Stripped with the other underscore fields before the
+          // response is built.
+          _polySlug: row.p_slug || null,
+          _polyIdx: idx,
           pairId: `${row.kalshi_id}|${row.polymarket_id}`,
           id: row.kalshi_id,
           title: cleanTitle(row.k_title),
@@ -770,10 +857,19 @@ export default async function handler(req, res) {
         // finding.
         if (m._implausible) return note("implausibleSpread");
         return true;
-      })
-      .map(({ _gameDate, _implausible, _spreadPts, ...m }) => m);
+      });
 
-    const depthCheck = await verifyKalshiDepth(shaped);
+    // The depth re-checks read `_polySlug` / `_polyIdx`, so the
+    // underscore fields are stripped AFTER them, not before.
+    const [depthCheck, polyDepthCheck] = await Promise.all([
+      verifyKalshiDepth(shaped),
+      verifyPolyDepth(shaped),
+    ]);
+    for (const m of shaped) {
+      delete m._gameDate; delete m._implausible; delete m._spreadPts;
+      delete m._polySlug; delete m._polyIdx;
+    }
+
     const priced = shaped.filter(m => m.arb).length;
     // After the depth re-check, so every leg carries its final numbers.
     const allCards = mergeByKalshiMarket(shaped);
@@ -902,6 +998,13 @@ export default async function handler(req, res) {
         // how many had a stored depth that no longer held.
         depthChecked: depthCheck.checked,
         depthCorrected: depthCheck.corrected || 0,
+        // The Polymarket half, reported separately. A polymarket.com
+        // leg had no size at all until the CLOB book was wired in, and
+        // most of the site's profitable legs are on that venue — so a
+        // combined counter would hide which side is actually verified.
+        polyDepthChecked: polyDepthCheck.checked || 0,
+        polyDepthCorrected: polyDepthCheck.corrected || 0,
+        ...(polyDepthCheck.errors?.length ? { polyDepthErrors: polyDepthCheck.errors } : {}),
         // Pairs whose maths says profitable but whose cross-venue gap
         // says "look at the data instead". Worth watching: a rising
         // count means matching quality is slipping.
