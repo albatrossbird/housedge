@@ -106,8 +106,19 @@ for (const cat of CATEGORIES) {
     if (n(f.writes?.duplicateIdsDropped) > 0) {
       console.log(`  duplicate ids dropped before write: ${f.writes.duplicateIdsDropped}`);
     }
-    for (const e of (f.writes?.marketsErrors || []).slice(0, 3)) warn(e);
-    for (const e of (f.writes?.embeddingErrors || []).slice(0, 3)) warn(e);
+    // A WRITE THAT FAILED IS NOT A WARNING. Econ came back green with
+    // marketsUpserted=13563 beside a 57014 statement timeout printed as
+    // a warning, so ~50 markets went unwritten on a run with a tick.
+    // Downstream nothing can tell an unwritten market from a delisted
+    // one, and /api/prune deletes on exactly that rule.
+    if (n(f.writes?.splitRetries) > 0) {
+      console.log(`  write batches split to fit: ${f.writes.splitRetries}`);
+    }
+    if (n(f.writes?.rowsFailed) > 0) {
+      fail(`${cat}: ${f.writes.rowsFailed} rows went UNWRITTEN — they will read as delisted and are prune candidates`);
+    }
+    for (const e of (f.writes?.marketsErrors || []).slice(0, 3)) fail(`${cat} write: ${e}`);
+    for (const e of (f.writes?.embeddingErrors || []).slice(0, 3)) fail(`${cat} embedding write: ${e}`);
     if (n(f.embedRemaining) > 0) warn(`${cat}: ${f.embedRemaining} titles still need embedding; next run continues`);
 
     if (!SPORTS_MATCHED_HERE.has(cat)) {
