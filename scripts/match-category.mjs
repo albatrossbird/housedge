@@ -95,11 +95,25 @@ async function readAll(select, extra) {
     const after = last == null ? "" : `&id=gt.${encodeURIComponent(last)}`;
     const path = `markets?select=${select}&${extra}${after}&order=id.asc&limit=${size}`;
     let rows;
+    // PER-PAGE TIMING, because two fixes for this read were shipped on a
+    // guess about WHICH page was slow and both were wrong. A read that
+    // fails after two minutes tells you nothing on its own: the first
+    // page timing out means the predicate has no usable index, while a
+    // late page timing out means something about the tail. The log now
+    // says which, so the next change is a measurement rather than a
+    // third theory.
+    const tPage = Date.now();
     try {
       rows = await rest(path);
     } catch (err) {
+      console.log(`  page ${page} FAILED after ${((Date.now() - tPage) / 1000).toFixed(1)}s at size=${size}, ${out.length} rows read so far`);
       if (size > 100) { size = Math.floor(size / 2); continue; } // payload too big
       throw err;
+    }
+    const ms = Date.now() - tPage;
+    // Only the slow ones, so a healthy read stays quiet.
+    if (page === 0 || ms > 2000) {
+      console.log(`  page ${page}: ${rows.length} rows in ${(ms / 1000).toFixed(1)}s (${out.length + rows.length} total)`);
     }
     out.push(...rows);
     if (rows.length < size) return out;
