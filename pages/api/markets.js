@@ -565,7 +565,11 @@ export default async function handler(req, res) {
     const priceFromBook = { kalshi: 0, poly: 0 };
     let noExecutablePrice = 0;
     let implausibleArbs = 0;
-    const sampleDropped = [];
+    // Per-reason, so one noisy reason cannot crowd out the one being
+    // investigated. See the note() comment below.
+    const sampleByReason = {};
+    const wantDebug = req.query.debug === "1";
+    const DEBUG_SAMPLE_PER_REASON = 120;
 
     const shaped = data
       .map(row => {
@@ -828,12 +832,28 @@ export default async function handler(req, res) {
         // invisible: an empty tab looks identical whether nothing
         // matched, everything is priced outside the band, or every
         // fixture has already been played. ?debug=1 reports the split.
+        //
+        // The sample is capped PER REASON, not in total. One cap
+        // across all five let the first reason encountered fill it —
+        // and the reason worth reading is `implausibleSpread`, which
+        // is the matcher failing rather than the product working, so
+        // it was the one you could never see. Auditing those pairs is
+        // the only way to tell a negation from a wrong threshold from
+        // a genuinely ambiguous claim, and it needs the whole list,
+        // not five rows of whatever sorted first.
+        //
+        // Only collected under ?debug=1, so a normal request pays
+        // nothing for it.
         const note = r => {
           dropped[r]++;
-          if (sampleDropped.length < 5) {
-            sampleDropped.push({
-              reason: r, id: m.id, title: (m.title || "").slice(0, 70),
+          if (wantDebug && (sampleByReason[r] = sampleByReason[r] || []).length < DEBUG_SAMPLE_PER_REASON) {
+            sampleByReason[r].push({
+              reason: r, id: m.id, title: (m.title || "").slice(0, 110),
+              polyTitle: (m.polyTitle || "").slice(0, 110),
+              similarity: m.similarity,
               k: m.kalshi.yes, p: m.poly.yes,
+              spreadPts: Math.round(m._spreadPts * 10) / 10,
+              venue: m.poly.venue,
               gameDate: m._gameDate ? m._gameDate.toISOString().slice(0, 10) : null,
             });
           }
@@ -1031,7 +1051,7 @@ export default async function handler(req, res) {
         total: data.length - shaped.length,
       },
       ...(req.query.debug === "1"
-        ? { debug: { rowsFromRpc: data.length, dropped, sampleDropped: sampleDropped.slice(0, 5) } }
+        ? { debug: { rowsFromRpc: data.length, dropped, sampleByReason } }
         : {}),
     });
   } catch (err) {
