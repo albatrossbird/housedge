@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
-import { tradeableArb, complementBook, realBook } from "../../lib/fees.js";
+import { tradeableArb, complementBook, realBook, midpointIsMeaningful } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 import { fetchTokenIdsById, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
 
@@ -388,8 +388,22 @@ function mergeByKalshiMarket(pairs) {
 function bookMid(bid, ask, fallback) {
   const b = Number(bid), a = Number(ask);
   if (Number.isFinite(b) && Number.isFinite(a) && a >= b && a > 0) {
+    // A BOOK WIDER THAN WIDE_BOOK_PTS HAS NO MIDPOINT WORTH SHOWING,
+    // and the fallback is NOT reached for it — that is the whole point.
+    //
+    // The stored outcome price for these markets is the venue's own
+    // placeholder: the untraded college-football games read
+    // ["0.495","0.505"]. Falling through to it would replace one
+    // fabricated 50% with another and look like a fix. Returning null
+    // means "no price", which is what the market actually has, and the
+    // pair then drops out under `missingPrice` rather than rendering a
+    // confident comparison against a number nobody quoted.
+    if (!midpointIsMeaningful(b, a)) return null;
     return Math.round(((b + a) / 2) * 10000) / 10000;
   }
+  // No usable book at all is a different case: the stored price may be
+  // a real traded quote we simply have no book for, so the fallback
+  // stands here.
   return fallback;
 }
 
@@ -563,6 +577,9 @@ export default async function handler(req, res) {
     // stored last-trade figure. A large poly number is the bug this
     // replaced still being present in the data.
     const priceFromBook = { kalshi: 0, poly: 0 };
+    // Legs whose two-sided book was too wide for its midpoint to mean
+    // anything — see WIDE_BOOK_PTS in lib/fees.js.
+    const wideBook = { kalshi: 0, poly: 0 };
     let noExecutablePrice = 0;
     let implausibleArbs = 0;
     // Per-reason, so one noisy reason cannot crowd out the one being
@@ -650,6 +667,12 @@ export default async function handler(req, res) {
         const kNoBook = realBook(row.k_no_bid, row.k_no_ask);
         const pYesShown = bookMid(polyBook.bid, polyBook.ask, pYes);
         const kYesShown = bookMid(kBook.bid, kBook.ask, row.k_yes_price);
+        // Named, not inferred from a smaller card count. These legs used
+        // to render a fabricated ~50%; they now have no price, and the
+        // difference between "we lost a price" and "the venue never
+        // quoted one" is exactly what a counter is for.
+        if (pYesShown == null && polyBook.bid != null && polyBook.ask != null) wideBook.poly++;
+        if (kYesShown == null && kBook.bid != null && kBook.ask != null) wideBook.kalshi++;
         if (pYesShown !== pYes) priceFromBook.poly++;
         if (kYesShown !== row.k_yes_price) priceFromBook.kalshi++;
 
@@ -1012,6 +1035,7 @@ export default async function handler(req, res) {
       // exist.
       feesIncluded: priced > 0,
       priceFromBook,
+      wideBookSuppressed: wideBook,
       pricing: {
         priced,
         noExecutablePrice,
