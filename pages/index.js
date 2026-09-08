@@ -6,6 +6,7 @@ import { useRouter } from "next/router";
 // came to suppress a bad pair on the page while the API went on
 // publishing `profitable: true` for it.
 import { positionAtSize } from "../lib/fees.js";
+import { legsForUsView } from "../lib/venueDisplay.js";
 
 // Brand palette, sampled from the MarketSlap logo artwork rather than
 // eyeballed: the wordmark's two inks and the app-icon tile.
@@ -317,6 +318,21 @@ function SpreadBar({ market }) {
       {widestBook != null && (
         <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.03em", paddingLeft: 106 }}>
           widest book {widestBook.toFixed(1)}pt
+        </span>
+      )}
+      {/* A global leg that agrees with the US one to within a couple of
+          points, and offers no edge, is not shown as a third bar — it
+          would repeat the row above it. It is SAID instead, because a
+          leg that silently vanishes is indistinguishable from a market
+          the other venue does not list, and those are different facts.
+
+          BELOW the book caption, not above it: that one describes the
+          bars it sits under, so a line about a leg that is NOT shown
+          must not come between them. paddingLeft matches the bars'
+          left edge. */}
+      {market.collapsedGlobal && (
+        <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.03em", paddingLeft: 106 }}>
+          also on polymarket.com, within {market.collapsedGlobal.gapPts.toFixed(1)}pt
         </span>
       )}
     </div>
@@ -884,8 +900,17 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
   // NOT on polymarket.us: drop its only Polymarket leg and what is left
   // is a price-COMPARISON card with one price on it. So the rule is the
   // most-traded market in each category THAT HAS A US LEG.
+  //
+  // The tab and the front door must apply the SAME rule, or the same
+  // market shows two bars here and three one click away — which is the
+  // exact inconsistency this block was written to remove. So this uses
+  // legsForUsView too: a global leg that prices materially apart, or
+  // carries an edge, keeps its row here as well.
   const usLegs = m => legsOf(m).filter(l => l.poly.usTradable);
-  const toUs = m => ({ ...m, legs: usLegs(m) });
+  const toUs = m => {
+    const { legs, collapsed } = legsForUsView(legsOf(m));
+    return { ...m, legs, collapsedGlobal: collapsed };
+  };
 
   // The API returns up to three per tab, already ranked by volume. The
   // first US-tradable one of each tab becomes a full card; everything
@@ -1365,11 +1390,27 @@ export default function HouseEdge() {
   // entirely under "US only" would hide a market the reader can
   // actually trade, and showing it with its .com leg still attached
   // would quote them a price they cannot take.
+  //
+  // Under "US", a global leg is not simply dropped — see
+  // lib/venueDisplay.js. 43 of the 52 profitable legs the site finds
+  // are polymarket.com only, so dropping them removes most of the arb
+  // signal for the readers most likely to act on it; but on cards
+  // carrying both, the median gap between the two venues is 0.6pt, so
+  // showing every one repeats the row above it. A global leg earns its
+  // row by pricing materially apart or by carrying an edge, and
+  // otherwise collapses to a line of text rather than vanishing.
   const byVenue = venue === "all"
     ? markets
-    : markets
-        .map(m => ({ ...m, legs: legsOf(m).filter(l => venueOf(l) === venue) }))
-        .filter(m => m.legs.length > 0);
+    : venue === "us"
+      ? markets
+          .map(m => {
+            const { legs, collapsed } = legsForUsView(legsOf(m));
+            return { ...m, legs, collapsedGlobal: collapsed };
+          })
+          .filter(m => m.legs.length > 0)
+      : markets
+          .map(m => ({ ...m, legs: legsOf(m).filter(l => venueOf(l) === venue) }))
+          .filter(m => m.legs.length > 0);
 
   // Derived from the VENUE-FILTERED set, not from every market. Counting
   // the unfiltered list would let a chip read "NFL 25" and then show
