@@ -9,7 +9,7 @@
 //
 // Run: node scripts/poly-clob.test.mjs
 
-import { touchOf, sizesForOutcome, fetchClobBooks, fetchTokenIdsBySlug, CLOB_BOOKS_BATCH } from "../lib/polymarketClob.js";
+import { touchOf, sizesForOutcome, fetchClobBooks, fetchTokenIdsById, CLOB_BOOKS_BATCH } from "../lib/polymarketClob.js";
 
 let failures = 0;
 function check(name, cond, detail = "") {
@@ -92,24 +92,50 @@ console.log("\nthe 200-book batch cap is chunked, and a short batch is reported"
   check("and it names both numbers", /150 of 200/.test(r.errors[0] || ""), r.errors[0] || "");
 }
 
-console.log("\ntoken lookup sends slug as a repeated key with an explicit limit");
+console.log("\ntoken lookup is keyed on the MARKET ID, not the slug");
 {
   let seenUrl = "";
   const fakeGamma = async (url) => {
     seenUrl = url;
     return { ok: true, status: 200, json: async () => ([
-      { slug: "a", clobTokenIds: JSON.stringify(["ta0", "ta1"]) },
-      { slug: "b", clobTokenIds: ["tb0", "tb1"] },
+      { id: 703258, clobTokenIds: JSON.stringify(["ta0", "ta1"]) },
+      { id: "665374", clobTokenIds: ["tb0", "tb1"] },
     ]) };
   };
-  const r = await fetchTokenIdsBySlug(["a", "b", "a"], { fetchImpl: fakeGamma });
+  const r = await fetchTokenIdsById(["703258", "665374", "703258"], { fetchImpl: fakeGamma });
   check("duplicates are collapsed", r.asked === 2, `asked=${r.asked}`);
-  check("slug is repeated, not comma-joined", /slug=a&slug=b/.test(seenUrl), seenUrl);
+  check("id is repeated, not comma-joined", /id=703258&id=665374/.test(seenUrl), seenUrl);
   // Gamma applies a default limit of 20 to a batch of any size and
   // returns the truncated list with a 200 — the same trap as /books.
   check("limit is sent explicitly", /[?&]limit=\d+/.test(seenUrl), seenUrl);
-  check("a JSON-string token list is parsed", r.tokensBySlug.get("a")?.[0] === "ta0");
-  check("an array token list works too", r.tokensBySlug.get("b")?.[0] === "tb0");
+  // `closed=true` is a FILTER, not an include-flag: it returned 0 of 6
+  // live ids. Sending it would silently check nothing.
+  check("closed= is never sent", !/closed=/.test(seenUrl), seenUrl);
+  check("a JSON-string token list is parsed", r.tokensById.get("703258")?.[0] === "ta0");
+  check("a numeric id keys as a string", r.tokensById.get("665374")?.[0] === "tb0");
+}
+
+console.log("\nthe bug the first version shipped: an EVENT slug answers nothing");
+{
+  // markets.slug holds "gdp-growth-in-2026" — one event carrying every
+  // GDP bucket. Gamma's ?slug= wants a market slug, so a batch of these
+  // returned 0 rows, and the check silently verified 2 of 45 legs.
+  // Non-numeric keys are now filtered BEFORE the request, because one
+  // of them 422s the entire batch.
+  let called = 0;
+  const fakeGamma = async () => { called++; return { ok: true, status: 200, json: async () => [] }; };
+  const r = await fetchTokenIdsById(["gdp-growth-in-2026", "what-price-will-bitcoin-hit-before-2027"], { fetchImpl: fakeGamma });
+  check("no request is made for non-numeric keys", called === 0, `called=${called}`);
+  check("and it SAYS they were skipped", r.errors.some(e => /non-numeric/.test(e)), JSON.stringify(r.errors));
+}
+
+{
+  // One bad id must not cost the whole chunk — gamma 422s the batch.
+  let askedIds = "";
+  const fakeGamma = async (url) => { askedIds = url; return { ok: true, status: 200, json: async () => ([{ id: "703258", clobTokenIds: ["t0"] }]) }; };
+  const r = await fetchTokenIdsById(["703258", "KXMLBGAME-26SEP08"], { fetchImpl: fakeGamma });
+  check("the Kalshi ticker is dropped, the good id survives", r.asked === 1 && !/KXMLBGAME/.test(askedIds), askedIds);
+  check("the good id still resolves", r.tokensById.get("703258")?.[0] === "t0");
 }
 
 console.log("\na failing venue leaves depth UNKNOWN rather than guessing");
@@ -119,8 +145,8 @@ console.log("\na failing venue leaves depth UNKNOWN rather than guessing");
   check("no books invented", r.books.size === 0);
   check("the failure is reported", r.errors.some(e => /503/.test(e)), JSON.stringify(r.errors));
   const thrown = async () => { throw new Error("socket hang up"); };
-  const r2 = await fetchTokenIdsBySlug(["a"], { fetchImpl: thrown });
-  check("a thrown fetch does not take the request down", r2.tokensBySlug.size === 0 && r2.errors.length === 1);
+  const r2 = await fetchTokenIdsById(["703258"], { fetchImpl: thrown });
+  check("a thrown fetch does not take the request down", r2.tokensById.size === 0 && r2.errors.length === 1);
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");

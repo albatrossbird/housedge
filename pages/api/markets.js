@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
 import { tradeableArb, complementBook, realBook } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
-import { fetchTokenIdsBySlug, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
+import { fetchTokenIdsById, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -193,13 +193,13 @@ async function verifyKalshiDepth(pairs) {
 // its own /bbo endpoint and already arrives with real sizes.
 async function verifyPolyDepth(pairs) {
   const profitable = pairs.filter(
-    p => p.arb && p.arb.profitable && p._polySlug && p.poly && !p.poly.usTradable
+    p => p.arb && p.arb.profitable && p._polyId && p.poly && !p.poly.usTradable
   );
   if (!profitable.length) return { checked: 0, corrected: 0 };
 
   const errors = [];
-  const { tokensBySlug, errors: tokErrors } = await fetchTokenIdsBySlug(
-    profitable.map(p => p._polySlug)
+  const { tokensById, errors: tokErrors } = await fetchTokenIdsById(
+    profitable.map(p => p._polyId)
   );
   errors.push(...tokErrors);
 
@@ -208,7 +208,7 @@ async function verifyPolyDepth(pairs) {
   // and reading the second would be a second copy of the same numbers.
   const wanted = [];
   for (const p of profitable) {
-    const ids = tokensBySlug.get(p._polySlug);
+    const ids = tokensById.get(p._polyId);
     if (ids && ids[0]) wanted.push(ids[0]);
   }
   const { books, errors: bookErrors } = await fetchClobBooks(wanted);
@@ -216,7 +216,7 @@ async function verifyPolyDepth(pairs) {
 
   let checked = 0, corrected = 0;
   for (const p of profitable) {
-    const ids = tokensBySlug.get(p._polySlug);
+    const ids = tokensById.get(p._polyId);
     const touch = ids && ids[0] ? books.get(String(ids[0])) : null;
     if (!touch) { p.arb.polyDepthVerified = false; continue; }
 
@@ -700,11 +700,12 @@ export default async function handler(req, res) {
           _implausible: implausible,
           _spreadPts: spreadPts,
           // Carried only so the live depth re-check can ask the CLOB
-          // for this leg's book: the slug names the market and the
-          // outcome index says which side of the binary the leg is.
+          // for this leg's book. The ID, not the slug: `markets.slug`
+          // holds the EVENT slug on polymarket.com and gamma's ?slug=
+          // filter wants a market slug, so slugs return nothing.
           // Stripped with the other underscore fields before the
           // response is built.
-          _polySlug: row.p_slug || null,
+          _polyId: row.polymarket_id || null,
           _polyIdx: idx,
           pairId: `${row.kalshi_id}|${row.polymarket_id}`,
           id: row.kalshi_id,
@@ -859,7 +860,7 @@ export default async function handler(req, res) {
         return true;
       });
 
-    // The depth re-checks read `_polySlug` / `_polyIdx`, so the
+    // The depth re-checks read `_polyId` / `_polyIdx`, so the
     // underscore fields are stripped AFTER them, not before.
     const [depthCheck, polyDepthCheck] = await Promise.all([
       verifyKalshiDepth(shaped),
@@ -867,7 +868,7 @@ export default async function handler(req, res) {
     ]);
     for (const m of shaped) {
       delete m._gameDate; delete m._implausible; delete m._spreadPts;
-      delete m._polySlug; delete m._polyIdx;
+      delete m._polyId; delete m._polyIdx;
     }
 
     const priced = shaped.filter(m => m.arb).length;
