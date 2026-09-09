@@ -96,11 +96,29 @@ for (const s of series) {
   // The price PATH. Only exists from the day the recorder started, and
   // a day not recorded is gone for good — so the count is reported
   // even when it is small, rather than the section being skipped.
-  const tickers = new Set(mk.map(m => m.ticker));
+  // SAMPLE THE MOST RECENT MARKETS, NOT THE FIRST 300.
+  //
+  // The first version sliced the ticker list as it came back, which is
+  // keyset order — alphabetical — and "26AUG" sorts before "26SEP", so
+  // it sampled AUGUST markets and asked whether a recorder that only
+  // started on 2026-09-06 had quotes for them. It reported `0` and the
+  // recorder was working fine.
+  //
+  // Same defect as the page log that printed only slow pages and made
+  // page cost look independent of page size: a biased sample read as
+  // if it were the population. Sorted by close_time, newest first.
+  const recent = mk
+    .filter(m => m.close_time)
+    .sort((a, b) => String(b.close_time).localeCompare(String(a.close_time)))
+    .slice(0, 300)
+    .map(m => m.ticker);
   const q = await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-    `ticker=in.(${[...tickers].slice(0, 300).map(t => `"${t}"`).join(",")})&`);
+    `ticker=in.(${recent.map(t => `"${t}"`).join(",")})&`);
   const covered = new Set(q.map(r => r.ticker));
-  console.log(`  quote rows         ${q.length} across ${covered.size} markets (sampled 300 tickers)`);
+  console.log(`  quote rows         ${q.length} across ${covered.size} of the 300 most recent markets`);
+  if (recent.length) {
+    console.log(`  newest sampled     ${recent[0]}  (closes ${String(mk.find(m => m.ticker === recent[0]).close_time).slice(0, 16)})`);
+  }
   if (q.length) {
     const late = q.filter(r => Number(r.secs_to_close) > 0 && Number(r.secs_to_close) <= 120);
     console.log(`  in the last 2 min  ${late.length} rows — the window a short-horizon signal would trade`);
