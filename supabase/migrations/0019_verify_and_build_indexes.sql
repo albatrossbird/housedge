@@ -59,11 +59,16 @@ create index if not exists markets_category_lookup
 -- An index the planner has no statistics for may not be chosen.
 analyze markets;
 
--- ── STEP 5: prove the planner uses it ────────────────────────────
--- The query the matcher actually issues. Expect an Index Scan or
--- Index Only Scan on markets_category_keyset. A Seq Scan here means
--- the index exists and is NOT being used, which is a different problem
--- from it not existing - and worth knowing before changing any code.
+-- ── STEP 5: SUPERSEDED BY 0020, AND IT WAS WRONG ─────────────────
+-- This selects `id, title, platform, sport_tag` while the matcher also
+-- selects `embedding_v` — a 4KB vector per row, TOASTed, which is the
+-- expensive part of the real read. EXPLAINing without it measures a
+-- query nobody runs and comes back fast, which would have read as an
+-- all-clear on the thing being investigated.
+--
+-- Use supabase/migrations/0020_diagnose_matcher_read.sql instead. It
+-- keeps this version as the deliberate CONTROL, because the difference
+-- between the two is the answer.
 explain analyze
 select id, title, platform, sport_tag
 from markets
