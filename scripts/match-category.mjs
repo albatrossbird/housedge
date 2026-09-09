@@ -170,7 +170,34 @@ console.log(`category=${category} threshold=${threshold}${dry ? " (dry)" : ""}`)
 
 const sel = "id,title,platform,sport_tag,embedding_v";
 const kalshi = await readAll(sel, `platform=eq.kalshi&sport_tag=eq.${category}&embedding_v=not.is.null`);
-const poly = await readAll(sel, `platform=in.(${POLY_PLATFORMS.join(",")})&sport_tag=eq.${category}&embedding_v=not.is.null`);
+
+// ONE READ PER PLATFORM, NOT ONE `IN` LIST — and the reason is in the
+// contrast between these two lines, measured on the same run:
+//
+//   platform=eq.kalshi          14,181 rows, 95 pages, median 510ms
+//   platform=in.(poly, poly_us) failed at 3.1s — at 150 rows, at 75,
+//                               at 37, and at EIGHTEEN
+//
+// Eighteen rows is ~72KB and took 3.0 seconds, which rules out payload
+// size as the cause on this side. `markets_category_keyset` is
+// (sport_tag, platform, id): an equality on `platform` walks one index
+// range already ordered by id, which is why the Kalshi read is fast.
+// An IN list makes `id` non-leading across TWO ranges, so `order=id`
+// can no longer be satisfied by a walk and the rows are SORTED — with
+// the 4KB vector carried through the sort, and the sort completed
+// before LIMIT can discard anything. That is a cost the page size
+// cannot touch, which is exactly the shape observed.
+//
+// Split into equalities, the poly side gets the same plan the Kalshi
+// side already proves fast. Order across the concatenation does not
+// matter: the matcher scores every pair and never relies on input
+// order.
+const poly = [];
+for (const platform of POLY_PLATFORMS) {
+  const rows = await readAll(sel, `platform=eq.${platform}&sport_tag=eq.${category}&embedding_v=not.is.null`);
+  console.log(`  ${platform}: ${rows.length} rows`);
+  poly.push(...rows);
+}
 console.log(`read kalshi=${kalshi.length} poly=${poly.length} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 
 if (!kalshi.length || !poly.length) {
