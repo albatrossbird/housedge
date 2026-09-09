@@ -1,0 +1,34 @@
+# Read-only analysis of the 15-minute data.
+#
+# Manual, not scheduled: this answers "is there anything here", which
+# is a question you ask when you are looking, not every hour. It writes
+# NOTHING — anon key only, and migration 0016 grants select on both m15
+# tables — so it cannot damage the recorder's data by being run.
+#
+# Runs in the runner rather than locally because that is where the
+# credentials are, same as every other job here.
+name: Analyze 15-minute markets
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Space-separated series (default: gold + silver)"
+        default: "KXGOLD15M KXSILVER15M"
+        required: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No `npm ci`: the script talks to Supabase over REST, like the
+      # refresh and m15 scripts, so the runner needs no node_modules.
+      - name: Analyze
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node scripts/m15-analyze.mjs ${{ github.event.inputs.series }}
