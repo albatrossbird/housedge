@@ -20,6 +20,22 @@ const REJECT = [
 // Politics: Kalshi's Elections category against Polymarket's. Every
 // REJECT here was accepted by a real dry run and read wrong by hand.
 const REJECT_POL = [
+  // ── A state legislature has no counterpart to pair with ───────
+  // Measured 2026-09-09 across the ingested catalogue: "state senate"
+  // Kalshi 37 / Polymarket 0, "state house" 24 / 0, "state assembly"
+  // 2 / 0. Kalshi runs 63 state-legislature markets and Polymarket
+  // runs NONE, so every one of them pairs wrongly if it pairs at all
+  // — and two of these were rendering on the live site.
+  //
+  // governmentLevel cannot reject them: it fires only on MUTUAL
+  // disagreement and the Polymarket side names no level.
+  ["Who will win the Minnesota State Senate? — Democratic party",
+   "Will the Democrats win the Minnesota Senate race in 2026?"],
+  ["Who will win the Minnesota State Senate? — Republican party",
+   "Will the Republicans win the Minnesota Senate race in 2026?"],
+  ["Who will win the Maine State House? — Republican party",
+   "Will the Republicans win the Maine governor race in 2026?"],
+
   // ── From the implausible-spread audit, 2026-09-08 ─────────────
   // The largest single family in it: a STATE CHAMBER against a
   // CONGRESSIONAL DISTRICT. Nothing already in the gate separated
@@ -140,6 +156,19 @@ const REJECT_POL = [
 ];
 
 const ACCEPT_POL = [
+  // The state-chamber rule must not touch FEDERAL seat-count markets,
+  // which share nearly every word. 39 of these were live when the rule
+  // was written, and they are the reason it keys on the literal word
+  // "state" before a chamber rather than on "house" or "senate".
+  ["Will Democrats win 6 seats in the 2026 U.S. House of Representatives elections in Florida? — 6",
+   "How Many House Seats Will The Democrats Win In Florida? — 6"],
+  ["Will Democratic win the House race for FL-23? — Lois Frankel",
+   "Will the Democratic Party win the FL-23 House seat?"],
+  // SELF-HEALING: the day Polymarket lists a state legislature, both
+  // sides say so, the answers agree, and the rule stops firing without
+  // anyone editing it.
+  ["Who will win the Minnesota State Senate? — Democratic party",
+   "Will Democrats win the Minnesota State Senate in 2026?"],
   // Found by searching "government shutdown" on the live site, which
   // returned 9 markets and 0 matched. The matcher DOES accept this at
   // 0.8836 — it was simply not written yet — so it is pinned here to
