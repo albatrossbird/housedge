@@ -676,6 +676,27 @@ function MarketCard({ market, pinned, onPin, showTrending = true }) {
                         {l.arb.edgeDollars != null && ` (~$${l.arb.edgeDollars.toFixed(2)})`}
                       </span>
                     )}
+                    {/* THE DOLLAR FIGURE ALONE IS THE MISLEADING ONE.
+                        It states the profit and says nothing about the
+                        capital it consumes or how long that capital is
+                        gone for. Measured live: the biggest edge on the
+                        site reads "~$461.77" and is $36,480 locked for
+                        144 days — 3.2% a year, worse than a Treasury
+                        bill. Another is $14,346 tied up for 789 DAYS at
+                        0.7%. Both look like free money without this line.
+
+                        Nothing else in this space shows it: a
+                        competitor's "1-8% typical ROI" is raw edge,
+                        which is the same omission.
+
+                        Rendered muted rather than in the arb colour —
+                        it qualifies the headline, it is not a second
+                        headline. */}
+                    {l.arb.annualizedPct != null && (
+                      <div style={{ fontWeight: 400, color: T.muted, marginTop: 2 }}>
+                        {l.arb.annualizedPct.toFixed(1)}%/yr · ties up ${Math.round(l.arb.cost * Math.floor(l.arb.maxContracts || 0)).toLocaleString()} for {Math.round(l.arb.daysToResolve)}d
+                      </div>
+                    )}
                   </>
                 ) : (
                   `${(l.arb.cost * 100).toFixed(1)}¢ to own both sides`
