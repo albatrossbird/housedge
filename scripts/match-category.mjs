@@ -89,8 +89,30 @@ async function rest(path) {
 // offset scan, not the bytes.
 async function readAll(select, extra) {
   const out = [];
-  let size = 500;
+  // 150, NOT 500, AND THE REASON IS MEASURED.
+  //
+  // EXPLAIN (analyze, buffers) on the same predicate WITHOUT
+  // `embedding_v`:
+  //
+  //   Index Scan using markets_category_keyset
+  //   Buffers: shared hit=487        (all cache, zero disk reads)
+  //   Execution Time: 0.713 ms
+  //
+  // Finding the rows costs SEVEN TENTHS OF A MILLISECOND. The same
+  // page carrying `embedding_v` took ~2,700ms in the runner, so
+  // essentially all of it is the vector: 4KB per row, stored
+  // out-of-line, so a 500-row page moves ~2MB. The index was never the
+  // problem, and neither was OFFSET paging, and neither was the
+  // migration — three wrong theories before this measurement.
+  //
+  // The timeout bites somewhere around 3-5s (failures observed at 3.1
+  // to 5.6s), so a 500-row page sits just under the line and the slow
+  // ones tip over. 150 rows is ~600KB and lands near 0.8s, which is
+  // headroom rather than a coin flip. The extra round trips are free
+  // next to a category that cannot match at all.
+  let size = 150;
   let last = null;
+  const pageMs = [];
   for (let page = 0; page < 1000; page++) {
     const after = last == null ? "" : `&id=gt.${encodeURIComponent(last)}`;
     const path = `markets?select=${select}&${extra}${after}&order=id.asc&limit=${size}`;
@@ -107,16 +129,32 @@ async function readAll(select, extra) {
       rows = await rest(path);
     } catch (err) {
       console.log(`  page ${page} FAILED after ${((Date.now() - tPage) / 1000).toFixed(1)}s at size=${size}, ${out.length} rows read so far`);
-      if (size > 100) { size = Math.floor(size / 2); continue; } // payload too big
+      // Halve down to 25, not 100. The floor was set when the cost was
+      // believed to be the scan, where a smaller page cannot help; now
+      // that it is known to be bytes, a smaller page is exactly what
+      // helps, and stopping at 100 gave up while the fix was still
+      // available.
+      if (size > 25) { size = Math.floor(size / 2); continue; }
       throw err;
     }
     const ms = Date.now() - tPage;
-    // Only the slow ones, so a healthy read stays quiet.
-    if (page === 0 || ms > 2000) {
-      console.log(`  page ${page}: ${rows.length} rows in ${(ms / 1000).toFixed(1)}s (${out.length + rows.length} total)`);
+    pageMs.push(ms);
+    // Slow pages are still called out, but a filtered log is a BIASED
+    // SAMPLE and reading one as if it were the whole distribution is
+    // how "page cost does not scale with page size" got asserted here:
+    // only pages over 2s were printed, so the fast small pages that
+    // would have disproved it were never shown. The summary below
+    // reports every page.
+    if (ms > 2000) {
+      console.log(`  slow page ${page}: ${rows.length} rows in ${(ms / 1000).toFixed(1)}s (${out.length + rows.length} total)`);
     }
     out.push(...rows);
-    if (rows.length < size) return out;
+    if (rows.length < size) {
+      const sorted = [...pageMs].sort((a, b) => a - b);
+      const med = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+      console.log(`  read ${out.length} rows in ${pageMs.length} pages — page ms min/median/max ${sorted[0] ?? 0}/${med}/${sorted[sorted.length - 1] ?? 0}`);
+      return out;
+    }
     last = rows[rows.length - 1].id;
   }
   // Falling out of the loop means the page cap was reached without a
