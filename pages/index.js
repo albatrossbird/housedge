@@ -1598,7 +1598,14 @@ export default function HouseEdge() {
                   reads as a broken site; one that says "soon" reads as a
                   roadmap, and costs nothing to leave in place until the
                   page behind it exists. */}
-              {["About", "Contact", "Pricing", "FAQ", "Sign in"].map(label => (
+              {/* NO "PRICING" UNTIL THERE IS ONE. A roadmap label costs
+                  nothing where it describes something already decided,
+                  and this one is not: it tells a first-time visitor the
+                  site will charge them BEFORE they have decided the free
+                  thing is any good, which is the wrong order. It also
+                  commits publicly to a price nobody has set. Put it back
+                  the day there is a number behind it. */}
+              {["About", "Contact", "FAQ", "Sign in"].map(label => (
                 <MenuItem key={label} label={label} soon />
               ))}
             </div>
@@ -1987,6 +1994,31 @@ export default function HouseEdge() {
               45 minutes and 3.5 hours. Saying only the first invites the
               reader to assume the second. */}
           <span>Page reloads every 60s · prices from the last scheduled venue read</span>
+        </div>
+
+        {/* WHAT A FOOTER IS ACTUALLY FOR HERE, and it is not the ©.
+            Copyright has been automatic on creation since 1989, so the
+            notice adds no protection — what it adds is the loss of an
+            "innocent infringement" defence, which is worth one line and
+            not more.
+            The lines that carry real weight are the other two. This
+            site displays two exchanges' brands, names and prices
+            prominently, so saying it is NOT affiliated with either is
+            the one a reader could otherwise get wrong. And it shows
+            numbers someone may act on with money, from a scheduled read
+            that can be hours old — the alpha notice says the matching
+            is being tuned, this says the prices are not the venue's
+            live book. Both are already true elsewhere on the page; a
+            footer is where someone looks for them deliberately. */}
+        <div style={{ marginTop: 14, paddingBottom: 28, fontSize: 11, lineHeight: 1.6, color: T.muted }}>
+          <p style={{ margin: 0 }}>
+            MarketSlap is not affiliated with, endorsed by or operated by Kalshi or Polymarket.
+          </p>
+          <p style={{ margin: "4px 0 0" }}>
+            Information only, not financial or betting advice. Prices come from a scheduled read
+            and can be out of date — always check the venue before you trade.
+          </p>
+          <p style={{ margin: "8px 0 0" }}>© {new Date().getFullYear()} MarketSlap</p>
         </div>
         </>
         )}
