@@ -1,0 +1,59 @@
+# Record Kalshi's daily temperature ladders and the NWS forecast.
+#
+# WHY BOTH, TOGETHER. The book alone cannot say whether a price was
+# wrong; the forecast alone cannot say whether anyone disagreed. The
+# question this dataset exists to answer — was Kalshi mispriced against
+# what was knowable at the time — needs the two side by side, stamped,
+# from before the outcome was known.
+#
+# Neither half is backfillable. A settled Kalshi market reports one last
+# price, and NWS serves the CURRENT forecast, never the one it was
+# issuing yesterday afternoon.
+#
+# 330 MINUTES, learned from the m15 recorder rather than rediscovered:
+# this repo asks for */30 and GETS gaps of 1.9 to 5.4 hours, so a
+# 55-minute run was recording ~26% of the time. Runs are meant to
+# overlap; the concurrency group is keyed on run_id so nothing blocks a
+# second recorder, and writes are append-only and write-on-change.
+#
+# The poll is every 10 MINUTES, not 15 seconds: a daily temperature
+# market moves on forecast revisions and order flow, not tick by tick,
+# and NWS issues a handful of times a day. The forecast is fetched on
+# its own hourly clock inside the loop.
+name: Record weather markets
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to record for"
+        default: "330"
+        required: false
+      pollMinutes:
+        description: "Minutes between ladder polls"
+        default: "10"
+        required: false
+
+concurrency:
+  group: record-weather-${{ github.run_id }}
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # No `npm ci`: the script talks to Kalshi, NWS and Supabase over
+      # plain fetch, like the m15 and refresh scripts.
+      - name: Record weather ladders and forecasts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WX_RUN_MINUTES: ${{ github.event.inputs.minutes || '330' }}
+          WX_POLL_MINUTES: ${{ github.event.inputs.pollMinutes || '10' }}
+        run: node scripts/wx-record.mjs
