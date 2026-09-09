@@ -19,6 +19,33 @@ name: Record 15-minute markets
 # schedule asks for every 30, so a late start still lands inside the
 # previous run's window. Writes are append-only and write-on-change, so
 # two overlapping recorders cost duplicate rows at worst, never a gap.
+#
+# 330 MINUTES, NOT 55, AND THE REASON IS MEASURED.
+#
+# 55 was sized against the cron this file ASKS for (*/30). Measured
+# 2026-09-09, the cron it GETS has gaps of 1.9 to 5.4 hours, averaging
+# about 3.5. A 55-minute run inside a 3.5-hour gap is a ~26% duty
+# cycle, and the data agrees exactly: of the 300 most recent gold
+# markets, only 87 (29%) had any quotes at all.
+#
+# Three quarters of every window was going unrecorded, PERMANENTLY — a
+# settled market reports only its last price, so an unwatched window is
+# gone rather than delayed. That is the one asset here that cannot be
+# bought or backfilled, and it was accruing at a quarter speed for want
+# of a number.
+#
+# 330 minutes outlives even the 5.4-hour gap observed, so runs overlap
+# instead of leaving holes. Overlap is already safe and already
+# intended — the concurrency group is keyed on run_id, so nothing
+# blocks a second recorder, and duplicate rows are the documented worst
+# case. Actions minutes are free and unmetered on a public repo, so
+# four times the coverage costs nothing.
+#
+# WATCH STORAGE. At ~26% this wrote roughly 50k rows a day; at full
+# coverage expect nearer 190k, which is ~70M rows a year and real
+# pressure against Supabase Pro's 8GB. Retention on m15_quotes is the
+# next decision, not an emergency — but it IS a decision, and the time
+# to make it is before the table forces it.
 
 on:
   schedule:
@@ -27,7 +54,7 @@ on:
     inputs:
       minutes:
         description: "How long to record for"
-        default: "55"
+        default: "330"
         required: false
       pollSeconds:
         description: "Seconds between polls"
@@ -42,7 +69,7 @@ concurrency:
 jobs:
   record:
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,6 +79,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          M15_RUN_MINUTES: ${{ github.event.inputs.minutes || '55' }}
+          M15_RUN_MINUTES: ${{ github.event.inputs.minutes || '330' }}
           M15_POLL_SECONDS: ${{ github.event.inputs.pollSeconds || '15' }}
         run: node scripts/m15-record.mjs
