@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
-import { tradeableArb, complementBook, realBook, midpointIsMeaningful } from "../../lib/fees.js";
+import { tradeableArb, complementBook, realBook, midpointIsMeaningful, annualizedReturn, daysUntil } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 import { fetchTokenIdsById, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
 
@@ -676,6 +676,12 @@ export default async function handler(req, res) {
         if (pYesShown !== pYes) priceFromBook.poly++;
         if (kYesShown !== row.k_yes_price) priceFromBook.kalshi++;
 
+        // How long the capital is committed for. Read here so both the
+        // arb figures and the card can use it; null when Kalshi states
+        // no close_time, which must NOT render as "settles today" or
+        // every long-dated arb would look urgent.
+        const closeDays = daysUntil(row.k_close_time);
+
         const arb = tradeableArb(
           {
             yesAsk: kBook.ask,
@@ -845,6 +851,19 @@ export default async function handler(req, res) {
             // card and the calculator can be seen to agree instead of
             // differing by a rounding artefact the reader cannot place.
             pricedAt: arb.pricedAt,
+            // AN EDGE IS NOT A RETURN UNTIL YOU DIVIDE BY TIME, and
+            // `edgeDollars` alone is the number that misleads: it is
+            // the profit with no mention of the capital it consumes
+            // or how long that capital is gone for.
+            //
+            // A matched pair pays $1 at settlement and costs `cost`
+            // now, so the capital IS the cost. Measured live: the
+            // largest edge on the site is "$461.77", which is $36,480
+            // locked for 144 days — 3.2% a year, worse than a
+            // Treasury bill. One is $14,346 locked for 789 DAYS at
+            // 0.7%. Both read as free money without this.
+            daysToResolve: closeDays,
+            annualizedPct: annualizedReturn(arb.r.edge, arb.r.total, closeDays),
             ...(implausible ? { implausible: true, spreadPts: Math.round(spreadPts * 10) / 10 } : {}),
           } : null,
           trending: ((row.k_volume || 0) + (row.p_volume || 0)) > 5000,
