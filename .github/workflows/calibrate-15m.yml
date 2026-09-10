@@ -26,6 +26,10 @@ on:
         description: "How far from that moment a quote may sit"
         default: "45"
         required: false
+      days:
+        description: "How far back to look for settled markets"
+        default: "21"
+        required: false
 
 jobs:
   calibrate:
@@ -49,4 +53,5 @@ jobs:
           SERIES: ${{ github.event.inputs.series || 'KXBTC15M' }}
           SECS: ${{ github.event.inputs.secs || '90' }}
           TOL: ${{ github.event.inputs.tol || '45' }}
-        run: node scripts/m15-calibrate.mjs "--secs=$SECS" "--tol=$TOL" $SERIES
+          DAYS: ${{ github.event.inputs.days || '21' }}
+        run: node scripts/m15-calibrate.mjs "--secs=$SECS" "--tol=$TOL" "--days=$DAYS" $SERIES
