@@ -1,0 +1,43 @@
+# How wrong is a FREE Coinbase feed as a stand-in for the CF Benchmarks
+# index Kalshi actually settles its 15-minute crypto markets on?
+#
+# CF licenses BRTI by contact, with no public price and up to a
+# 15-minute delay on their API — which is useless for a 15-minute
+# market. So the question worth answering first is how much accuracy a
+# free proxy costs, and that is measurable against thousands of settled
+# markets we already hold.
+#
+# Read-only: Supabase anon, Coinbase unauthenticated. Writes nothing.
+name: Crypto settlement basis
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Space-separated series"
+        default: "KXBTC15M KXETH15M"
+        required: false
+      days:
+        description: "How far back to compare"
+        default: "30"
+        required: false
+
+jobs:
+  basis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Inputs go through env and are quoted, never interpolated into
+      # the command line: `${{ }}` is raw text substitution before bash
+      # parses it, so a value with a semicolon would run as a command on
+      # a runner holding the Supabase credentials.
+      - name: Compare
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERIES: ${{ github.event.inputs.series || 'KXBTC15M KXETH15M' }}
+          DAYS: ${{ github.event.inputs.days || '30' }}
+        run: node scripts/crypto-basis.mjs "--days=$DAYS" $SERIES
