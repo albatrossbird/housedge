@@ -64,6 +64,7 @@ const lastQuote = new Map();      // ticker -> last written quote
 let ticks = 0, quotesWritten = 0, marketsSeen = 0, forecastsWritten = 0;
 let lastForecastAt = 0;
 const errors = [];
+const skippedNoStation = new Set();   // series with no CLI in their rules — not daily markets
 
 const series = await dailyTempSeries();
 console.log(`watching ${series.length} daily temperature series for ${RUN_MINUTES} min, polling every ${POLL_MINUTES} min`);
@@ -87,8 +88,23 @@ while (Date.now() < deadline) {
     // the series ticker — KXHIGHMIA and KXHIGHTMIN follow no single
     // convention. Read once per series from its first market.
     const cli = cliFromRules(ms[0].rules_primary);
-    if (cli && CLI_TO_STATION[cli]) stations.add(CLI_TO_STATION[cli]);
-    else if (cli) errors.push(`unmapped station ${cli} (${s}) — add it to CLI_TO_STATION`);
+
+    // No CLI station in the rules means this is not a daily
+    // station-settled temperature market, and storing it would be
+    // WORSE than skipping it. KXSJCLOWT asks whether San Jose drops
+    // below 40F at any hour in ALL of December, and its ticker is
+    // KXSJCLOWT-26DEC31-40 — so targetDateOf reads it as a Dec 31
+    // DAILY market and any calibration built on this table would
+    // compare a month-long claim against one day's forecast.
+    //
+    // Reported by name rather than as an error, like embedGate and
+    // kalshiSeriesFailed: a series that is correctly skipped every run
+    // is an alarm nobody can clear, which teaches you to ignore the
+    // ones that matter.
+    if (!cli) { skippedNoStation.add(s); continue; }
+
+    if (CLI_TO_STATION[cli]) stations.add(CLI_TO_STATION[cli]);
+    else errors.push(`unmapped station ${cli} (${s}) — add it to CLI_TO_STATION`);
 
     for (const m of ms) {
       marketsSeen++;
@@ -131,6 +147,8 @@ while (Date.now() < deadline) {
 }
 
 console.log(`\nticks=${ticks} marketsSeen=${marketsSeen} quotesWritten=${quotesWritten} forecastsWritten=${forecastsWritten} errors=${errors.length}`);
+if (skippedNoStation.size)
+  console.log(`skipped (no settlement station in rules, not daily markets): ${[...skippedNoStation].join(", ")}`);
 for (const e of errors.slice(0, 10)) console.log(`::warning::${e}`);
 
 // A run that wrote NOTHING is a broken run, not a quiet one — the
