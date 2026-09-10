@@ -27,8 +27,13 @@ jobs:
           node-version: 22
       # No `npm ci`: the script talks to Supabase over REST, like the
       # refresh and m15 scripts, so the runner needs no node_modules.
+      # The series list goes through env, not into the command line.
+      # `${{ }}` is substituted as raw text before bash parses it, so an
+      # input containing a semicolon runs as a command on a runner that
+      # holds the Supabase credentials.
       - name: Analyze
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: node scripts/m15-analyze.mjs ${{ github.event.inputs.series }}
+          SERIES: ${{ github.event.inputs.series }}
+        run: node scripts/m15-analyze.mjs $SERIES
