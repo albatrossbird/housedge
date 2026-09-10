@@ -85,5 +85,35 @@ console.log("\nwrite-on-change, with a heartbeat");
   check("the heartbeat fires at 15 min", quoteChanged(base, { ...base, observed_at: "2026-09-09T12:15:00.000Z" }) === true);
 }
 
+console.log("\na monthly market must not read as a daily one");
+{
+  // KXSJCLOWT asks whether San Jose drops below 40F at ANY HOUR in all
+  // of December. Its ticker carries a date like a daily market's, so
+  // targetDateOf answers — and the answer is a trap. The rules name no
+  // CLI station, and that absence is what the recorder skips on.
+  const monthly = "If any hourly temperature value reported for KSJC in San Jose within " +
+                  "December 1, 2026 through December 31, 2026 is strictly less than 40 degrees " +
+                  "Fahrenheit, then the market resolves to Yes.";
+  check("targetDateOf still answers, which is why the rules gate is needed",
+        targetDateOf("KXSJCLOWT-26DEC31-40") === "2026-12-31");
+  check("a monthly market names no CLI station", cliFromRules(monthly) === null);
+  const daily = "If the maximum temperature recorded at Newark (CLIEWR) for Sep 10, 2026, is " +
+                "greater than 92\u00b0 fahrenheit according to The Weather Company, then the market resolves to Yes.";
+  check("a daily market does", cliFromRules(daily) === "CLIEWR");
+}
+
+console.log("\nevery CLI a live series settles on is mapped");
+{
+  // Read off /series + /markets on 2026-09-10 and each ICAO confirmed
+  // against NWS /stations/<icao>. Kalshi settles Chicago at MIDWAY and
+  // Houston at HOBBY, which are not the airports either city suggests.
+  const live = ["CLIATL","CLIAUS","CLIBOS","CLIDCA","CLIDEN","CLIDFW","CLIEWR","CLIHOU",
+                "CLILAS","CLILAX","CLIMDW","CLIMIA","CLIMSP","CLIMSY","CLINYC","CLIOKC",
+                "CLIPHL","CLIPHX","CLISAN","CLISAT","CLISDF","CLISEA","CLISFO","CLITTN"];
+  for (const cli of live) check(`${cli} is mapped`, typeof CLI_TO_STATION[cli] === "string");
+  check("Chicago settles at Midway, not O'Hare", CLI_TO_STATION.CLIMDW === "KMDW");
+  check("Houston settles at Hobby, not Intercontinental", CLI_TO_STATION.CLIHOU === "KHOU");
+}
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);
