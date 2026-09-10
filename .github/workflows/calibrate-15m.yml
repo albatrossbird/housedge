@@ -1,0 +1,48 @@
+# Does a "buy the favourite late" strategy on the 15-minute markets
+# actually have an edge?
+#
+# Manual and read-only. It writes nothing — anon key, and migration
+# 0016 grants select on both m15 tables — so running it cannot damage
+# the recorder's data.
+#
+# It answers one question: of the markets quoted at p with T seconds
+# left, what fraction resolve YES? A win rate above the price, net of
+# Kalshi's fee, is an edge; a win rate that merely tracks the price is
+# a calibrated market and a slow loss.
+name: Calibrate 15-minute markets
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Space-separated series (e.g. KXBTC15M KXGOLD15M)"
+        default: "KXBTC15M"
+        required: false
+      secs:
+        description: "Seconds to close at the entry moment"
+        default: "90"
+        required: false
+      tol:
+        description: "How far from that moment a quote may sit"
+        default: "45"
+        required: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No `npm ci`: Supabase over REST and Kalshi over plain fetch,
+      # like the other m15 scripts.
+      - name: Calibrate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          node scripts/m15-calibrate.mjs \
+            --secs=${{ github.event.inputs.secs || '90' }} \
+            --tol=${{ github.event.inputs.tol || '45' }} \
+            ${{ github.event.inputs.series || 'KXBTC15M' }}
