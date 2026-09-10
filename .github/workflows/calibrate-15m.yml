@@ -37,12 +37,16 @@ jobs:
           node-version: 22
       # No `npm ci`: Supabase over REST and Kalshi over plain fetch,
       # like the other m15 scripts.
+      # Inputs go through env and are quoted in the shell, NEVER
+      # interpolated into the command line. `${{ }}` is substituted as
+      # raw text before bash sees it, so a series name containing a
+      # semicolon would run as a command — on a runner holding the
+      # Supabase credentials. Quoting $SERIES makes it an argument.
       - name: Calibrate
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: |
-          node scripts/m15-calibrate.mjs \
-            --secs=${{ github.event.inputs.secs || '90' }} \
-            --tol=${{ github.event.inputs.tol || '45' }} \
-            ${{ github.event.inputs.series || 'KXBTC15M' }}
+          SERIES: ${{ github.event.inputs.series || 'KXBTC15M' }}
+          SECS: ${{ github.event.inputs.secs || '90' }}
+          TOL: ${{ github.event.inputs.tol || '45' }}
+        run: node scripts/m15-calibrate.mjs "--secs=$SECS" "--tol=$TOL" $SERIES
