@@ -8,14 +8,14 @@
 # markets we already hold.
 #
 # Read-only: Supabase anon, Coinbase unauthenticated. Writes nothing.
-name: Crypto settlement basis
+name: Settlement basis
 
 on:
   workflow_dispatch:
     inputs:
       series:
         description: "Space-separated series"
-        default: "KXBTC15M KXETH15M"
+        default: "KXBTC15M KXETH15M KXGOLD15M KXSILVER15M"
         required: false
       days:
         description: "How far back to compare"
@@ -38,6 +38,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SERIES: ${{ github.event.inputs.series || 'KXBTC15M KXETH15M' }}
+          SERIES: ${{ github.event.inputs.series || 'KXBTC15M KXETH15M KXGOLD15M KXSILVER15M' }}
           DAYS: ${{ github.event.inputs.days || '30' }}
         run: node scripts/crypto-basis.mjs "--days=$DAYS" $SERIES

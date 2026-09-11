@@ -18,6 +18,7 @@
 // Usage: node scripts/crypto-basis.mjs [--days=30] [SERIES ...]
 
 import { indexCandles, refPrice, predict, marginBps, agreementByMargin } from "../lib/cryptoBasis.js";
+import { YAHOO_SYMBOLS, yahooChart, indexYahooChart } from "../lib/yahooCandles.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_ANON_KEY;
@@ -34,6 +35,14 @@ const SINCE = new Date(Date.now() - DAYS * 86400000).toISOString();
 const PRODUCT = { KXBTC15M: "BTC-USD", KXETH15M: "ETH-USD", KXSOL15M: "SOL-USD", KXXRP15M: "XRP-USD" };
 const series = process.argv.slice(2).filter(a => !a.startsWith("-"));
 if (!series.length) series.push("KXBTC15M", "KXETH15M");
+
+// Commodities come from Yahoo instead, and are capped at ~7 days of
+// minute bars. Enough to VALIDATE the proxy; not enough to backfill.
+function sourceFor(s) {
+  if (PRODUCT[s]) return { kind: "coinbase", name: `Coinbase ${PRODUCT[s]}`, product: PRODUCT[s] };
+  if (YAHOO_SYMBOLS[s]) return { kind: "yahoo", name: `Yahoo ${YAHOO_SYMBOLS[s].symbol}`, ...YAHOO_SYMBOLS[s] };
+  return null;
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -84,9 +93,10 @@ async function candles(product, fromSecs, toSecs, errors) {
 }
 
 for (const s of series) {
-  const product = PRODUCT[s];
-  console.log(`\n${"=".repeat(72)}\n${s}  vs Coinbase ${product || "(unmapped)"}\n${"=".repeat(72)}`);
-  if (!product) { console.log("::warning::no Coinbase product mapped — skipped"); continue; }
+  const src = sourceFor(s);
+  console.log(`\n${"=".repeat(72)}\n${s}  vs ${src ? src.name : "(unmapped)"}\n${"=".repeat(72)}`);
+  if (!src) { console.log("::warning::no source mapped for this series — skipped"); continue; }
+  if (src.kind === "yahoo") console.log(`proxy: ${src.note}; Kalshi settles on ${src.pyth}`);
 
   const mk = await readAll("m15_markets", "ticker,close_time,result,strike",
     `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker");
@@ -96,9 +106,14 @@ for (const s of series) {
   const times = mk.map(m => Math.floor(Date.parse(m.close_time) / 1000)).filter(Number.isFinite);
   const lo = Math.min(...times) - 20 * 60, hi = Math.max(...times) + 5 * 60;
   const errors = [];
-  const rows = await candles(product, lo, hi, errors);
-  const ix = indexCandles(rows);
-  console.log(`coinbase minute candles     ${ix.size}`);
+  let ix;
+  if (src.kind === "coinbase") {
+    ix = indexCandles(await candles(src.product, lo, hi, errors));
+  } else {
+    try { ix = indexYahooChart(await yahooChart(src.symbol)); }
+    catch (err) { errors.push(err.message); ix = new Map(); }
+  }
+  console.log(`minute bars                 ${ix.size}`);
   if (errors.length) {
     console.log(`::error::${errors.length} candle slices failed — the sample is INCOMPLETE, not smaller`);
     for (const e of errors.slice(0, 5)) console.log(`  ${e}`);
@@ -133,7 +148,8 @@ for (const s of series) {
     }
   }
 
-  console.log(`\n  A proxy for a multi-exchange index can only disagree NEAR A TIE.`);
-  console.log(`  If the misses sit in the tightest band it is usable with a known`);
-  console.log(`  blind spot; if they are spread across real moves it is not.`);
+  console.log(`\n  A proxy can only disagree NEAR A TIE. If the misses sit in the`);
+  console.log(`  tightest band it is usable with a known blind spot; if they are`);
+  console.log(`  spread across real moves it is not. That is the whole question,`);
+  console.log(`  and it is what decides whether a paid feed is needed at all.`);
 }

@@ -1,4 +1,5 @@
 import { parseCandle, indexCandles, refPrice, predict, marginBps, agreementByMargin } from "../lib/cryptoBasis.js";
+import { indexYahooChart, YAHOO_SYMBOLS } from "../lib/yahooCandles.js";
 
 let failures = 0;
 const check = (name, ok) => { console.log(`  ${ok ? "ok  " : "FAIL"} ${name}`); if (!ok) failures++; };
@@ -66,6 +67,32 @@ console.log("\nmargin, and why aggregate agreement is the wrong number");
 
   const unresolved = agreementByMargin([{ predicted: "yes", actual: null, bps: 5 }]);
   check("an unsettled market is not counted as agreement", unresolved.n === 0);
+}
+
+console.log("\nYahoo pads untraded minutes with null, not zero");
+{
+  const chart = { chart: { result: [{
+    timestamp: [1000, 1060, 1120],
+    indicators: { quote: [{
+      open:  [12, null, 14],
+      high:  [20, null, 22],
+      low:   [10, null, 11],
+      close: [18, null, 19],
+      volume:[5,  null, 7],
+    }] },
+  }] } };
+  const ix = indexYahooChart(chart);
+  // Number(null) is 0, and a fabricated $0 gold print reads as a
+  // catastrophic move rather than as missing data.
+  check("the null minute is dropped, not stored as 0", ix.size === 2 && !ix.has(1060));
+  check("real minutes survive", ix.get(1000).close === 18 && ix.get(1120).low === 11);
+  check("it indexes into the same shape refPrice reads", refPrice(ix, 1180) === 19);
+  check("an empty chart is an empty map, not a throw", indexYahooChart({}).size === 0);
+  check("a missing quote block is empty too",
+        indexYahooChart({ chart: { result: [{ timestamp: [1] }] } }).size === 0);
+
+  check("every commodity series maps to a symbol and names its Pyth feed",
+        Object.values(YAHOO_SYMBOLS).every(v => v.symbol && v.pyth));
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
