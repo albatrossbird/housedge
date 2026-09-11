@@ -14,7 +14,7 @@ on:
     inputs:
       spec:
         description: "Path to the strategy JSON"
-        default: "strategies/turbine-btc-15m.json"
+        default: "strategies/late-favourite-btc-15m.json"
         required: false
       days:
         description: "How far back to score"
@@ -35,6 +35,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SPEC: ${{ github.event.inputs.spec || 'strategies/turbine-btc-15m.json' }}
+          SPEC: ${{ github.event.inputs.spec || 'strategies/late-favourite-btc-15m.json' }}
           DAYS: ${{ github.event.inputs.days || '21' }}
         run: node scripts/audit-strategy.mjs "$SPEC" "--days=$DAYS"

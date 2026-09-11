@@ -6,7 +6,7 @@
 //
 // Reads Supabase (anon) and Kalshi (no key). Writes nothing.
 //
-// Usage: node scripts/audit-strategy.mjs strategies/turbine-btc-15m.json [--days=21]
+// Usage: node scripts/audit-strategy.mjs strategies/late-favourite-btc-15m.json [--days=21]
 
 import { readFileSync } from "node:fs";
 import { parseSpec, audit } from "../lib/strategyAudit.js";
