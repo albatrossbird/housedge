@@ -1,0 +1,40 @@
+# Score a published trading strategy against what actually settled.
+#
+# The prediction-market tooling space is ~200 products making
+# performance claims and zero products auditing another's. We hold the
+# settled outcomes, a recorded price path, and real fee maths, so we can
+# falsify them. A strategy is a JSON file in strategies/, so a new claim
+# is data rather than a rewrite.
+#
+# Read-only: Supabase anon, Kalshi unauthenticated. Writes nothing.
+name: Audit a strategy
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: "Path to the strategy JSON"
+        default: "strategies/turbine-btc-15m.json"
+        required: false
+      days:
+        description: "How far back to score"
+        default: "21"
+        required: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Inputs go through env and are quoted, never interpolated into
+      # the command line.
+      - name: Audit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SPEC: ${{ github.event.inputs.spec || 'strategies/turbine-btc-15m.json' }}
+          DAYS: ${{ github.event.inputs.days || '21' }}
+        run: node scripts/audit-strategy.mjs "$SPEC" "--days=$DAYS"
