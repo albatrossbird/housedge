@@ -36,6 +36,16 @@ const TARGET    = arg("secs", 90);      // seconds to close at the entry moment
 const TOL       = arg("tol", 45);       // how far from TARGET a quote may sit
 const MAXSPREAD = arg("spread", 0.03);
 const LO = arg("lo", 0.65), HI = arg("hi", 0.95);
+// How far back to look for settled markets.
+//
+// NOT a tuning knob — a correctness one. The price path only exists
+// from the day the recorder started, so a market that settled before
+// then can NEVER contribute an observation however far back we read.
+// The first version read every settled market since 2026-06-30 and was
+// killed by Postgres with 57014: thousands of rows fetched to be
+// joined against a quote table that has nothing to say about them.
+const DAYS = arg("days", 21);
+const SINCE = new Date(Date.now() - DAYS * 86400000).toISOString();
 
 const series = process.argv.slice(2).filter(a => !a.startsWith("-"));
 if (!series.length) series.push("KXBTC15M");
@@ -91,20 +101,35 @@ for (const s of series) {
   }
   console.log(`fee_multiplier ${mult}`);
 
-  // Settled markets only: a live window has no result to calibrate
-  // against. `result` is null on a live market, never "", by the
-  // recorder's own rule.
+  // Settled markets in the window the recorder actually covers. A live
+  // market has no result to calibrate against; `result` is null on one,
+  // never "", by the recorder's own rule.
+  //
+  // series + close_time is exactly what m15_markets_series_close_idx
+  // serves, so this is an index scan over a few hundred rows rather
+  // than the whole backfill.
   const mk = await readAll("m15_markets", "ticker,close_time,result",
-    `series=eq.${encodeURIComponent(s)}&result=not.is.null&`, "ticker");
+    `series=eq.${encodeURIComponent(s)}&result=not.is.null` +
+    `&close_time=gte.${SINCE}&`, "ticker");
   const resultOf = new Map(mk.map(m => [m.ticker, m.result]));
-  console.log(`settled markets stored       ${mk.length}`);
-  if (!mk.length) { console.log("  nothing settled to calibrate against"); continue; }
+  console.log(`settled markets, last ${DAYS}d    ${mk.length}`);
+  if (!mk.length) { console.log("  nothing settled in that window to calibrate against"); continue; }
 
-  // Quotes inside the entry window, filtered server-side on
-  // secs_to_close so we read a slice rather than the whole table.
-  const q = await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-    `ticker=like.${encodeURIComponent(s + "-")}*` +
-    `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`);
+  // Quotes for those markets, inside the entry band.
+  //
+  // Asked BY TICKER rather than by a LIKE prefix: m15_quotes is indexed
+  // on (ticker, observed_at) and a prefix match cannot be trusted to
+  // use it, while this table is the big one and grows ~50k rows a day.
+  // Chunked at 200 ids, per the .in() URL-length lesson — a few
+  // thousand ids build a URL long enough to kill the request.
+  const tickers = [...resultOf.keys()];
+  const q = [];
+  for (let i = 0; i < tickers.length; i += 200) {
+    const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
+    q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
+      `ticker=in.(${encodeURIComponent(ids)})` +
+      `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`));
+  }
   console.log(`quotes in the window         ${q.length}`);
 
   const obs = pickOnePerTicker(q, TARGET, { known: new Set(resultOf.keys()) });
@@ -112,7 +137,9 @@ for (const s of series) {
   if (!obs.length) {
     console.log("\n  No price path in this window yet. The recorder has been running");
     console.log("  since 2026-09-06 and only covers windows it was awake for —");
-    console.log("  this half of the data cannot be backfilled.");
+    console.log("  this half of the data cannot be backfilled. Settled markets");
+    console.log("  older than that carry an outcome but only a LAST price, which");
+    console.log("  cannot answer what a market was quoted at with 90s to run.");
     continue;
   }
 
