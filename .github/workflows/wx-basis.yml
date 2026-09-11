@@ -1,0 +1,36 @@
+# Can we trade Kalshi's weather markets on a FREE NWS observation, or do
+# we need the paid source they actually settle on?
+#
+# Kalshi resolves every daily temperature market "according to The
+# Weather Company". We record NWS. This scores an NWS-derived daily
+# extreme against Kalshi's own settled result, which measures the basis
+# WITHOUT a TWC key — the same method used for Coinbase against BRTI and
+# Yahoo against Pyth.
+#
+# Read-only: Supabase anon, NWS unauthenticated. Writes nothing.
+name: Weather settlement basis
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How far back (NWS serves about 7 days of observations)"
+        default: "7"
+        required: false
+
+jobs:
+  basis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Inputs go through env and are quoted, never interpolated into
+      # the command line.
+      - name: Compare
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          DAYS: ${{ github.event.inputs.days || '7' }}
+        run: node scripts/wx-basis.mjs "--days=$DAYS"
