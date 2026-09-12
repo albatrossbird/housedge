@@ -52,6 +52,36 @@ console.log("\nentry filters, including the NO side");
         entryFor({ yes_bid: 0.20, yes_ask: 0.22 }, yesOnly) === null);
 }
 
+console.log("\nno lookahead: a quote at or after expiry can never be entered");
+{
+  // THE BUG THIS EXISTS TO PREVENT. Past the bell the "price" IS the
+  // settlement, so scoring a post-expiry quote hands the backtest the
+  // answer. A commercial backtester was confirmed by its own support to
+  // do exactly this: its engine stepped in 60-second cycles, so a trade
+  // closing inside the last two minutes of a 15-minute market resolved
+  // AFTER settlement and booked false wins — on the very strategies it
+  // sells, which enter in the final 90 seconds.
+  const timed = parseSpec({ ...base, entry: { price: { min: 0.65, max: 0.95 }, secsToClose: { max: 90 } } });
+  check("a live quote enters",
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: 45 }, timed) !== null);
+  check("EXACTLY at the bell is rejected",
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: 0 }, timed) === null);
+  check("after the bell is rejected",
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: -30 }, timed) === null);
+
+  // The guard must hold even when the spec states no time filter at
+  // all — a filter that lives only in the caller's query is one
+  // refactor away from being absent.
+  const untimed = parseSpec({ ...base, entry: { price: { min: 0.65, max: 0.95 } } });
+  check("a spec with NO time filter still cannot look ahead",
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: -30 }, untimed) === null);
+  check("...and still takes a live quote",
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: 45 }, untimed) !== null);
+  check("unknown timing is allowed only when the spec asks for no window",
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: null }, untimed) !== null &&
+        entryFor({ yes_bid: 0.79, yes_ask: 0.80, secs_to_close: null }, timed) === null);
+}
+
 console.log("\nthe verdict refuses to overclaim");
 {
   // An auditor that reports a number on 30 correlated trades is doing
