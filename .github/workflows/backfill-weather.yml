@@ -1,0 +1,36 @@
+# Pull the SETTLED outcomes of Kalshi's daily temperature markets.
+#
+# record-weather.yml polls `status=open`, because its job is the
+# perishable half — the book and the forecast, which exist nowhere once
+# the window closes. But an open market reports result "", so the
+# recorder alone leaves wx_markets.result null FOREVER, and every
+# downstream weather question needs the outcome.
+#
+# The 15-minute family has had backfill-15m.yml since day one for
+# exactly this reason. Weather did not, and the gap sat between two
+# files that each looked complete.
+#
+# Daily, and idempotent: it upserts on ticker, so a re-run is a no-op.
+name: Backfill settled weather markets
+
+on:
+  schedule:
+    - cron: "20 10 * * *"   # after the US morning settlements
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No `npm ci`: Kalshi and Supabase over plain fetch, like the
+      # other weather and m15 scripts.
+      - name: Backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/wx-backfill.mjs
