@@ -54,10 +54,14 @@ const mk = await readAll("wx_markets",
   `result=not.is.null&close_time=gte.${SINCE}&`);
 console.log(`settled weather markets, last ${DAYS}d   ${mk.length}`);
 if (!mk.length) {
-  console.log("\n  Nothing has settled yet in that window. The recorder started");
-  console.log("  2026-09-10, and a daily market settles the morning after its");
-  console.log("  target date — so this becomes answerable within a day or two,");
-  console.log("  and gets stronger every day after.");
+  console.log("\n  No settled weather markets. Two things produce this, and they are");
+  console.log("  NOT the same:");
+  console.log("    1. the recorder has not been running long enough, or");
+  console.log("    2. nothing is writing outcomes at all.");
+  console.log("  record-weather.yml polls status=open, and an open market reports");
+  console.log("  result \"\" — so the recorder ALONE leaves this null forever.");
+  console.log("  backfill-weather.yml is what fills it. If that job has never run");
+  console.log("  green, this is case 2 and waiting will not fix it.");
   process.exit(0);
 }
 
