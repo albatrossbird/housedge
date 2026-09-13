@@ -1,0 +1,42 @@
+# Before trusting Kairos candles to widen the calibration sample,
+# measure how far they sit from what we actually recorded.
+#
+# Kairos serves 1-minute Kalshi candles with 30-day retention — six
+# times the price path our own recorder has gathered. But a candle is
+# TRADED prices and the calibration needs the ASK, and those two are
+# closest exactly where nothing is at stake and furthest exactly where
+# the money is.
+#
+# Read-only: Supabase anon, Kairos anonymous. Writes nothing, and no
+# Kairos data ever enters m15_quotes.
+name: Kairos candle basis
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Kalshi series"
+        default: "KXBTC15M"
+        required: false
+      days:
+        description: "How far back to compare"
+        default: "7"
+        required: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Inputs go through env and are quoted, never interpolated into
+      # the command line.
+      - name: Probe
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERIES: ${{ github.event.inputs.series || 'KXBTC15M' }}
+          DAYS: ${{ github.event.inputs.days || '7' }}
+        run: node scripts/kairos-probe.mjs "--days=$DAYS" "$SERIES"

@@ -17,6 +17,7 @@
 import { useState, useMemo } from "react";
 import Head from "next/head";
 import { kalshiTakerFee, polymarketTakerFee } from "../lib/fees";
+import { walkBook } from "../lib/bookWalk";
 
 const T = {
   bg: "#F7F8FA", surface: "#FFFFFF", border: "#E4E7ED",
@@ -46,6 +47,8 @@ export default function Fees() {
   const [sizeStr, setSize] = useState("100");
   const [multStr, setMult] = useState("1");
   const [rateStr, setRate] = useState("0.05");
+  // A ladder as text, so it can be pasted straight off a book.
+  const [ladderStr, setLadder] = useState("0.82 x 8\n0.83 x 150\n0.84 x 12\n0.86 x 500");
 
   const price = Math.min(Math.max(num(priceStr, 0.8), 0.01), 0.99);
   const size = Math.max(Math.round(num(sizeStr, 100)), 1);
@@ -64,6 +67,17 @@ export default function Fees() {
       kMaxProfit: 1 - price - kPer,
     };
   }, [price, size, mult, rate]);
+
+  // "0.82 x 8" per line, tolerant of commas and stray whitespace,
+  // because the point is to paste a book rather than fill a form.
+  const ladder = useMemo(() => ladderStr.split("\n").map(line => {
+    const m = /(-?[\d.]+)\s*[x@,]?\s*(-?[\d.]+)/.exec(line.trim());
+    return m ? { price: Number(m[1]), size: Number(m[2]) } : null;
+  }).filter(Boolean), [ladderStr]);
+
+  const walk = useMemo(() => walkBook(ladder, size, "buy"), [ladder, size]);
+  // Fees are charged on what you ACTUALLY paid, not on the touch.
+  const walkFee = walk.avgPrice == null ? 0 : kalshiTakerFee(walk.avgPrice, walk.filled || 1, mult) / (walk.filled || 1);
 
   // The rounding penalty is LUMPY, not monotonic: it is +0.25c at 1-3
   // contracts on one fixture and exactly 0 at 4. A table beats a
@@ -155,6 +169,48 @@ export default function Fees() {
             })}
             highlight={sizes.indexOf(size)}
           />
+        </Section>
+
+        <Section title="The touch is one number; your order is not"
+          body="A book showing 82c might have 8 contracts there and the next 92 at 83c. Paste a ladder (price x size, one level per line) and this walks it: what each level fills, what the whole order averages, and what you could not fill at all.">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 16 }}>
+            <div>
+              <Field label="Ask ladder" hint="price x size, one level per line. Order does not matter — it is sorted.">
+                <textarea
+                  style={{ ...inputStyle, minHeight: 116, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, resize: "vertical" }}
+                  value={ladderStr} onChange={e => setLadder(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 16 }}>
+              <Row k="Best price (the touch)" v={walk.best == null ? "\u2014" : c(walk.best)} />
+              <Row k={`Average fill, ${walk.filled} ct`} v={walk.avgPrice == null ? "\u2014" : c(walk.avgPrice)} strong />
+              <Row k="Slippage vs touch" v={walk.slippage == null ? "\u2014" : `+${c(walk.slippage)}`}
+                   tone={walk.slippage > 0 ? T.arb : T.muted} />
+              <Row k="Fee per contract" v={c(walkFee)} />
+              <Row k="All-in per contract" v={walk.avgPrice == null ? "\u2014" : c(walk.avgPrice + walkFee)} strong />
+              <Row k="Depth on this side" v={`${walk.available} ct`} />
+              {!walk.complete && walk.requested > 0 && (
+                <div style={{ marginTop: 10, padding: "8px 10px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, fontSize: 12, color: "#92400E", lineHeight: 1.5 }}>
+                  <strong>{walk.shortfall} of {walk.requested} contracts could not be filled.</strong> The
+                  average above covers only what the book holds — it is not the price of the order you asked for.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {walk.fills.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <Table
+                head={["Level", "Price", "Fills", "Cumulative", "Running avg"]}
+                rows={walk.fills.map((f, i) => {
+                  const sofar = walk.fills.slice(0, i + 1);
+                  const qty = sofar.reduce((a, x) => a + x.size, 0);
+                  const spend = sofar.reduce((a, x) => a + x.size * x.price, 0);
+                  return [String(i + 1), c(f.price), `${f.size} ct`, `${f.cumulative} ct`, c(spend / qty)];
+                })}
+              />
+            </div>
+          )}
         </Section>
 
         <p style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, marginTop: 28, maxWidth: 620 }}>
