@@ -20,7 +20,7 @@
 //
 // Usage: node scripts/kairos-probe.mjs [--secs=90] [--days=7] [SERIES]
 
-import { candleBatch, centsToPrice, candleEndingAt, CANDLE_BATCH } from "../lib/kairos.js";
+import { candleBatch, centsToPrice, candleCovering, CANDLE_BATCH } from "../lib/kairos.js";
 import { pickOnePerTicker } from "../lib/calibrate.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
@@ -89,7 +89,12 @@ if (failures.length) {
 const diffs = [];
 let noCandle = 0;
 for (const o of ours) {
-  const c = candleEndingAt(byTicker.get(o.ticker), closeOf.get(o.ticker) - TARGET + 60);
+  // The instant this quote was actually recorded at, not the nominal
+  // target: pickOnePerTicker takes the NEAREST quote in a window, so
+  // its own secs_to_close is the truth.
+  const secs = Number(o.secs_to_close);
+  if (!Number.isFinite(secs)) { noCandle++; continue; }
+  const c = candleCovering(byTicker.get(o.ticker), closeOf.get(o.ticker) - secs);
   if (!c) { noCandle++; continue; }
   const close = centsToPrice(c.close);
   const ask = Number(o.yes_ask), bid = Number(o.yes_bid);
