@@ -142,5 +142,27 @@ console.log("\nlocal hour is local, not UTC");
   check("nonsense is null", localHour("nope", "America/Denver") === null);
 }
 
+console.log("\na '+' in a query string means SPACE");
+{
+  // NWS stamps observations "2026-09-12T19:53:00+00:00". Feeding that
+  // back as the `end` of the next page sends "...19:53:00 00:00" and
+  // NWS answers 400 — verified live, and it took out 22 of 24 stations
+  // while the two hourly ones passed, because they never needed a
+  // second page. The fix is to normalise to the Z form, which carries
+  // no '+' at all.
+  const raw = "2026-09-12T19:53:00+00:00";
+  const normalised = new Date(Date.parse(raw)).toISOString();
+  check("the raw stamp contains a '+'", raw.includes("+"));
+  check("the normalised one does not", !normalised.includes("+"));
+  check("...and names the same instant", Date.parse(normalised) === Date.parse(raw));
+  // Encoding alone is not enough to reason about: %2B round-trips, but
+  // the two forms still must not be COMPARED as strings.
+  check("string compare of the two formats is unreliable",
+        ("2026-09-12T19:53:00+00:00" < "2026-09-12T19:53:00.000Z") !==
+        (Date.parse("2026-09-12T19:53:00+00:00") < Date.parse("2026-09-12T19:53:00.000Z")));
+  check("comparing as instants is not", Date.parse(raw) === Date.parse(normalised));
+}
+
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);
