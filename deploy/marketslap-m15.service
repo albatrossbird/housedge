@@ -1,0 +1,49 @@
+# The 15-minute recorder, as a long-lived service.
+#
+# WHY A SERVICE AND NOT A TIMER. On GitHub Actions this job runs for 330
+# minutes at a stretch, because GitHub does not honour short crons —
+# this repo asks for */30 and measures gaps of 45 minutes to 3.5 hours,
+# so long overlapping runs were the only way to approach continuous
+# coverage. Measured result: 303 of 602 windows captured, about half.
+#
+# A machine we control has no such problem. Restart=always plus a
+# modest RUN_MINUTES gives genuinely continuous coverage, and the
+# process cycling every hour is also what lets new code land without a
+# deploy step — marketslap-update.timer pulls, and the next cycle runs
+# the new code.
+#
+# The price path CANNOT BE BACKFILLED. Two independent attempts
+# confirmed it: a settled market reports only its last price, and
+# Kairos 1-minute candles sit inside our recorded book only 11.4% of
+# the time. Every window missed is gone for good, which is why this is
+# Restart=always rather than best effort.
+
+[Unit]
+Description=MarketSlap 15-minute market recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marketslap
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+# One hour per cycle. Short enough that a code update lands promptly,
+# long enough that restarts are not the dominant activity.
+Environment=M15_RUN_MINUTES=60
+ExecStart=/usr/bin/node scripts/m15-record.mjs
+Restart=always
+RestartSec=5
+# A crash loop should be loud rather than infinite.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# The box holds a service-role key. Give the unit no more than it needs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/marketslap
+
+[Install]
+WantedBy=multi-user.target

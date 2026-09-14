@@ -1,0 +1,36 @@
+# Is anything still writing?
+#
+# Once the recorders move off GitHub Actions, a dead box produces no red
+# workflow — it produces silence, and silence is indistinguishable from
+# a quiet market until someone goes looking. The price path cannot be
+# backfilled, so unnoticed downtime is destroyed data.
+#
+# The DATA is the heartbeat: this reads max(observed_at) from the tables
+# themselves rather than a separate "I am alive" ping, because a ping
+# would report a process that is running and writing nothing — the exact
+# failure this project keeps finding.
+#
+# It works today against the Actions recorders, unchanged. It is a
+# better alarm than the one we have either way.
+name: Watchdog
+
+on:
+  schedule:
+    # Four times a day. Frequent enough that a failure is caught within
+    # hours; rare enough that it is not itself a source of noise.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check freshness
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node scripts/watchdog.mjs
