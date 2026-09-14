@@ -33,14 +33,37 @@ const CEILING_GB = Number(process.env.CEILING_GB || 8);
 // plus Postgres' 23-byte tuple header and per-index overhead. Stated
 // per table rather than as one number, because a five-column quote row
 // and a twenty-column market row are not the same object.
+//
+// THE FIRST VERSION OF THIS WAS 2.8x LOW, and it was low for one
+// reason. It charged `markets` a flat 600 bytes a row. But an embedded
+// market carries a vector(1024), and this project has already MEASURED
+// what that costs: 147MB across 37,518 rows, 4.01KB each, because
+// float arrays are high-entropy and TOAST compresses them to nothing.
+// Averaging that into a per-row figure would be wrong in the other
+// direction, since most rows carry no vector at all.
+//
+// So the wide subset is COUNTED rather than assumed — one more REST
+// call asking how many rows are embedded — and charged the measured
+// width. An estimate built on a measurement of the thing that
+// dominates it is a different object from one built on a guess.
 const BYTES = {
   m15_quotes:   210,  // id, ticker, ts, int, 5 doubles, 2 indexes
   wx_quotes:    210,
   wx_forecasts: 260,  // + short_forecast text
   m15_markets:  330,
   wx_markets:   380,
-  markets:      600,  // wide, and carries resolution text
+  markets:      600,  // the NARROW case; see WIDE below
   pairs:        120,
+};
+
+// Rows matching the filter cost `bytes` INSTEAD of the table's base
+// figure, not on top of it.
+const WIDE = {
+  markets: {
+    filter: "&embedding_v=not.is.null",
+    bytes: 4600,            // 4.01KB measured vector + the row around it
+    note: "carry a vector(1024)",
+  },
 };
 
 async function count(table, filter = "", mode = "planned") {
@@ -73,8 +96,23 @@ const rows = [];
 for (const t of TABLES) {
   const { n, err } = await count(t);
   if (err) { console.log(`${t.padEnd(15)} ${"ERROR".padStart(12)}   ${err}`); continue; }
-  const bytes = (n || 0) * (BYTES[t] || 200);
+  const w = WIDE[t];
+  let wide = null;
+  if (w && n) {
+    const r = await count(t, w.filter, "exact");
+    wide = r.n;
+  }
+  // A failed wide count must not read as "no wide rows" — that is the
+  // silent-no-op shape this repo keeps finding. Fall back to charging
+  // the whole table the wide width, which is an OVERstatement, because
+  // the failure mode of a capacity estimate should be pessimism.
+  const wideRows = w && n ? (wide == null ? n : wide) : 0;
+  const bytes = ((n || 0) - wideRows) * (BYTES[t] || 200) + wideRows * (w ? w.bytes : 0);
   totalBytes += bytes;
+  if (w && n) {
+    console.log(`  ${wide == null ? "(wide count FAILED — charging every row the wide width)" :
+      `of which ${fmt(wide)} ${w.note} at ~${(w.bytes / 1024).toFixed(1)}KB`}`);
+  }
 
   let day = null;
   if (GROWING[t]) {
@@ -108,9 +146,13 @@ if (dailyBytes > 0) {
   console.log(`  growth      not measurable — the recorders may not have run in 24h`);
 }
 
-console.log(`\nTHE SIZE FIGURES ARE ESTIMATES. PostgREST serves row counts, not`);
-console.log(`bytes. The counts above are real; the GB are rows x an assumed`);
-console.log(`per-row width and will be wrong if a column is wider than assumed`);
-console.log(`or TOAST compression is doing more than expected. For the exact`);
-console.log(`number run supabase/queries/storage.sql in the SQL editor:`);
+console.log(`\nTHE SIZE FIGURES ARE ESTIMATES, AND THEY RUN LOW. PostgREST serves`);
+console.log(`row counts, not bytes. The counts above are real; the GB are rows x`);
+console.log(`an assumed per-row width. Measured 2026-09-14: this report said`);
+console.log(`0.269 GB and the database was 771 MB — 2.8x. Most of that gap was`);
+console.log(`the markets vector, which is now counted rather than assumed; the`);
+console.log(`rest is index bloat, fillfactor and the Supabase-owned schemas that`);
+console.log(`pg_database_size includes and this report cannot see at all.`);
+console.log(`So treat the total as a FLOOR. For the real number run`);
+console.log(`supabase/queries/storage.sql in the SQL editor:`);
 console.log(`https://github.com/albatrossbird/housedge/blob/main/supabase/queries/storage.sql`);
