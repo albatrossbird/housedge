@@ -86,16 +86,26 @@ async function observations(st) {
   const out = [];
   let end = new Date().toISOString();
   for (let page = 0; page < 40; page++) {
-    const j = await nwsGet(`/stations/${st}/observations?start=${SINCE}&end=${end}&limit=${PAGE}`);
+    const j = await nwsGet(`/stations/${st}/observations` +
+      `?start=${encodeURIComponent(SINCE)}&end=${encodeURIComponent(end)}&limit=${PAGE}`);
     const got = j.features || [];
     if (!got.length) return { rows: out, truncated: false };
     out.push(...got);
     if (got.length < PAGE) return { rows: out, truncated: false };
-    const oldest = got[got.length - 1]?.properties?.timestamp;
+    // NWS stamps observations "2026-09-12T19:53:00+00:00". A '+' in a
+    // query string means SPACE, so feeding that back as `end` verbatim
+    // produced a malformed date and NWS answered 400 — on 22 of 24
+    // stations, every one that needed a second page. Normalise to the
+    // Z form, which carries no '+' at all, and compare as instants
+    // rather than as strings in two different formats.
+    const oldestRaw = got[got.length - 1]?.properties?.timestamp;
+    const oldestMs = Date.parse(oldestRaw);
     // No progress means paging cannot terminate; say so rather than
     // looping or returning a silently short answer.
-    if (!oldest || oldest >= end) return { rows: out, truncated: true };
-    end = oldest;
+    if (!Number.isFinite(oldestMs) || oldestMs >= Date.parse(end)) {
+      return { rows: out, truncated: true };
+    }
+    end = new Date(oldestMs).toISOString();
     await new Promise(r => setTimeout(r, 120));
   }
   return { rows: out, truncated: true };

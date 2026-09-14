@@ -32,42 +32,104 @@ to use self-hosted runners only with private repos.
 These units run the scripts under **plain systemd**, with no GitHub
 runner involved, which sidesteps the problem entirely.
 
-## Setup
+## Choosing the box
 
-A small box is plenty — the work is network-bound, not CPU-bound.
-Hetzner CX22, DigitalOcean or Vultr at $4-6/month are all far more
-machine than this needs.
+**The workload is network-bound, and that decides more than it looks
+like it does.** Measured: one recorder tick costs ~400ms of CPU across
+26 series, at a 12-second cadence — **about 5% of one core**, plus the
+weather loop. Every candidate box has one to two orders of magnitude
+more CPU than that.
+
+So the benchmark that separates VPS providers — sustained compute,
+where dedicated vCPUs beat burstable ones badly — is measuring
+something these scripts never do. A burstable instance's *baseline*
+alone (10-20%) has multiples of headroom, and the one genuinely bursty
+thing here, `npm ci` on deploy, is exactly what burst credits are for.
+
+Latency does not decide it either. Kalshi is **CloudFront → an AWS
+ALB**; Polymarket is **Cloudflare, edge `IAD`**. Both are CDN-fronted,
+so any US east coast host is within a few milliseconds of the same
+edge, and the recorder polls every 12 seconds regardless.
+
+What DOES decide it is whether the venue throttles the address.
+Widening the refresh poll list once drew **sixteen straight HTTP
+429s**, and a series that exhausts its retries freezes until the next
+run. That is a property of the provider's IP range, not its hardware,
+and it is the failure that has actually cost this project data.
+
+**So measure it rather than reasoning about it.** The candidates bill
+hourly, so this costs a few cents:
 
 ```bash
-# 1. Harden first. The box will hold a service-role key.
-adduser --system --group --home /opt/marketslap marketslap
-# SSH keys only, passwords off, then:
-ufw allow OpenSSH && ufw --force enable
-apt update && apt install -y nodejs git unattended-upgrades
-
-# 2. Clone. The repo is public, so no deploy key is needed.
-git clone https://github.com/albatrossbird/housedge /opt/marketslap
-chown -R marketslap:marketslap /opt/marketslap
-
-# 3. Secrets, on the box only — never in git, never pasted into chat.
-mkdir -p /etc/marketslap
-cat > /etc/marketslap/env <<'EOF'
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-EOF
-chmod 600 /etc/marketslap/env
-
-# 4. Install the units.
-cp /opt/marketslap/deploy/*.service /opt/marketslap/deploy/*.timer /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now marketslap-update.timer
-systemctl enable --now marketslap-m15.service
+node scripts/venue-probe.mjs --minutes=10
 ```
 
-**Migrate one job first.** Start with `marketslap-m15` only, leave
-weather on Actions, and run both for a couple of days. If coverage does
-not actually improve, you have learned that cheaply. Only disable the
-Actions schedule once the box has proven itself.
+It runs the recorder's real request rate against the real endpoints and
+counts 429s, separating them from network failures — the two argue for
+opposite conclusions. A clean result means take the cheaper box.
+
+## Setup
+
+One command on a fresh Ubuntu box, as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/albatrossbird/housedge/main/deploy/bootstrap.sh | bash
+```
+
+That installs Node 22, creates a no-login service account, clones the
+repo, enables unattended security upgrades, sets the firewall to
+inbound-SSH-only, and installs the units. It is idempotent.
+
+**It deliberately does not write the secrets.** A script taking a
+service-role key as an argument puts it in shell history and in the
+process list. It prints what to do instead:
+
+```bash
+install -m 600 /dev/null /etc/marketslap/env
+nano /etc/marketslap/env      # typed, not piped
+```
+
+```
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<the service_role key>
+```
+
+Then probe the address, then start **one** job:
+
+```bash
+sudo -u marketslap node /opt/marketslap/scripts/venue-probe.mjs --minutes=10
+systemctl enable --now marketslap-update.timer
+systemctl enable --now marketslap-m15.service
+journalctl -u marketslap-m15 -f
+```
+
+**Migrate one job first.** Leave weather on Actions and run both for a
+couple of days. If coverage does not actually improve, you have learned
+that cheaply. Only disable the Actions schedule once the box has proven
+itself.
+
+## Closing SSH to the internet
+
+Optional, and worth doing — but **in this order**, because closing
+port 22 first is how people lock themselves out:
+
+1. Take a provider snapshot.
+2. `curl -fsSL https://tailscale.com/install.sh | sh && tailscale up` on
+   the box, and install Tailscale on your laptop.
+3. **Verify** `ssh marketslap-box` over the tailnet address works.
+4. Only then: `ufw delete allow OpenSSH && ufw allow in on tailscale0`.
+
+## The credential is the real exposure
+
+The box holds `SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS entirely
+— full read and write on every table. The hardening above protects the
+box; nothing above limits what the key can do if the box is lost.
+
+The actual fix is a dedicated Postgres role with INSERT/UPDATE granted
+only on the recorder tables, used through PostgREST with its own JWT,
+so a compromised box can append quotes and nothing else. That is real
+work rather than a checkbox, and it is the right next step **after**
+the box is up and recording — not a reason to delay it.
 
 ## Deploying is a git push
 
