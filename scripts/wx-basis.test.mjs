@@ -1,4 +1,4 @@
-import { cToF, localDate, dailyExtremes, resolves, marginF, roundings, STATION_TZ } from "../lib/wxBasis.js";
+import { cToF, localDate, localHour, dailyExtremes, resolves, marginF, roundings, STATION_TZ, MIN_HOURS_FOR_DAY } from "../lib/wxBasis.js";
 
 let failures = 0;
 const check = (n, ok) => { console.log(`  ${ok ? "ok  " : "FAIL"} ${n}`); if (!ok) failures++; };
@@ -79,6 +79,67 @@ console.log("\nmargin: how far from the line the observation sat");
   check("a range takes the NEARER edge",
         near(marginF(84.2, { strike_type: "between", floor_strike: 84, cap_strike: 88 }), 0.2));
   check("an unreadable shape is null", marginF(87, { strike_type: "wobble" }) === null);
+}
+
+console.log("\na partially-observed day still produces a maximum, and it is a lie");
+{
+  // The real case. Denver's Sep 5 sat at the oldest edge of the request
+  // window, so only three late-evening readings came back. Their
+  // maximum is 74F; the day's actual high was 93F, and the difference
+  // rendered as a 19F basis against The Weather Company rather than as
+  // data we never had.
+  const evening = [
+    obs("2026-09-06T03:53:00Z", 23.3),  // 21:53 local
+    obs("2026-09-06T04:53:00Z", 22.2),  // 22:53 local
+    obs("2026-09-06T05:53:00Z", 21.1),  // 23:53 local
+  ];
+  const { byDate } = dailyExtremes(evening, "America/Denver");
+  const d = byDate.get("2026-09-05");
+  check("the clipped day still has a finite high", Number.isFinite(d.highF));
+  check("...which is nowhere near the real one", d.highF < 80);
+  check("it observed 3 distinct hours", d.hoursObserved === 3);
+  check("so it is NOT complete, and the caller must refuse it", d.complete === false);
+}
+console.log("\na fully-observed day is scoreable");
+{
+  const full = [];
+  for (let h = 0; h < 24; h++) {
+    // 24 local hours at Denver (UTC-6 in September).
+    const utc = (h + 6) % 24;
+    full.push(obs(`2026-09-${h < 18 ? "10" : "11"}T${String(utc).padStart(2, "0")}:53:00Z`, 20 + h * 0.5));
+  }
+  const { byDate } = dailyExtremes(full, "America/Denver");
+  const d = byDate.get("2026-09-10");
+  check("24 hours observed", d.hoursObserved === 24);
+  check("complete at the 20-hour floor", d.complete === true);
+  check("the floor is stated, not hidden in a comparison", MIN_HOURS_FOR_DAY === 20);
+}
+console.log("\ndensity is not coverage");
+{
+  // A five-minute station logs 200 readings inside one afternoon hour.
+  // Counting READINGS would call that a well-observed day; counting
+  // HOURS does not.
+  const dense = [];
+  for (let m = 0; m < 200; m++) {
+    const t = new Date(Date.parse("2026-09-10T20:00:00Z") + m * 60000).toISOString();
+    dense.push(obs(t, 25));
+  }
+  const { byDate } = dailyExtremes(dense, "America/Denver");
+  const d = byDate.get("2026-09-10");
+  check("200 readings", d.n === 200);
+  check("...spanning 4 hours", d.hoursObserved <= 4);
+  check("...and therefore not scoreable", d.complete === false);
+}
+console.log("\nlocal hour is local, not UTC");
+{
+  check("03:53Z is 21h in Denver", localHour("2026-09-06T03:53:00Z", "America/Denver") === 21);
+  check("03:53Z is 23h in New York", localHour("2026-09-06T03:53:00Z", "America/New_York") === 23);
+  // en-GB renders local midnight as "24" in some ICU versions; the
+  // value has to be usable as a Set key either way, and 0 and 24 are
+  // the same hour. What matters is that it is a number.
+  check("midnight is a number, whatever it is called",
+        Number.isFinite(localHour("2026-09-10T06:00:00Z", "America/Denver")));
+  check("nonsense is null", localHour("nope", "America/Denver") === null);
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");

@@ -20,7 +20,7 @@
 //
 // Usage: node scripts/wx-basis.mjs [--days=7]
 
-import { dailyExtremes, resolves, marginF, roundings, STATION_TZ } from "../lib/wxBasis.js";
+import { dailyExtremes, resolves, marginF, roundings, STATION_TZ, MIN_HOURS_FOR_DAY } from "../lib/wxBasis.js";
 import { nwsGet } from "../lib/weather.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
@@ -68,19 +68,57 @@ if (!mk.length) {
 const stations = [...new Set(mk.map(m => m.station).filter(Boolean))];
 console.log(`stations                          ${stations.length}`);
 
-const start = SINCE, end = new Date().toISOString();
+// ONE REQUEST DOES NOT HOLD SEVEN DAYS.
+//
+// NWS caps a response at `limit` and serves newest-first, and most of
+// these stations report every five minutes rather than hourly — so a
+// 7-day request with limit=500 came back holding TWO DAYS at 24 of the
+// 26 stations. It scored 420 of 2,016 settled markets and reported the
+// other 1,596 as "no observation", which reads as Kalshi listing
+// markets we have no weather for rather than as a truncated read.
+//
+// Keyset-paged on time: when a page comes back full, ask again ending
+// at the oldest timestamp it returned. Same shape as every other pager
+// in this repo, and for the same reason — an OFFSET or a single
+// oversized request is how reads here have silently lost their tails.
+const PAGE = 500;
+async function observations(st) {
+  const out = [];
+  let end = new Date().toISOString();
+  for (let page = 0; page < 40; page++) {
+    const j = await nwsGet(`/stations/${st}/observations?start=${SINCE}&end=${end}&limit=${PAGE}`);
+    const got = j.features || [];
+    if (!got.length) return { rows: out, truncated: false };
+    out.push(...got);
+    if (got.length < PAGE) return { rows: out, truncated: false };
+    const oldest = got[got.length - 1]?.properties?.timestamp;
+    // No progress means paging cannot terminate; say so rather than
+    // looping or returning a silently short answer.
+    if (!oldest || oldest >= end) return { rows: out, truncated: true };
+    end = oldest;
+    await new Promise(r => setTimeout(r, 120));
+  }
+  return { rows: out, truncated: true };
+}
+
 const extremes = new Map();
-let qcRejected = 0, noTemp = 0;
+let qcRejected = 0, noTemp = 0, pagesTruncated = 0;
 const failed = [];
 for (const st of stations) {
   const tz = STATION_TZ[st];
   if (!tz) { failed.push(`${st}: no timezone mapped`); continue; }
   try {
-    const j = await nwsGet(`/stations/${st}/observations?start=${start}&end=${end}&limit=500`);
-    const { byDate, rejected, noTemp: nt } = dailyExtremes(j.features || [], tz);
+    const { rows, truncated } = await observations(st);
+    if (truncated) { pagesTruncated++; failed.push(`${st}: paging did not terminate — TRUNCATED`); }
+    const { byDate, rejected, noTemp: nt } = dailyExtremes(rows, tz);
     extremes.set(st, byDate); qcRejected += rejected; noTemp += nt;
   } catch (err) { failed.push(`${st}: ${err.message}`.slice(0, 110)); }
   await new Promise(r => setTimeout(r, 250));
+}
+{
+  const days = [...extremes.values()].flatMap(m => [...m.values()]);
+  console.log(`station-days observed             ${days.length}`);
+  console.log(`  of those, complete (>=${MIN_HOURS_FOR_DAY}h)        ${days.filter(d => d.complete).length}`);
 }
 console.log(`QC-rejected readings              ${qcRejected}`);
 console.log(`readings with no temperature      ${noTemp}`);
@@ -96,11 +134,17 @@ if (failed.length) {
 // differs between the two.
 for (const mode of ["round", "floor", "raw"]) {
   const cases = [];
-  let noObs = 0, unreadable = 0;
+  let noObs = 0, unreadable = 0, partialDay = 0;
   for (const m of mk) {
     const isHigh = /HIGH/i.test(m.ticker);
     const day = extremes.get(m.station)?.get(m.target_date);
     if (!day) { noObs++; continue; }
+    // A PARTIAL DAY IS NOT A SMALL SAMPLE, IT IS A WRONG ANSWER. The
+    // oldest day of any window is clipped, and a maximum taken over
+    // three late-evening readings is still a number: Denver's Sep 5
+    // scored 74F against a real 93F and rendered as a 19F basis
+    // against The Weather Company. Not scoreable, and counted as such.
+    if (!day.complete) { partialDay++; continue; }
     const base = isHigh ? day.highF : day.lowF;
     const observed = roundings(base)[mode];
     const pred = resolves(observed, m);
@@ -113,6 +157,7 @@ for (const mode of ["round", "floor", "raw"]) {
   console.log(`    agreement with Kalshi's settlement  ${agree}/${cases.length} = ` +
               `${(100 * agree / cases.length).toFixed(1)}%` +
               (noObs ? `   (${noObs} had no observation)` : "") +
+              (partialDay ? `   (${partialDay} on a partially-observed day)` : "") +
               (unreadable ? `   (${unreadable} unreadable strike)` : ""));
   // A proxy can only disagree NEAR the line.
   for (const [lo, hi] of [[0, 1], [1, 2], [2, 5], [5, Infinity]]) {

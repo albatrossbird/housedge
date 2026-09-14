@@ -8,6 +8,17 @@
 --
 -- Run this in the Supabase SQL editor for the real number. It is a
 -- catalogue read, so it returns instantly and touches no data.
+--
+-- MEASURED 2026-09-14: 771 MB, against the script's 0.269 GB estimate.
+-- A 2.8x miss, and the estimate was low for a specific reason it has
+-- since been taught: `markets` carries a vector(1024) on embedded rows
+-- at ~4KB each, and the script charged every row a flat 600 bytes.
+--
+-- Note also that the two numbers below are NOT the same thing. The
+-- per-table sum covers the public schema; pg_database_size covers the
+-- whole database, including auth, storage, realtime and the catalogue.
+-- The plan's ceiling applies to the second one, so that is the figure
+-- to compare against 8 GB.
 select
   c.relname                                            as table_name,
   pg_size_pretty(pg_total_relation_size(c.oid))        as total,
