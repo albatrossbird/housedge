@@ -1,0 +1,33 @@
+# How fast is the database actually growing, and when does it matter?
+#
+# m15_quotes and wx_quotes are append-only and nothing deletes from
+# them. The retention decision has been open on the strength of an
+# estimate, and this project has a long record of estimates being wrong
+# in exactly this way.
+#
+# Read-only: Supabase anon, planner-estimate counts rather than full
+# scans. Writes nothing.
+name: Storage report
+
+on:
+  workflow_dispatch:
+    inputs:
+      ceiling:
+        description: "Plan ceiling in GB (Supabase Pro includes 8)"
+        default: "8"
+        required: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          CEILING_GB: ${{ github.event.inputs.ceiling || '8' }}
+        run: node scripts/storage-report.mjs
