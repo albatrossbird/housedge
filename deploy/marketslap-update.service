@@ -1,0 +1,22 @@
+# Pull the latest code, so deploying is a git push and nothing else.
+#
+# THIS IS WHAT KEEPS THE PROJECT PHONE-WORKABLE. Without it, every code
+# change needs an SSH session; with it, pushing to main is the deploy.
+# The recorders cycle hourly, so new code is live within the hour with
+# no manual step.
+#
+# The repo is public, so this needs no credential. `git reset --hard`
+# rather than `git pull`, because a merge conflict on an unattended box
+# is a recorder that silently stops.
+
+[Unit]
+Description=MarketSlap self-update from git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=marketslap
+WorkingDirectory=/opt/marketslap
+ExecStart=/usr/bin/git fetch --quiet origin main
+ExecStart=/usr/bin/git reset --hard --quiet origin/main

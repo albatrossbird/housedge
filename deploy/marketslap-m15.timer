@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the MarketSlap 15-minute recorder
+
+[Timer]
+# Only used if the service is ever switched to Type=oneshot. The
+# service as shipped is Restart=always and needs no timer.
+OnBootSec=1min
+OnUnitActiveSec=60min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

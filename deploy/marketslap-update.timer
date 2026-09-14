@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull MarketSlap code every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+# Catch up after downtime rather than skipping the missed run.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
