@@ -92,7 +92,14 @@ nano /etc/marketslap/env      # typed, not piped
 ```
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<the service_role key>
+SUPABASE_ANON_KEY=<the anon key>
 ```
+
+The anon key is there so `scripts/watchdog.mjs` can be run **on the
+box**, answering "is anything actually landing" without leaving it. A
+recorder that runs and writes nothing is this project's most common
+failure, and `systemctl status` reports it as active. The anon key is
+public by design — it ships to every browser — so it adds no exposure.
 
 Then probe the address, then start **one** job:
 
@@ -102,6 +109,11 @@ systemctl enable --now marketslap-update.timer
 systemctl enable --now marketslap-m15.service
 journalctl -u marketslap-m15 -f
 ```
+
+**Ashburn has CPX and CCX only — there is no CX series in the US
+locations.** The box is a **CPX11**; looking for a CX22 there wastes
+time. New Hetzner accounts are also manually reviewed, so register
+before you clear an afternoon for this.
 
 **Migrate one job first.** Leave weather on Actions and run both for a
 couple of days. If coverage does not actually improve, you have learned
