@@ -92,7 +92,13 @@ Box is provisioned. Two things left, and they are yours to do by hand.
 
      SUPABASE_URL=https://<project>.supabase.co
      SUPABASE_SERVICE_ROLE_KEY=<the service_role key>
-     VOYAGE_API_KEY=<only if you later run discovery here>
+     SUPABASE_ANON_KEY=<the anon key>
+
+   The anon key belongs here even though the recorders do not write
+   with it: scripts/watchdog.mjs reads through it, and being able to
+   ask the box "is anything actually landing" without leaving the box
+   is the difference between checking and assuming. It is public by
+   design — it ships to every browser — so it adds no exposure.
 
    Then confirm nothing else can read it:
 
@@ -112,6 +118,14 @@ Only then start recording. ONE JOB FIRST:
      systemctl enable --now marketslap-update.timer
      systemctl enable --now marketslap-m15.service
      journalctl -u marketslap-m15 -f
+
+Then confirm rows are LANDING, not just that a process is running —
+a recorder that runs and writes nothing is this project's most common
+failure:
+
+     sudo -u $USER --preserve-env=SUPABASE_URL,SUPABASE_ANON_KEY \
+       env \$(grep -E '^SUPABASE_(URL|ANON_KEY)=' $ENVFILE | xargs) \
+       node $DIR/scripts/watchdog.mjs
 
 Leave weather on GitHub Actions for a couple of days and compare. If
 coverage does not actually improve, you have learned that cheaply.
