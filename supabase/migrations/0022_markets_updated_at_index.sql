@@ -3,8 +3,7 @@
 -- It asks one question — what is the newest updated_at — which
 -- PostgREST sends as `order=updated_at.desc&limit=1`. With no index on
 -- that column Postgres sorts the whole table to answer it, and
--- `markets` is ~190,000 rows carrying a vector(1024), so the sort
--- spills and the statement is cancelled:
+-- `markets` is ~190,000 rows, so the statement is cancelled:
 --
 --   57014 canceling statement due to statement timeout
 --
@@ -14,33 +13,58 @@
 -- this repo has written that lesson down twice already, about a
 -- counter that could only be non-zero and about a daily alarm nobody
 -- can action. It teaches you to ignore the channel, and the channel is
--- the one that reports a dead recorder.
+-- the one that reports a dead recorder on a price path that cannot be
+-- backfilled.
 --
--- DESC NULLS LAST matches the query exactly. A plain btree can be
--- scanned backwards, but matching the sort order means the planner
--- takes the index for this query without having to reason about it.
+-- ============================================================
+-- RUN THIS ONE. Paste it into the Supabase SQL editor, by itself.
+-- ============================================================
+
+create index if not exists markets_updated_at_desc_idx
+  on public.markets (updated_at desc nulls last);
+
+-- WHY NOT CONCURRENTLY, WHICH THIS FILE ASKED FOR FIRST.
 --
--- CONCURRENTLY so it does not take a write lock on the table the site
--- reads from. That means it CANNOT run inside a transaction block —
--- paste it on its own, not inside a BEGIN/COMMIT, and not alongside
--- other statements in one editor run.
+-- CONCURRENTLY cannot run inside a transaction block, and whether the
+-- dashboard's SQL editor wraps a lone statement in one is reported
+-- both ways — so it is a coin toss that fails with an error looking
+-- like the migration is wrong. The plain form always works there.
 --
--- It builds against a live table, so give it a direct connection
--- rather than the dashboard editor's 60-second ceiling:
+-- The cost of dropping it is a SHARE lock for the duration of the
+-- build: WRITES to `markets` wait, reads do not. This index covers a
+-- single timestamptz column, so the build is seconds, and `markets` is
+-- written by the daily discovery job and by /api/refresh — NOT by
+-- either recorder. Nothing being recorded can be lost by this. A
+-- refresh call landing mid-build waits and then succeeds.
 --
---   psql "<session-pooler-url>" -c "set statement_timeout = 0;" \
---     -f supabase/migrations/0022_markets_updated_at_index.sql
+-- Do NOT reach for CONCURRENTLY here on general principle. It exists
+-- for builds long enough that blocking writes matters, and it costs a
+-- second table pass plus the possibility of leaving an INVALID index
+-- behind if the build fails. If you do want it, it needs a direct
+-- connection rather than the editor:
+--
+--   psql "<session-pooler-url>" \
+--     -c "create index concurrently if not exists markets_updated_at_desc_idx
+--         on public.markets (updated_at desc nulls last);"
+--
+-- DESC NULLS LAST matches the watchdog's query ordering exactly, so
+-- the planner takes the index without having to reason about reading a
+-- btree backwards.
 --
 -- Idempotent: IF NOT EXISTS, so a re-run is a no-op.
 
-create index concurrently if not exists markets_updated_at_desc_idx
-  on public.markets (updated_at desc nulls last);
-
--- Verify. Expect idx_scan to climb after the next watchdog run, and
--- the query below to come back in milliseconds rather than timing out.
+-- ============================================================
+-- VERIFY. Paste this after, in the same editor.
+-- ============================================================
 --
---   select indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid))
---   from pg_stat_user_indexes where relname = 'markets';
+-- Should come back in milliseconds, and the plan should say
+-- "Index Only Scan Backward" or "Index Scan" — never "Seq Scan".
 --
 --   explain analyze
 --   select updated_at from public.markets order by updated_at desc limit 1;
+--
+-- And after the next watchdog run, idx_scan should be non-zero:
+--
+--   select indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid))
+--   from pg_stat_user_indexes
+--   where relname = 'markets' and indexrelname = 'markets_updated_at_desc_idx';
