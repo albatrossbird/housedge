@@ -47,9 +47,26 @@ create index if not exists markets_updated_at_desc_idx
 --     -c "create index concurrently if not exists markets_updated_at_desc_idx
 --         on public.markets (updated_at desc nulls last);"
 --
--- DESC NULLS LAST matches the watchdog's query ordering exactly, so
--- the planner takes the index without having to reason about reading a
--- btree backwards.
+-- DESC NULLS LAST DOES NOT MATCH A BARE `ORDER BY x DESC`, and this
+-- file previously claimed it did. In Postgres, DESC implies NULLS
+-- FIRST, so the two orderings differ and the planner cannot use the
+-- index to satisfy the sort. Measured after this index was built:
+--
+--   Sort (top-N heapsort)  Sort Key: updated_at DESC
+--     -> Parallel Index Only Scan using markets_updated_at_desc_idx
+--        rows=101922 loops=2    Heap Fetches: 47153
+--   Execution Time: 1635 ms
+--
+-- The index WAS used and the query still read ~204,000 entries and
+-- sorted them. A Sort node above an index scan is the tell that the
+-- ordering does not match.
+--
+-- THE INDEX IS FINE AND DOES NOT NEED REBUILDING. scripts/watchdog.mjs
+-- now asks for `order=updated_at.desc.nullslast`, which matches it, and
+-- filters nulls out so the null placement cannot decide the answer.
+-- Fixed in the caller rather than here because the other three watched
+-- tables rely on plain ascending indexes answering a bare DESC order,
+-- and changing this one to match them would only move the mismatch.
 --
 -- Idempotent: IF NOT EXISTS, so a re-run is a no-op.
 
