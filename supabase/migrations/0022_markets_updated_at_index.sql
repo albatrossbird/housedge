@@ -1,0 +1,46 @@
+-- The watchdog cannot read `markets`, and says so every six hours.
+--
+-- It asks one question — what is the newest updated_at — which
+-- PostgREST sends as `order=updated_at.desc&limit=1`. With no index on
+-- that column Postgres sorts the whole table to answer it, and
+-- `markets` is ~190,000 rows carrying a vector(1024), so the sort
+-- spills and the statement is cancelled:
+--
+--   57014 canceling statement due to statement timeout
+--
+-- scripts/watchdog.mjs reports that as UNREADABLE rather than as a
+-- pass, which is correct and is the whole design. But an alarm that
+-- fires on every run and can never be cleared is its own defect —
+-- this repo has written that lesson down twice already, about a
+-- counter that could only be non-zero and about a daily alarm nobody
+-- can action. It teaches you to ignore the channel, and the channel is
+-- the one that reports a dead recorder.
+--
+-- DESC NULLS LAST matches the query exactly. A plain btree can be
+-- scanned backwards, but matching the sort order means the planner
+-- takes the index for this query without having to reason about it.
+--
+-- CONCURRENTLY so it does not take a write lock on the table the site
+-- reads from. That means it CANNOT run inside a transaction block —
+-- paste it on its own, not inside a BEGIN/COMMIT, and not alongside
+-- other statements in one editor run.
+--
+-- It builds against a live table, so give it a direct connection
+-- rather than the dashboard editor's 60-second ceiling:
+--
+--   psql "<session-pooler-url>" -c "set statement_timeout = 0;" \
+--     -f supabase/migrations/0022_markets_updated_at_index.sql
+--
+-- Idempotent: IF NOT EXISTS, so a re-run is a no-op.
+
+create index concurrently if not exists markets_updated_at_desc_idx
+  on public.markets (updated_at desc nulls last);
+
+-- Verify. Expect idx_scan to climb after the next watchdog run, and
+-- the query below to come back in milliseconds rather than timing out.
+--
+--   select indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid))
+--   from pg_stat_user_indexes where relname = 'markets';
+--
+--   explain analyze
+--   select updated_at from public.markets order by updated_at desc limit 1;
