@@ -80,8 +80,17 @@ async function newest(table, column, { nullsLast = false } = {}) {
   if (!r.ok) return { at: null, err: `${r.status} ${(await r.text()).slice(0, 100)}` };
   const rows = await r.json();
   if (!rows.length) return { at: null, err: "table is EMPTY" };
-  const t = Date.parse(rows[0][column]);
-  return Number.isFinite(t) ? { at: t, err: null } : { at: null, err: "unparseable timestamp" };
+  // SAY WHAT COULD NOT BE PARSED. "unparseable timestamp" names the
+  // symptom and withholds the one fact needed to act on it, which is
+  // the defect this whole check keeps being rewritten for — a
+  // diagnostic that cannot diagnose. JSON.stringify so that null, an
+  // empty string and a missing key are distinguishable from each other
+  // rather than all rendering as nothing.
+  const raw = rows[0][column];
+  const t = Date.parse(raw);
+  if (Number.isFinite(t)) return { at: t, err: null };
+  return { at: null, err: `unparseable ${column}: ${JSON.stringify(raw)?.slice(0, 60)}` +
+                          ` (row keys: ${Object.keys(rows[0]).join(",") || "none"})` };
 }
 
 const mins = ms => Math.round(ms / 60000);
