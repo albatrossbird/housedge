@@ -88,7 +88,6 @@ const specs = grid();
 console.log(`STRATEGY SWEEP  ${specs.length} variants x ${SERIES.length} series = ${specs.length * SERIES.length} tests`);
 console.log(`window ${DAYS}d, null ${DRAWS} simulated worlds per series\n`);
 
-const MAX_SECS = Math.max(...WINDOWS);
 let anyProven = false;
 
 for (const s of SERIES) {
@@ -102,22 +101,48 @@ for (const s of SERIES) {
   const dayOf = new Map(mk.map(m => [m.ticker, String(m.close_time).slice(0, 10)]));
 
   const tickers = [...resultOf.keys()];
-  const q = [];
-  for (let i = 0; i < tickers.length; i += 200) {
-    const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
-    q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-      `ticker=in.(${encodeURIComponent(ids)})&secs_to_close=lte.${MAX_SECS}&secs_to_close=gte.0&`));
-  }
+  const known = new Set(tickers);
 
-  // ONE OBSERVATION PER MARKET PER WINDOW. m15_quotes is
-  // write-on-change, so counting rows weights the sample toward
-  // volatile markets — exactly the ones likeliest to settle against
-  // their quote. Each time window gets its own pick, because the
-  // nearest quote to T-60 is not the nearest to T-600.
-  const obsByWindow = new Map(
-    WINDOWS.map(w => [w, pickOnePerTicker(q, w, { known: new Set(resultOf.keys()) })]));
+  // READ A BAND AROUND EACH TARGET, NOT EVERYTHING UP TO THE WIDEST.
+  //
+  // Two reasons, and the second is the important one.
+  //
+  // Reading secs_to_close 0..600 in one query is ~7x the rows the
+  // 90-second audit pulls, and it timed out on the first run with
+  // 57014 — the same statement-timeout this repo keeps meeting when a
+  // read is wider than the question.
+  //
+  // But it was also WRONG. pickOnePerTicker takes the row NEAREST the
+  // target, so with a 0..600 read a market whose only quote sat at T-5
+  // would be selected and scored as a "T-600 entry". That is not a
+  // slower answer, it is a different strategy wearing the label of the
+  // one being tested. The band makes the label true, and a market with
+  // no quote near the target is DROPPED and COUNTED rather than
+  // silently represented by a quote from a different moment.
+  //
+  // Tolerance scales with the target: at T-60 a quote 60s away is a
+  // different market state, at T-600 it is barely a different one.
+  const tol = w => Math.max(15, Math.round(w * 0.25));
+
   const obs = [];
-  for (const [w, rows] of obsByWindow) for (const r of rows) obs.push({ ...r, __w: w });
+  const coverage = [];
+  for (const w of WINDOWS) {
+    const rows = [];
+    for (let i = 0; i < tickers.length; i += 120) {
+      const ids = tickers.slice(i, i + 120).map(t => `"${t}"`).join(",");
+      rows.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
+        `ticker=in.(${encodeURIComponent(ids)})` +
+        `&secs_to_close=gte.${Math.max(1, w - tol(w))}&secs_to_close=lte.${w + tol(w)}&`));
+    }
+    // ONE OBSERVATION PER MARKET PER WINDOW. m15_quotes is
+    // write-on-change, so counting rows weights the sample toward
+    // volatile markets — exactly the ones likeliest to settle against
+    // their quote.
+    const picked = pickOnePerTicker(rows, w, { known });
+    for (const r of picked) obs.push({ ...r, __w: w });
+    coverage.push({ w, tol: tol(w), rows: rows.length, markets: picked.length,
+                    dropped: tickers.length - picked.length });
+  }
 
   // Each spec only sees observations picked for its own window.
   const per = specs.map((sp, i) =>
@@ -129,8 +154,16 @@ for (const s of SERIES) {
   }).filter(x => x.r && x.r.n > 0);
 
   console.log(`${"=".repeat(74)}`);
-  console.log(`${s}  (fee multiplier ${mult})  ${mk.length} settled markets, ${q.length} quote rows`);
+  console.log(`${s}  (fee multiplier ${mult})  ${mk.length} settled markets`);
   console.log(`${"=".repeat(74)}`);
+  // A sample that quietly shrinks teaches you to distrust it, so the
+  // coverage per window is stated before any result that rests on it.
+  for (const c of coverage) {
+    console.log(`  T-${String(c.w).padStart(3)}s +/-${String(c.tol).padStart(3)}s: ` +
+                `${String(c.markets).padStart(5)} of ${mk.length} markets have a quote in range` +
+                ` (${c.dropped} without)`);
+  }
+  console.log();
   if (!rows.length) { console.log("  no variant took a single entry\n"); continue; }
 
   rows.sort((a, b) => b.r.netPer - a.r.netPer);
