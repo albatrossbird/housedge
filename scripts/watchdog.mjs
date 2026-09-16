@@ -39,15 +39,42 @@ const CHECKS = [
     note: "NWS forecast fetch" },
   // Discovery and matching are daily; two days of silence means a run
   // failed rather than that nothing changed.
+  //
+  // nullsLast MATCHES THE INDEX, and the coupling is the whole point of
+  // the flag. `markets_updated_at_desc_idx` is DESC NULLS LAST, while a
+  // bare `ORDER BY x DESC` in Postgres means DESC NULLS **FIRST** — so
+  // the two orderings differ and the index cannot answer the sort. The
+  // measured result was an index that WAS used and still took 1.6s:
+  //
+  //   Sort (top-N heapsort)  Sort Key: updated_at DESC
+  //     -> Parallel Index Only Scan ... rows=101922 loops=2
+  //
+  // A Sort node above the scan is the tell. Reading 204,000 index
+  // entries and sorting them is not what an index was added for; with
+  // the orderings matched the plan is Limit -> Index Only Scan, rows=1.
+  //
+  // The other three tables deliberately do NOT set this: their indexes
+  // are plain ascending, and a backward scan of one yields DESC NULLS
+  // FIRST, which is exactly what the bare order already asks for.
+  // Setting it there would break them the same way.
   { table: "markets", column: "updated_at", budget: 60 * 48,
-    note: "market discovery / price refresh" },
+    nullsLast: true, note: "market discovery / price refresh" },
 ];
 
-async function newest(table, column) {
+async function newest(table, column, { nullsLast = false } = {}) {
   // One row, newest first. An index on the ordering column makes this
   // an index scan rather than the full-table sort that has twice
-  // produced 57014 here.
-  const r = await fetch(`${URL}/rest/v1/${table}?select=${column}&order=${column}.desc&limit=1`, {
+  // produced 57014 here — but ONLY if the index's null ordering matches
+  // the one asked for here. See the note on the markets check.
+  //
+  // The null filter is not redundant with nullslast. Ordering decides
+  // where nulls sit; the filter decides whether a null can be the
+  // answer at all. Without it a single null row would make this report
+  // "unparseable timestamp" forever, which is the same permanently-red
+  // alarm this check was already fixed for once.
+  const order = `${column}.desc${nullsLast ? ".nullslast" : ""}`;
+  const r = await fetch(
+    `${URL}/rest/v1/${table}?select=${column}&${column}=not.is.null&order=${order}&limit=1`, {
     headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
   });
   if (!r.ok) return { at: null, err: `${r.status} ${(await r.text()).slice(0, 100)}` };
@@ -65,7 +92,7 @@ console.log(`${"table".padEnd(15)} ${"newest".padStart(9)} ${"budget".padStart(8
 
 let failed = 0, unreadable = 0;
 for (const c of CHECKS) {
-  const { at, err } = await newest(c.table, c.column);
+  const { at, err } = await newest(c.table, c.column, { nullsLast: c.nullsLast });
   if (err) {
     // A read that FAILS is not a table that is fresh. Saying "unknown"
     // rather than passing is the whole point — this repo has been
