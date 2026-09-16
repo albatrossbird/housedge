@@ -20,6 +20,8 @@
 //
 // Reads only, anon key. Writes nothing. Exits non-zero when stale.
 
+import { parseWhen } from "../lib/parseWhen.js";
+
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
 
@@ -87,8 +89,8 @@ async function newest(table, column, { nullsLast = false } = {}) {
   // empty string and a missing key are distinguishable from each other
   // rather than all rendering as nothing.
   const raw = rows[0][column];
-  const t = Date.parse(raw);
-  if (Number.isFinite(t)) return { at: t, err: null };
+  const t = parseWhen(raw);
+  if (t != null) return { at: t, err: null };
   return { at: null, err: `unparseable ${column}: ${JSON.stringify(raw)?.slice(0, 60)}` +
                           ` (row keys: ${Object.keys(rows[0]).join(",") || "none"})` };
 }
