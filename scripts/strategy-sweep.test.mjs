@@ -1,5 +1,5 @@
 import { collectEntries, score, realWin, mulberry32, simulatedWin,
-         nullDistribution, quantile, pValue } from "../lib/strategySweep.js";
+         nullDistribution, quantile, pValue, tStat, MIN_CELL_N } from "../lib/strategySweep.js";
 
 let failures = 0;
 const check = (n, ok) => { console.log(`  ${ok ? "ok  " : "FAIL"} ${n}`); if (!ok) failures++; };
@@ -64,6 +64,67 @@ console.log("\nthe null is CALIBRATED: edge over price must centre on zero");
   check(`mean edge ${(100 * mean).toFixed(3)}pt is within 0.5pt of zero`, Math.abs(mean) < 0.005);
 }
 
+console.log("\nstudentising is what stops the thinnest cells taking the MAX");
+{
+  // Hansen (2005) makes exactly this correction to White (2000), and
+  // the effect only appears in the maximum over MANY cells. Two cells
+  // at the same price are symmetric — each wins half the time whatever
+  // their sizes — so a pairwise test proves nothing here. It is the
+  // upper tail that thin cells dominate, and the max is all upper tail.
+  const cell = (n, tag) => Array.from({ length: n }, (_, i) =>
+    ({ ticker: `${tag}${i}`, side: "yes", price: 0.5, impliedYes: 0.5 }));
+  const sizes = [20, 20, 20, 20, 60, 60, 60, 60, 200, 200, 200, 200];
+  const cells = sizes.map((n, k) => cell(n, `C${k}_`));
+  const tickers = cells.flat().map(e => e.ticker);
+  const rand = mulberry32(3);
+  let rawThin = 0, tThin = 0;
+  const draws = 2000;
+  for (let d = 0; d < draws; d++) {
+    const won = simulatedWin(rand, tickers);
+    const scored = cells.map((c, i) => ({ n: sizes[i], s: score(c, 1, won) }));
+    const byRaw = scored.reduce((a, b) => (b.s.netPer > a.s.netPer ? b : a));
+    const byT = scored.reduce((a, b) => (tStat(b.s) > tStat(a.s) ? b : a));
+    if (byRaw.n === 20) rawThin++;
+    if (byT.n === 20) tThin++;
+  }
+  const rawPct = 100 * rawThin / draws, tPct = 100 * tThin / draws;
+  // The four 20-entry cells are a third of the family, so a fair
+  // procedure hands them the max about a third of the time.
+  check(`on RAW net the thin cells take ${rawPct.toFixed(0)}% of maxima — far past their 33% share`,
+        rawPct > 55);
+  check(`studentised they take ${tPct.toFixed(0)}% — near fair`, Math.abs(tPct - 33) < 12);
+  check("...and studentising strictly reduces it", tPct < rawPct);
+}
+
+console.log("\nthe SD is theoretical, because a sample SD collapses");
+{
+  // Every entry won. A sample standard deviation is exactly zero here,
+  // so a sample-based t is infinite and the smallest cell that ran the
+  // table takes the whole family. This is the same defect that once
+  // made a three-entry band read as significant.
+  const perfect = { n: 3, avgEntry: 0.5, netPer: 0.5, winRate: 1 };
+  const t = tStat(perfect);
+  check("a perfect run gives a FINITE t", Number.isFinite(t));
+  // Three entries at even money is t = 0.5 / sqrt(0.25/3) = 1.73.
+  check(`...and a modest one (${t.toFixed(2)}), because n is small`, t < 2);
+  const many = tStat({ n: 300, avgEntry: 0.5, netPer: 0.5, winRate: 1 });
+  check(`the same result on 300 entries is overwhelming (${many.toFixed(1)})`, many > 15);
+}
+
+console.log("\nthe floor protects the approximation, not the correction");
+{
+  // It is deliberately LOW. An earlier version set it at 400 on the
+  // theory that it was what stopped small cells dominating; it is not,
+  // the studentisation is, and a floor that high would discard a
+  // genuine edge found in a 60-entry cell.
+  check("the floor is 30, not hundreds", MIN_CELL_N === 30);
+  const under = Array.from({ length: MIN_CELL_N - 1 }, (_, i) =>
+    ({ ticker: `U${i}`, side: "yes", price: 0.5, impliedYes: 0.5 }));
+  const nd = nullDistribution([under], 1, { draws: 30 });
+  check("a cell under the floor is not eligible", nd.eligible === 0);
+  check("...and contributes no draws rather than a silent zero", nd.bestT.length === 0);
+}
+
 console.log("\nthe null prices the cost of trying many things");
 {
   // Twenty strategies over the same markets. The best of twenty on pure
@@ -75,8 +136,8 @@ console.log("\nthe null prices the cost of trying many things");
        impliedYes: 0.5 + ((i + k) % 7) * 0.05 }));
   const one = nullDistribution([mk(0)], 1, { draws: 600, seed: 5 });
   const twenty = nullDistribution(Array.from({ length: 20 }, (_, k) => mk(k)), 1, { draws: 600, seed: 5 });
-  const q95one = quantile(one.bestEdge, 0.95), q95twenty = quantile(twenty.bestEdge, 0.95);
-  check(`best-of-20 noise (${(100 * q95twenty).toFixed(2)}pt) exceeds best-of-1 (${(100 * q95one).toFixed(2)}pt)`,
+  const q95one = quantile(one.bestT, 0.95), q95twenty = quantile(twenty.bestT, 0.95);
+  check(`best-of-20 noise (t ${q95twenty.toFixed(2)}) exceeds best-of-1 (t ${q95one.toFixed(2)})`,
         q95twenty > q95one);
 }
 
@@ -92,13 +153,14 @@ console.log("\nthe p-value is a share of simulated worlds, and never zero");
 
 console.log("\nthe same seed gives the same answer");
 {
-  const e = [{ ticker: "A", side: "yes", price: 0.7, impliedYes: 0.7 }];
+  const e = Array.from({ length: 40 }, (_, i) =>
+    ({ ticker: `A${i}`, side: "yes", price: 0.7, impliedYes: 0.7 }));
   const a = nullDistribution([e], 1, { draws: 50, seed: 42 });
   const b = nullDistribution([e], 1, { draws: 50, seed: 42 });
-  check("reproducible", JSON.stringify(a.bestEdge) === JSON.stringify(b.bestEdge));
+  check("reproducible", JSON.stringify(a.bestT) === JSON.stringify(b.bestT));
   const c = nullDistribution([e], 1, { draws: 50, seed: 43 });
   check("and a different seed is a different null",
-        JSON.stringify(a.bestEdge) !== JSON.stringify(c.bestEdge));
+        JSON.stringify(a.bestT) !== JSON.stringify(c.bestT));
 }
 
 console.log("\nreal scoring still agrees with the outcome map");

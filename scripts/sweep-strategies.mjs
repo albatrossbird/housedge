@@ -29,7 +29,7 @@
 // Usage: node scripts/sweep-strategies.mjs [--days=21] [--draws=400]
 
 import { pickOnePerTicker } from "../lib/calibrate.js";
-import { collectEntries, score, realWin, nullDistribution, quantile, pValue }
+import { collectEntries, score, realWin, nullDistribution, quantile, pValue, tStat, MIN_CELL_N }
   from "../lib/strategySweep.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
@@ -41,9 +41,31 @@ const DRAWS = arg("draws", 400);
 const SINCE = new Date(Date.now() - DAYS * 86400000).toISOString();
 
 const SERIES = ["KXBTC15M", "KXGOLD15M"];
-const BANDS = [[0.05, 0.20], [0.20, 0.40], [0.40, 0.60], [0.60, 0.80], [0.80, 0.90], [0.90, 0.98]];
+
+// EIGHT CELLS, NOT THIRTY-SIX, AND THE AXIS IS PRICE.
+//
+// The noise floor of a best-of-K grows with the family, so every cell
+// that does not test the hypothesis makes the ones that do harder to
+// see. The first sweep spent 36 cells covering price, side and time at
+// once and could not separate any of them.
+//
+// The hypothesis is the FAVOURITE-LONGSHOT BIAS, which is documented on
+// Kalshi specifically rather than borrowed from racetrack betting:
+// cheap contracts win less often than their price implies and
+// expensive ones slightly more, with sub-10c contracts reported losing
+// over 60% of stake. That is a claim about PRICE LEVEL, so price gets
+// the resolution and the other axes give theirs up.
+//
+// Both sides run because they are genuinely different books carrying
+// different fees at different prices — not because the hypothesis needs
+// them. One time window, because the time axis was exploratory and
+// multiplying K by three to carry it would cost more in noise floor
+// than it buys. T-180 is the choice: the widest coverage of the three
+// in the first run, and three minutes is a window a person can trade
+// rather than only a machine.
+const BANDS = [[0.05, 0.15], [0.15, 0.35], [0.65, 0.85], [0.85, 0.95]];
 const SIDES = ["yes", "no"];
-const WINDOWS = [60, 180, 600];
+const WINDOWS = [180];
 
 function grid() {
   const out = [];
@@ -166,29 +188,48 @@ for (const s of SERIES) {
   console.log();
   if (!rows.length) { console.log("  no variant took a single entry\n"); continue; }
 
-  rows.sort((a, b) => b.r.netPer - a.r.netPer);
-  console.log(`  ${"variant".padEnd(26)} ${"n".padStart(5)} ${"days".padStart(5)} ${"win%".padStart(7)} ${"edge".padStart(8)} ${"net/ct".padStart(8)}`);
-  for (const { label, r } of rows) {
+  // EVERY cell is printed; only cells at the floor are ELIGIBLE to be
+  // called best. A table that hides its thin cells hides the shape of
+  // the data, and the floor is about what can be scored rather than
+  // about what is interesting.
+  for (const x of rows) { x.t = tStat(x.r); x.eligible = x.r.n >= MIN_CELL_N; }
+  rows.sort((a, b) => (b.eligible - a.eligible) || (b.t - a.t));
+  console.log(`  ${"variant".padEnd(26)} ${"n".padStart(5)} ${"days".padStart(5)} ${"win%".padStart(7)} ${"net/ct".padStart(8)} ${"t".padStart(7)}`);
+  for (const { label, r, t, eligible } of rows) {
     console.log(`  ${label.padEnd(26)} ${String(r.n).padStart(5)} ${String(r.days).padStart(5)} ` +
-                `${(100 * r.winRate).toFixed(1).padStart(6)}% ${pc(r.edgeOverPrice).padStart(8)} ${pc(r.netPer).padStart(8)}`);
+                `${(100 * r.winRate).toFixed(1).padStart(6)}% ${pc(r.netPer).padStart(8)} ` +
+                `${t.toFixed(2).padStart(7)}${eligible ? "" : `   (under n=${MIN_CELL_N}, not scored)`}`);
   }
 
   // THE CORRECTION. The best of N is not the same object as one test.
   const nd = nullDistribution(per, mult, { draws: DRAWS });
-  const best = rows[0];
-  const pNet = pValue(nd.bestNet, best.r.netPer);
-  const pEdge = pValue(nd.bestEdge, Math.abs(best.r.edgeOverPrice));
+  const eligible = rows.filter(x => x.eligible);
+  if (!eligible.length) {
+    console.log(`\n  NOTHING ELIGIBLE: no cell has reached n=${MIN_CELL_N} yet.`);
+    console.log(`  That is an answer about the SAMPLE, not about the strategies.`);
+    console.log(`  Largest cell is ${Math.max(...rows.map(x => x.r.n))} entries.\n`);
+    continue;
+  }
+  const best = eligible[0];
+  const pT = pValue(nd.bestT, best.t);
 
-  console.log(`\n  BEST: ${best.label}`);
-  console.log(`    net ${pc(best.r.netPer)}c/contract on ${best.r.n} entries over ${best.r.days} days`);
-  console.log(`\n  AGAINST A CALIBRATED-MARKET NULL (${nd.draws} simulated worlds, same entries)`);
-  console.log(`    best net/ct reached by NOISE  median ${pc(quantile(nd.bestNet, 0.5))}c` +
+  console.log(`\n  BEST (studentised): ${best.label}`);
+  console.log(`    t ${best.t.toFixed(2)},  net ${pc(best.r.netPer)}c/contract` +
+              ` on ${best.r.n} entries over ${best.r.days} days`);
+  console.log(`\n  AGAINST A CALIBRATED-MARKET NULL (${nd.draws} worlds, ${nd.eligible} eligible cells)`);
+  console.log(`    best t reached by NOISE       median ${quantile(nd.bestT, 0.5).toFixed(2)}` +
+              `   95th ${quantile(nd.bestT, 0.95).toFixed(2)}`);
+  console.log(`    ...and the net it came with   median ${pc(quantile(nd.bestNet, 0.5))}c` +
               `   95th ${pc(quantile(nd.bestNet, 0.95))}c`);
-  console.log(`    best |edge| reached by NOISE  median ${pc(quantile(nd.bestEdge, 0.5))}pt` +
-              `   95th ${pc(quantile(nd.bestEdge, 0.95))}pt`);
-  console.log(`    p(noise >= our best net)   ${pNet.toFixed(3)}`);
-  console.log(`    p(noise >= our best |edge|) ${pEdge.toFixed(3)}`);
+  console.log(`    p(noise >= our best t)  ${pT.toFixed(3)}`);
+  // Harvey & Liu argue a newly proposed factor should clear t = 3.0
+  // rather than 2.0, precisely because of multiple testing. Stated
+  // beside the bootstrap as an independent reference point, not as a
+  // second gate: the bootstrap already corrects for THIS family, and
+  // applying a published haircut on top would charge for it twice.
+  console.log(`    (Harvey & Liu's published bar for a new factor is t > 3.0)`);
 
+  const pNet = pT;
   if (pNet <= 0.05) {
     anyProven = true;
     console.log(`\n    SURVIVES the multiplicity correction. Worth a real look.`);
