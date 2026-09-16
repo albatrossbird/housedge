@@ -1,0 +1,40 @@
+# Walk a grid of strategies across BTC and gold, and correct for the
+# fact that a grid was walked.
+#
+# Running seventy variants and publishing the best one is how a backtest
+# is manufactured. This reports the result AND what the sweep's own
+# width cost, by simulating a calibrated market on the same entries and
+# asking how often noise reaches the same number.
+#
+# Read-only: Supabase anon, Kalshi unauthenticated. Writes nothing.
+name: Sweep strategies
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How far back to score"
+        default: "21"
+        required: false
+      draws:
+        description: "Simulated worlds for the null"
+        default: "400"
+        required: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Inputs go through env and are quoted, never interpolated into
+      # the command line.
+      - name: Sweep
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          DAYS: ${{ github.event.inputs.days || '21' }}
+          DRAWS: ${{ github.event.inputs.draws || '400' }}
+        run: node scripts/sweep-strategies.mjs "--days=$DAYS" "--draws=$DRAWS"
