@@ -314,10 +314,13 @@ async function verifyPolyDepth(pairs) {
     const touch = ids && ids[0] ? books.get(String(ids[0])) : null;
     if (!touch) { p.arb.polyDepthVerified = false; continue; }
 
-    // The whole book, kept for the ladder walk below. `touch` is the
-    // full CLOB book despite the name; extracting only its touch here
-    // and refetching it moments later would be two calls for one answer.
-    p._polyBook = touch;
+    // The LEVELS, kept for the ladder walk below. `touch` here carries
+    // the touch at its top level and the full book under `.book` — an
+    // earlier version of this read the levels straight off `touch` on
+    // the strength of a comment rather than a check, and fetchClobBooks
+    // had in fact reduced it to four numbers. Every profitable leg
+    // reported an empty ladder.
+    p._polyBook = touch.book || null;
 
     const { yesBidSize, yesAskSize } = sizesForOutcome(touch, p._polyIdx);
 

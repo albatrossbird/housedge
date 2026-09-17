@@ -149,5 +149,25 @@ console.log("\na failing venue leaves depth UNKNOWN rather than guessing");
   check("a thrown fetch does not take the request down", r2.tokensById.size === 0 && r2.errors.length === 1);
 }
 
+console.log("\nthe stored entry carries the LEVELS, not just the touch");
+{
+  // A caller that needed the ladder read `.asks` off this and got
+  // undefined, then reported an empty book for 46 of 46 profitable
+  // legs. The touch stays at the top level so existing callers are
+  // untouched; the book rides along under `.book`.
+  const fake = async () => ({
+    ok: true,
+    json: async () => ([liveBook]),
+  });
+  const { books } = await fetchClobBooks(["tok0"], { fetchImpl: fake });
+  const entry = books.get("tok0");
+  check("the touch is still at the top level", entry.ask === 0.48 && entry.bid === 0.47);
+  check("...and the sizes with it", entry.askSize === 18216.27);
+  check("the full book is reachable", Array.isArray(entry.book?.asks));
+  check("...with every level, not just the best",
+        entry.book.asks.length === 3 && entry.book.bids.length === 3);
+  check("and it is the SAME book that was fetched", entry.book.asset_id === "tok0");
+}
+
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");
 process.exit(failures ? 1 : 0);
