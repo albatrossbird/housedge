@@ -488,6 +488,36 @@ function Details({ market, legs }) {
               <> · {leg.arb.depthKnown ? "" : "at most "}{Math.floor(leg.arb.maxContracts)} contract{Math.floor(leg.arb.maxContracts) === 1 ? "" : "s"} at this price</>
             )}
           </div>
+          {/* WHAT THE WHOLE BOOK PAYS, not what the first contract earns.
+              The line above is a RATE at the touch; this is the money,
+              and on a live NFL book the two were $15.06 across 500
+              contracts against $142.95 across 7,031 — nine and a half
+              times as much at a cent worse rate. Shown only when the
+              deeper fill actually beats the touch, so a card where the
+              touch IS the best trade does not carry a second number
+              saying the same thing twice. */}
+          {leg.arb.depth && leg.arb.depth.bestDollars > (leg.arb.depth.atTouchDollars ?? 0) + 0.01 && (
+            <div style={{
+              marginTop: 6, padding: "6px 8px", borderRadius: 4,
+              background: T.arbBg || "transparent",
+              border: `1px solid ${T.arb}`,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.arb, fontVariantNumeric: "tabular-nums" }}>
+                ${leg.arb.depth.bestDollars.toFixed(2)} across {leg.arb.depth.bestContracts.toLocaleString()} contracts
+              </div>
+              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
+                Walking the book to {(leg.arb.depth.edgeAtBest * 100).toFixed(2)}¢ each
+                {" "}· the touch alone pays ${(leg.arb.depth.atTouchDollars ?? 0).toFixed(2)}
+              </div>
+              {/* Deeper is not better without limit: past this size the
+                  next contract costs more than it returns. Saying so
+                  stops "walk the book" reading as "take everything". */}
+              <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>
+                Best size — beyond it the next contract loses money.
+              </div>
+            </div>
+          )}
+
           {/* Polymarket publishes no size, so the binding leg may be
               smaller than the one we can see. Saying "at most" is the
               difference between a bound and a promise. */}
