@@ -3,6 +3,7 @@ import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
 import { tradeableArb, complementBook, realBook, midpointIsMeaningful, annualizedReturn, daysUntil } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 import { fetchTokenIdsById, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
+import { kalshiOffers, sortOffers, profitCurve } from "../../lib/depthLadder.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -191,6 +192,87 @@ async function verifyKalshiDepth(pairs) {
 //
 // polymarket.us is NOT handled here — it publishes bidDepth/askDepth on
 // its own /bbo endpoint and already arrives with real sizes.
+
+// ── How much money is on the table, not how good the first contract is ──
+//
+// The card has always led with an edge PER CONTRACT at the touch, which
+// is one number about the cheapest sliver of the book. Measured on a
+// live NFL market: the touch held 500 contracts at a 3.01c edge, worth
+// $15.06, while walking two levels deeper reached 7,031 contracts at
+// 2.03c — $142.95. Nine and a half times the money at a cent worse
+// rate, and the card could not say so.
+//
+// Only pairs the maths already calls profitable are walked, the same
+// scoping the two depth checks above use: this is one orderbook call
+// each on a handful of markets, not a sweep.
+//
+// The Polymarket book is REUSED from verifyPolyDepth rather than
+// refetched — see `_polyBook`.
+async function attachDepthLadders(pairs) {
+  const profitable = pairs.filter(p => p.arb && p.arb.profitable && p.id);
+  if (!profitable.length) return { walked: 0, improved: 0 };
+
+  const books = new Map();
+  await Promise.all(profitable.map(async p => {
+    try {
+      const r = await fetch(
+        `https://api.elections.kalshi.com/trade-api/v2/markets/${encodeURIComponent(p.id)}/orderbook`
+      );
+      if (r.ok) books.set(p.id, await r.json());
+    } catch { /* leave unwalked rather than guessing a ladder */ }
+  }));
+
+  let walked = 0, improved = 0;
+  for (const p of profitable) {
+    const ob = books.get(p.id);
+    const pb = p._polyBook;
+    if (!ob || !pb) continue;
+
+    // Which side each venue is taken on. bestArb encodes both in one
+    // string, so read it once rather than inferring twice.
+    const takesKalshiYes = String(p.arb.side || "").startsWith("kalshi-yes");
+    const kOffers = kalshiOffers(ob, takesKalshiYes ? "yes" : "no");
+
+    // A binary CLOB's two tokens are exact complements, so token[0]'s
+    // book prices both outcomes: buying the side it quotes lifts its
+    // asks, and buying the other is the complement of its bids.
+    const wantYesOnOutcome = !takesKalshiYes;      // the poly leg is the other half
+    const onToken0 = (Number(p._polyIdx) === 0) === wantYesOnOutcome;
+    const pOffers = onToken0
+      ? sortOffers(pb.asks)
+      : sortOffers((pb.bids || []).map(l => ({ price: 1 - Number(l.price), size: Number(l.size) })));
+    if (!kOffers.length || !pOffers.length) continue;
+
+    const curve = profitCurve(
+      { venue: "kalshi", feeMultiplier: p._kFeeMultiplier, offers: kOffers },
+      { venue: "poly", feeSchedule: p._pFeeSchedule || null, offers: pOffers }
+    );
+    if (!curve || !curve.best || curve.best.totalProfit <= 0) continue;
+    walked++;
+
+    // The touch figure is KEPT beside the walked one. A number that
+    // changes with no way to see what it was is a number a reader
+    // cannot check, and this one moves by an order of magnitude.
+    const beforeDollars = p.arb.edgeDollars ?? 0;
+    p.arb.depth = {
+      bestContracts: curve.best.contracts,
+      bestDollars: Math.round(curve.best.totalProfit * 100) / 100,
+      edgeAtBest: curve.best.edgePerPair,
+      costAtBest: curve.best.costPerPair,
+      maxContracts: curve.maxContracts,
+      levels: { kalshi: curve.levelsA, poly: curve.levelsB },
+      atTouchDollars: beforeDollars,
+      curve: curve.curve.map(c => ({
+        n: c.contracts,
+        edge: Math.round(c.edgePerPair * 10000) / 10000,
+        total: Math.round(c.totalProfit * 100) / 100,
+      })),
+    };
+    if (curve.best.totalProfit > beforeDollars + 0.005) improved++;
+  }
+  return { walked, improved };
+}
+
 async function verifyPolyDepth(pairs) {
   const profitable = pairs.filter(
     p => p.arb && p.arb.profitable && p._polyId && p.poly && !p.poly.usTradable
@@ -219,6 +301,11 @@ async function verifyPolyDepth(pairs) {
     const ids = tokensById.get(p._polyId);
     const touch = ids && ids[0] ? books.get(String(ids[0])) : null;
     if (!touch) { p.arb.polyDepthVerified = false; continue; }
+
+    // The whole book, kept for the ladder walk below. `touch` is the
+    // full CLOB book despite the name; extracting only its touch here
+    // and refetching it moments later would be two calls for one answer.
+    p._polyBook = touch;
 
     const { yesBidSize, yesAskSize } = sizesForOutcome(touch, p._polyIdx);
 
@@ -740,6 +827,12 @@ export default async function handler(req, res) {
           // response is built.
           _polyId: row.polymarket_id || null,
           _polyIdx: idx,
+          // Fee parameters travel WITH the pair so the ladder walk
+          // prices with the same per-series and per-market figures the
+          // touch calculation used. Re-deriving them there would be a
+          // second place for them to drift from the API.
+          _kFeeMultiplier: row.k_fee_multiplier,
+          _pFeeSchedule: row.p_fee_schedule || null,
           pairId: `${row.kalshi_id}|${row.polymarket_id}`,
           id: row.kalshi_id,
           title: cleanTitle(row.k_title),
@@ -928,9 +1021,14 @@ export default async function handler(req, res) {
       verifyKalshiDepth(shaped),
       verifyPolyDepth(shaped),
     ]);
+    // AFTER both checks, not beside them: this reuses the Polymarket
+    // book verifyPolyDepth fetched, and walks a ladder whose ceiling
+    // those checks may just have corrected downward.
+    const ladderPass = await attachDepthLadders(shaped);
     for (const m of shaped) {
       delete m._gameDate; delete m._implausible; delete m._spreadPts;
-      delete m._polyId; delete m._polyIdx;
+      delete m._polyId; delete m._polyIdx; delete m._polyBook;
+      delete m._kFeeMultiplier; delete m._pFeeSchedule;
     }
 
     const priced = shaped.filter(m => m.arb).length;
@@ -955,6 +1053,30 @@ export default async function handler(req, res) {
     // The home page says "most traded on Kalshi" for exactly this
     // reason rather than claiming a total.
     const byVolume = (a, b) => (b.kalshi?.volume || 0) - (a.kalshi?.volume || 0);
+
+    // DOLLARS ON THE TABLE, then volume.
+    //
+    // Ranking by Kalshi contracts answers "what is most traded", which
+    // is a fact about the venue rather than about the reader. A card
+    // offering $143 across seven thousand contracts and one offering
+    // $15 across five hundred sorted identically before this, because
+    // the per-contract edge that used to lead was nearly the same on
+    // both — 2.03c against 3.01c, with the WORSE rate carrying nine
+    // times the money.
+    //
+    // Volume stays as the tiebreak, so the ordering of the cards with
+    // no walked ladder is exactly what it was. Only pairs the maths
+    // calls profitable get walked, so this reorders the top of the
+    // board and leaves the long tail alone.
+    const dollarsOf = card =>
+      Math.max(0, ...(card.legs || []).map(l => l.arb?.depth?.bestDollars ?? l.arb?.edgeDollars ?? 0));
+    const byDollarsThenVolume = (a, b) => {
+      const d = dollarsOf(b) - dollarsOf(a);
+      // A cent of difference is not a ranking signal — below that,
+      // fall through to volume rather than letting float noise decide.
+      if (Math.abs(d) > 0.01) return d;
+      return byVolume(a, b);
+    };
     const top = Math.max(0, parseInt(req.query.top, 10) || 0);
     // ?perCategory=N caps EACH tab before the overall ranking.
     //
@@ -989,7 +1111,7 @@ export default async function handler(req, res) {
     const usFirstThenVolume = (a, b) => {
       const ua = hasUsLeg(a), ub = hasUsLeg(b);
       if (ua !== ub) return ua ? -1 : 1;
-      return byVolume(a, b);
+      return byDollarsThenVolume(a, b);
     };
 
     let cards = allCards;
@@ -1003,7 +1125,7 @@ export default async function handler(req, res) {
           return kept[tab] <= perCategory;
         });
     }
-    if (top) cards = [...cards].sort(byVolume).slice(0, top);
+    if (top) cards = [...cards].sort(byDollarsThenVolume).slice(0, top);
 
     // 30 SECONDS WAS 60x SHORTER THAN THE DATA IT CACHES.
     //
@@ -1062,6 +1184,12 @@ export default async function handler(req, res) {
         // how many had a stored depth that no longer held.
         depthChecked: depthCheck.checked,
         depthCorrected: depthCheck.corrected || 0,
+        // How many profitable pairs had their whole ladder walked, and
+        // how many were worth MORE than the touch figure said. The
+        // second number is the one that justifies the extra calls: if
+        // it is persistently zero, this pass is buying nothing.
+        laddersWalked: ladderPass.walked,
+        laddersImproved: ladderPass.improved,
         // The Polymarket half, reported separately. A polymarket.com
         // leg had no size at all until the CLOB book was wired in, and
         // most of the site's profitable legs are on that venue — so a
