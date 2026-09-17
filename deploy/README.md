@@ -57,8 +57,8 @@ Widening the refresh poll list once drew **sixteen straight HTTP
 run. That is a property of the provider's IP range, not its hardware,
 and it is the failure that has actually cost this project data.
 
-**So measure it rather than reasoning about it.** The candidates bill
-hourly, so this costs a few cents:
+**So measure it rather than reasoning about it.** The candidates bill by
+the hour or the second, so this costs a few cents:
 
 ```bash
 node scripts/venue-probe.mjs --minutes=10
@@ -110,10 +110,27 @@ systemctl enable --now marketslap-m15.service
 journalctl -u marketslap-m15 -f
 ```
 
-**Ashburn has CPX and CCX only — there is no CX series in the US
-locations.** The box is a **CPX11**; looking for a CX22 there wastes
-time. New Hetzner accounts are also manually reviewed, so register
-before you clear an afternoon for this.
+**The box is AWS Lightsail, us-east-1, the $7 tier** — 2 vCPU, 1 GB,
+40 GB, 2 TB transfer. Not the $5 tier: 0.5 GB is thin for Node plus two
+recorder processes plus an `npm ci` on deploy, and an out-of-memory kill
+on an unattended box costs more than the $2 saved.
+
+**This was Hetzner until the prices moved, and the correction is worth
+recording rather than quietly editing.** Hetzner Ashburn was the pick at
+$5.85/month against Lightsail's $12 for the same specs, with the only
+argument against it an unverified claim about IP reputation. Hetzner
+then raised US prices roughly 3x on 15 June 2026 — CPX11 in Ashburn went
+$6.99 to $20.49 — with a second rise in August. Lightsail now wins on
+price AND on transfer at identical specs, so both halves of the original
+argument reversed at once.
+
+The lesson is about the figure, not the vendor: a price quoted from
+memory is a measurement with no date on it, and this one was three
+months stale while reading as current. Check the vendor's own page
+before acting on any number here.
+
+Nothing else changes. bootstrap.sh, venue-probe.mjs, the secrets file
+and the systemd units do not know which company owns the box.
 
 **Migrate one job first.** Leave weather on Actions and run both for a
 couple of days. If coverage does not actually improve, you have learned
