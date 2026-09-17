@@ -222,11 +222,22 @@ async function attachDepthLadders(pairs) {
     } catch { /* leave unwalked rather than guessing a ladder */ }
   }));
 
+  // A ZERO HAS TO SAY WHICH BRANCH PRODUCED IT.
+  //
+  // The first deployment of this reported `laddersWalked: 0` beside 67
+  // profitable legs and could not distinguish "no candidates" from
+  // "every orderbook fetch failed" from "the curve came back empty" —
+  // which is precisely the diagnostic failure this repo has recorded
+  // twice already, once as a Set that collapsed 79 frozen series into
+  // one null and once as a counter that could only be non-zero. The
+  // reasons are counted so the next zero is readable.
+  const skipped = { noKalshiBook: 0, noPolyBook: 0, noOffers: 0, noCurve: 0, notPositive: 0 };
   let walked = 0, improved = 0;
   for (const p of profitable) {
     const ob = books.get(p.id);
     const pb = p._polyBook;
-    if (!ob || !pb) continue;
+    if (!ob) { skipped.noKalshiBook++; continue; }
+    if (!pb) { skipped.noPolyBook++; continue; }
 
     // Which side each venue is taken on. bestArb encodes both in one
     // string, so read it once rather than inferring twice.
@@ -241,13 +252,14 @@ async function attachDepthLadders(pairs) {
     const pOffers = onToken0
       ? sortOffers(pb.asks)
       : sortOffers((pb.bids || []).map(l => ({ price: 1 - Number(l.price), size: Number(l.size) })));
-    if (!kOffers.length || !pOffers.length) continue;
+    if (!kOffers.length || !pOffers.length) { skipped.noOffers++; continue; }
 
     const curve = profitCurve(
       { venue: "kalshi", feeMultiplier: p._kFeeMultiplier, offers: kOffers },
       { venue: "poly", feeSchedule: p._pFeeSchedule || null, offers: pOffers }
     );
-    if (!curve || !curve.best || curve.best.totalProfit <= 0) continue;
+    if (!curve || !curve.best) { skipped.noCurve++; continue; }
+    if (curve.best.totalProfit <= 0) { skipped.notPositive++; continue; }
     walked++;
 
     // The touch figure is KEPT beside the walked one. A number that
@@ -270,7 +282,7 @@ async function attachDepthLadders(pairs) {
     };
     if (curve.best.totalProfit > beforeDollars + 0.005) improved++;
   }
-  return { walked, improved };
+  return { walked, improved, candidates: profitable.length, skipped };
 }
 
 async function verifyPolyDepth(pairs) {
@@ -1190,6 +1202,8 @@ export default async function handler(req, res) {
         // it is persistently zero, this pass is buying nothing.
         laddersWalked: ladderPass.walked,
         laddersImproved: ladderPass.improved,
+        laddersCandidates: ladderPass.candidates ?? 0,
+        laddersSkipped: ladderPass.skipped || null,
         // The Polymarket half, reported separately. A polymarket.com
         // leg had no size at all until the CLOB book was wired in, and
         // most of the site's profitable legs are on that venue — so a
