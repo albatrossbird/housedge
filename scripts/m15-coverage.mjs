@@ -20,6 +20,8 @@
 //
 // Reads only, anon key. Writes nothing.
 
+import { pageAll as page } from "../lib/restPage.js";
+
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
 
@@ -34,35 +36,18 @@ async function rest(path) {
   return r.json();
 }
 
-// Keyset paging, never OFFSET. This repo has been bitten three times by
-// `.range()` without an ORDER BY: Postgres promises nothing about row
-// order without one, so consecutive pages can overlap or SKIP rows, and
-// the cost is O(n^2) into the bargain.
-async function pageAll(table, select, filter, key = "id") {
-  const out = [];
-  let last = null;
-  for (;;) {
-    const q = `${table}?select=${select}&${filter}&order=${key}.asc&limit=1000`
-            + (last == null ? "" : `&${key}=gt.${encodeURIComponent(last)}`);
-    const rows = await rest(q);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][key];
-  }
-}
-
 // The denominator is WINDOWS THAT EXISTED, taken from m15_markets, not
 // from the quotes themselves. Deriving it from quotes would define
 // coverage as the windows we covered, which is 100% by construction —
 // the same shape of error as a counter that can only be non-zero.
-const windows = await pageAll(
+const windows = await page(rest,
   "m15_markets", "ticker,close_time",
   `close_time=gte.${since}&close_time=lte.${new Date().toISOString()}`,
-  "ticker",
+  { key: "ticker" },
 );
 
-const quotes = await pageAll(
-  "m15_quotes", "ticker,source",
+const quotes = await page(rest,
+  "m15_quotes", "id,ticker,source",
   `observed_at=gte.${since}`,
 );
 
