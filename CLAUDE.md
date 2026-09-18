@@ -527,6 +527,24 @@ pager a key.
 `match_candidates` — opt-in behind `?matcher=sql` and off by default —
 and it reads an RPC whose ordering has not been checked.
 
+**Use `lib/restPage.js`. Do not write a fifth pager.** Four separate
+ones have been wrong here: `.range()` with no `ORDER BY` skipping rows
+the embed job re-bought from Voyage, OFFSET paging in prune going O(n²)
+and timing out as the table grew, the same shape in the refresh job's
+pairs read, and `m15-coverage.mjs` paging on `id` while selecting
+`ticker,source` — which made the cursor `undefined`, never advanced it,
+and **re-read the same first page forever**. That last one is the
+reason the module exists rather than a fix in place: it presents as
+LATENCY, not as an error. No exception, a climbing row count, a job
+that looks busy on something large. It ran in Actions until it was
+cancelled by hand.
+
+So the shared pager refuses the call instead: the key must appear in
+the `select` (checked before any request), and a full page whose last
+row does not advance the cursor throws rather than spinning — still
+reachable with the key selected, via a null in the column.
+`scripts/rest-page.test.mjs` pins both.
+
 **Then it caught a second one, in the fix itself.** Econ came back
 `asked=76 embedded=3 alreadyEmbedded=73`. The pre-filter read was scoped
 by `sport_tag` and the confirmation by id, so the two disagreed for
