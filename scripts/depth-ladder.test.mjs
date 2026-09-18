@@ -101,6 +101,32 @@ console.log("\nthe headline number is total dollars, and it beats the touch");
         r.best.totalProfit > r.curve[0].totalProfit);
 }
 
+console.log("\nthe touch figure is priced by the SAME function as the best");
+{
+  // A live shape where the two calculators disagreed: the touch level
+  // is fillable and profitable, and a deeper level pays more in total.
+  const legA = { venue: "kalshi", feeMultiplier: 1,
+                 offers: sortOffers([["0.49", "134"], ["0.50", "1312"]]) };
+  const legB = { venue: "poly", feeSchedule: null,
+                 offers: sortOffers([["0.45", "50000"]]) };
+  const r = profitCurve(legA, legB);
+  check("atTouch exists", r && r.atTouch);
+  // The bug this pins: atTouch used to be at(1) — the profit on ONE
+  // contract — which is a rate, not a total, and is not comparable
+  // with best.totalProfit at all. Two legs rendered a "best" a cent
+  // below the "touch" it was shown beside.
+  check(`atTouch is the whole touch level, not one contract (${r.atTouch.contracts})`,
+        r.atTouch.contracts === 134);
+  check("it is the curve's first point, so both come from one calculator",
+        r.atTouch.contracts === r.curve[0].contracts &&
+        near(r.atTouch.totalProfit, r.curve[0].totalProfit, 1e-12));
+  // The comparison the card makes must be well-founded in both
+  // directions: the best is never below the touch, because the touch
+  // is one of the points the maximum is taken over.
+  check("the best is never worse than the touch",
+        r.best.totalProfit >= r.atTouch.totalProfit - 1e-12);
+}
+
 console.log("\na size neither ladder can fill is not a trade");
 {
   const legA = { venue: "kalshi", feeMultiplier: 1, offers: sortOffers([["0.40", "10"]]) };

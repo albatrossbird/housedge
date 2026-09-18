@@ -8,6 +8,20 @@
 # The repo is public, so this needs no credential. `git reset --hard`
 # rather than `git pull`, because a merge conflict on an unattended box
 # is a recorder that silently stops.
+#
+# IT UPDATES THE REPO, NOT THE MACHINE. Unit files under
+# /etc/systemd/system are copies taken by bootstrap.sh, and nothing here
+# rewrites them or reloads systemd — this runs as `marketslap`, which
+# has no business writing to /etc. So a change to a .service file in
+# deploy/ does NOT deploy: it lands in the repo and is ignored by the
+# running box, silently, which is the worst shape a deploy gap can take.
+#
+# Anything that must take effect without an SSH session therefore
+# belongs in CODE, which this does update, rather than in unit config.
+# The m15 recorder's source stamp is the worked example: it reads
+# systemd's INVOCATION_ID instead of an Environment= line for exactly
+# this reason. To change a unit for real, re-run bootstrap.sh — it is
+# idempotent and reinstalls the units.
 
 [Unit]
 Description=MarketSlap self-update from git

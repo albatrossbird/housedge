@@ -31,6 +31,13 @@ EnvironmentFile=/etc/marketslap/env
 # One hour per cycle. Short enough that a code update lands promptly,
 # long enough that restarts are not the dominant activity.
 Environment=M15_RUN_MINUTES=60
+# Belt and braces only — NOT what makes attribution work. This file is
+# copied to /etc/systemd/system at bootstrap and the update timer only
+# resets the git repo, so an edit here does not reach a running box.
+# m15-record.mjs therefore DERIVES the source from systemd's own
+# INVOCATION_ID, which needs no deploy. This line matters only on a box
+# provisioned after it was written.
+Environment=M15_SOURCE=box
 ExecStart=/usr/bin/node scripts/m15-record.mjs
 Restart=always
 RestartSec=5

@@ -85,8 +85,8 @@ Box is provisioned. Two things left, and they are yours to do by hand.
 1. WRITE THE SECRETS. Not through this script and not over a pipe —
    type them into the editor so they stay out of shell history:
 
-     install -m 600 /dev/null $ENVFILE
-     nano $ENVFILE
+     sudo install -m 600 /dev/null $ENVFILE
+     sudo nano $ENVFILE
 
    Three lines, no quotes, no spaces around '=':
 
@@ -100,9 +100,21 @@ Box is provisioned. Two things left, and they are yours to do by hand.
    is the difference between checking and assuming. It is public by
    design — it ships to every browser — so it adds no exposure.
 
-   Then confirm nothing else can read it:
+   Save with Ctrl+X, then Y, then Enter. Ctrl+O also saves, but a
+   browser-based terminal hands that shortcut to the browser instead,
+   so the file looks unsaved when it is simply unsent.
 
-     chmod 600 $ENVFILE && ls -l $ENVFILE
+   If your terminal pastes '^[[200~' as literal text, it is leaking
+   bracketed-paste markers into the line. Type this once, by hand, and
+   paste again:
+
+     bind 'set enable-bracketed-paste off'
+
+   Then confirm nothing else can read it, and that no marker landed
+   inside a key:
+
+     sudo chmod 600 $ENVFILE && sudo ls -l $ENVFILE
+     sudo grep -c '200~' $ENVFILE     # must print 0
 
 2. PROVE THE ADDRESS IS NOT THROTTLED before you commit to this host.
    Ten minutes, no credentials needed:
@@ -115,9 +127,9 @@ Box is provisioned. Two things left, and they are yours to do by hand.
 
 Only then start recording. ONE JOB FIRST:
 
-     systemctl enable --now marketslap-update.timer
-     systemctl enable --now marketslap-m15.service
-     journalctl -u marketslap-m15 -f
+     sudo systemctl enable --now marketslap-update.timer
+     sudo systemctl enable --now marketslap-m15.service
+     sudo journalctl -u marketslap-m15 -f
 
 Then confirm rows are LANDING, not just that a process is running —
 a recorder that runs and writes nothing is this project's most common
