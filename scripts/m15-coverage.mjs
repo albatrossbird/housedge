@@ -36,32 +36,64 @@ async function rest(path) {
   return r.json();
 }
 
+// DOES THE COLUMN EXIST? Asked first, because every other reading below
+// depends on the answer and "no rows from the box" has three causes
+// that look identical from the table: the migration was never run, the
+// recorders are running code from before the stamp, or the box is not
+// writing at all. A verdict that lists three possibilities is not a
+// verdict — it is the reader's problem again.
+//
+// PostgREST answers this directly: selecting a column that does not
+// exist is a 400 naming it, not an empty result.
+let haveColumn = true;
+try {
+  await rest("m15_quotes?select=source&limit=1");
+} catch (e) {
+  if (/source/.test(String(e.message))) haveColumn = false;
+  else throw e;
+}
+
 // The denominator is WINDOWS THAT EXISTED, taken from m15_markets, not
 // from the quotes themselves. Deriving it from quotes would define
 // coverage as the windows we covered, which is 100% by construction —
 // the same shape of error as a counter that can only be non-zero.
+//
+// CLOSED windows only, and the numerator is INTERSECTED with them. A
+// window still open is being recorded right now and has not had its
+// chance to be missed, so counting its quotes against a denominator it
+// is not in produced 273 of 252 — a coverage figure of 108.3%, which
+// is not a stricter measure but a meaningless one.
+const nowIso = new Date().toISOString();
 const windows = await page(rest,
   "m15_markets", "ticker,close_time",
-  `close_time=gte.${since}&close_time=lte.${new Date().toISOString()}`,
+  `close_time=gte.${since}&close_time=lte.${nowIso}`,
   { key: "ticker" },
 );
 
 const quotes = await page(rest,
-  "m15_quotes", "id,ticker,source",
+  "m15_quotes", haveColumn ? "id,ticker,source" : "id,ticker",
   `observed_at=gte.${since}`,
 );
 
-const seen = new Map();          // source -> Set(ticker)
+const total = new Set(windows.map(w => w.ticker));
+
+const seen = new Map();          // source -> Set(ticker), closed windows only
+let liveSkipped = 0;
 for (const q of quotes) {
+  if (!total.has(q.ticker)) { liveSkipped++; continue; }
   const s = q.source || "(before attribution)";
   if (!seen.has(s)) seen.set(s, new Set());
   seen.get(s).add(q.ticker);
 }
 
-const total = new Set(windows.map(w => w.ticker));
 const pct = n => total.size ? `${(100 * n / total.size).toFixed(1)}%` : "n/a";
 
-console.log(`M15 COVERAGE  last ${HOURS}h  —  ${total.size} windows closed\n`);
+console.log(`M15 COVERAGE  last ${HOURS}h  —  ${total.size} windows closed`);
+console.log(`source column: ${haveColumn ? "present" : "ABSENT (migration 0023 not applied)"}`);
+if (liveSkipped) {
+  console.log(`(${liveSkipped} quotes on windows not yet closed, excluded from both sides)`);
+}
+console.log("");
 console.log("source                    windows seen   coverage");
 console.log("=".repeat(52));
 const rows = [...seen.entries()].sort((a, b) => b[1].size - a[1].size);
@@ -75,18 +107,36 @@ console.log("=".repeat(52));
 console.log(`${"union (all sources)".padEnd(24)} ${String(union.size).padStart(12)}   ${pct(union.size).padStart(8)}`);
 
 // The verdict, stated rather than left to be inferred from the table.
+// Each branch names ONE cause and what to do about it.
 const box = seen.get("box")?.size ?? 0;
+const unattributed = seen.get("(before attribution)")?.size ?? 0;
 console.log("");
-if (!seen.has("box")) {
-  console.log("No rows from the box yet. Either it is not recording, or");
-  console.log("migration 0023_m15_quotes_source.sql has not been run —");
-  console.log("check for '(before attribution)' rows newer than the box start.");
+
+if (!haveColumn) {
+  console.log("VERDICT: cannot tell. m15_quotes has no `source` column, so every");
+  console.log("row reads the same. Run supabase/migrations/0023_m15_quotes_source.sql,");
+  console.log("then re-run this. The recorders are unaffected — they drop the column");
+  console.log("and keep recording, which is why nothing is failing.");
+} else if (!seen.size) {
+  console.log("VERDICT: NOTHING IS RECORDING. No quotes at all in the window, on any");
+  console.log("source. The price path cannot be backfilled, so treat this as urgent.");
+} else if (!seen.has("box") && !seen.has("actions") && unattributed) {
+  console.log(`VERDICT: not yet. The column exists but all ${unattributed} windows are`);
+  console.log("unattributed, so both recorders are still running code from before the");
+  console.log("stamp landed. The box cycles hourly and an Actions run lasts 330");
+  console.log("minutes, so give it until the current run ends and re-check. Recording");
+  console.log("is healthy meanwhile — this is an attribution gap, not a data gap.");
+} else if (!seen.has("box")) {
+  console.log("VERDICT: THE BOX IS NOT WRITING. Other sources are landing rows, so");
+  console.log("this is not the column and not the migration. Check the service on the");
+  console.log("box: systemctl status marketslap-m15. The price path cannot be");
+  console.log("backfilled, so every window lost here is lost for good.");
 } else if (box >= union.size) {
-  console.log(`The box alone covers ${pct(box)}, matching the union.`);
+  console.log(`VERDICT: the box alone covers ${pct(box)}, matching the union.`);
   console.log("Actions is adding nothing and can be turned off.");
 } else {
   const miss = union.size - box;
-  console.log(`The box alone covers ${pct(box)}; the union covers ${pct(union.size)}.`);
+  console.log(`VERDICT: not yet. The box alone covers ${pct(box)}; the union covers ${pct(union.size)}.`);
   console.log(`${miss} window${miss === 1 ? "" : "s"} would be LOST by turning Actions off today.`);
   console.log("Leave both running and re-check — a window missed is not recoverable.");
 }
