@@ -25,11 +25,27 @@ const CONCURRENCY   = Number(process.env.M15_CONCURRENCY || 6);
 // a dry series is rested — but only briefly, because a 15-minute market
 // that is missed is missed entirely.
 const IDLE_RECHECK_MS = Number(process.env.M15_IDLE_RECHECK_MS || 120000);
-// Which recorder this is. Set to "box" by the systemd unit and "actions"
-// by the workflow; the default is deliberately neither, so a row from an
-// unlabelled caller is visible as one rather than silently attributed to
-// whichever writer happens to be the default.
-const SOURCE = process.env.M15_SOURCE || "unlabelled";
+// Which recorder this is.
+//
+// DERIVED, NOT CONFIGURED, and that is the point. The obvious way is an
+// env var in the systemd unit — but unit files live in
+// /etc/systemd/system as copies taken at bootstrap, while
+// marketslap-update.service only does `git reset --hard origin/main` on
+// the REPO. A unit change therefore never reaches a running box, so
+// attribution set that way would have stayed silently unlabelled and
+// the two-day comparison would have measured nothing.
+//
+// Both runtimes already identify themselves, so ask them:
+//   GITHUB_ACTIONS  set by Actions on every runner.
+//   INVOCATION_ID   set by systemd for every service invocation.
+// Anything else — a laptop, a shell on the box — is neither, and says
+// so rather than being credited to whichever default was convenient.
+// M15_SOURCE still overrides, for a case not foreseen here.
+const SOURCE = process.env.M15_SOURCE
+  || (process.env.GITHUB_ACTIONS ? "actions"
+    : process.env.INVOCATION_ID ? "box"
+    : "unlabelled");
+console.log(`source: ${SOURCE}`);
 
 if (!SUPABASE_URL || !KEY) { console.error("::error::SUPABASE_URL and a key are required"); process.exit(1); }
 console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role" : "anon (writes will be REJECTED by RLS)"}`);
