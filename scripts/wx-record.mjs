@@ -18,6 +18,7 @@ import {
   WEATHER_CATEGORY, CLI_TO_STATION, kalshiGet, cliFromRules,
   toWxMarketRow, toWxQuote, quoteChanged, nwsForecast,
 } from "../lib/weather.js";
+import { assertCredential } from "../lib/supabaseCredential.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -29,6 +30,12 @@ const FORECAST_EVERY_MINUTES = Number(process.env.WX_FORECAST_MINUTES || 60);
 
 if (!SUPABASE_URL || !KEY) { console.error("::error::SUPABASE_URL and a key are required"); process.exit(1); }
 console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role" : "anon (writes will be REJECTED by RLS)"}`);
+
+// Same guard as the 15-minute recorder, for the same reason: the line
+// above reports which variable is set, not whether it works, and a
+// long-running recorder with a bad key warns forever while writing
+// nothing. See lib/supabaseCredential.js.
+await assertCredential(SUPABASE_URL, KEY, { table: "wx_quotes" });
 
 async function post(table, rows, onConflict) {
   if (!rows.length) return { ok: true, n: 0 };

@@ -13,6 +13,7 @@
 // may run for six hours, so the loop lives here and talks to Kalshi and
 // Supabase directly.
 import { listM15Series, kalshiGet, toM15Row, toM15Quote, quoteChanged, marketChanged } from "../lib/m15.js";
+import { assertCredential } from "../lib/supabaseCredential.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -49,6 +50,10 @@ console.log(`source: ${SOURCE}`);
 
 if (!SUPABASE_URL || !KEY) { console.error("::error::SUPABASE_URL and a key are required"); process.exit(1); }
 console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role" : "anon (writes will be REJECTED by RLS)"}`);
+
+// Proven, not assumed — the line above reports which VARIABLE IS SET
+// and says nothing about whether the value works. See the module.
+await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
 
 // Set once, the first time the database rejects `source`. A deploy can
 // land before the migration does — the same case migration 0004 handles
