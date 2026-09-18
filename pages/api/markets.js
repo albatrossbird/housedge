@@ -265,7 +265,16 @@ async function attachDepthLadders(pairs) {
     // The touch figure is KEPT beside the walked one. A number that
     // changes with no way to see what it was is a number a reader
     // cannot check, and this one moves by an order of magnitude.
-    const beforeDollars = p.arb.edgeDollars ?? 0;
+    //
+    // It comes from the CURVE, not from `arb.edgeDollars`. Both claim
+    // to be the money at the touch, but `tradeableArb` prices a single
+    // level and rounds Kalshi's per-order fee there, while the curve
+    // rounds once over every level it walks — so on a live read two
+    // legs reported a "best" a cent BELOW the touch they were being
+    // compared with, which states that walking deeper loses money.
+    // It does not; the two numbers were simply from different
+    // calculators. One trade, one calculator.
+    const beforeDollars = Math.round((curve.atTouch?.totalProfit ?? 0) * 100) / 100;
     p.arb.depth = {
       bestContracts: curve.best.contracts,
       bestDollars: Math.round(curve.best.totalProfit * 100) / 100,
