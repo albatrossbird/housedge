@@ -6,7 +6,7 @@
 // which VARIABLE WAS SET, never whether the value worked — a diagnostic
 // structurally incapable of being wrong, which is the exact class this
 // repo has recorded twice before.
-import { describeKey, refFromUrl, assertCredential } from "../lib/supabaseCredential.js";
+import { describeKey, refFromUrl, assertCredential, unwrapped } from "../lib/supabaseCredential.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -67,6 +67,30 @@ console.log("\na rejected key names the cause, not a checklist");
 
   const truncated = await run("eyJhbGciOiJIUzI1NiJ9.onlytwo", URL_, 401);
   ok(/not a JWT/.test(truncated.out), "a truncated value is called truncated, not rotated");
+}
+
+console.log("\na key wrapped in the placeholder's own brackets");
+{
+  // What actually happened: the instructions read `<the service_role
+  // key>` and the brackets were kept. systemd takes the value
+  // literally, so a valid key was sent as `<key>` and refused for
+  // fourteen hours. Every other diagnosis leads somewhere useless here
+  // — the key is the right project, the right role and unexpired.
+  const wrapped = `<${GOOD}>`;
+  const d = describeKey(wrapped);
+  ok(d.shape === "wrapped" && d.wrapped === "<>", "recognised as wrapped, not as a bad key");
+  ok(d.innerShape === "jwt" && d.role === "service_role",
+     "and the key INSIDE is read, so it can say the key itself is fine");
+
+  const r = await run(wrapped, URL_, 401);
+  ok(/WRAPPED IN <>/.test(r.out), "the error names the brackets");
+  ok(/delete those two characters/.test(r.out), "and says exactly what to do");
+  ok(!/ROTATED|WRONG PROJECT|EXPIRED/.test(r.out),
+     "and does NOT send the reader to rotate a key that is perfectly good");
+
+  ok(describeKey(`"${GOOD}"`).shape === "wrapped", "double quotes too");
+  ok(describeKey(`'${GOOD}'`).shape === "wrapped", "single quotes too");
+  ok(describeKey(GOOD).shape === "jwt", "a bare key is untouched");
 }
 
 console.log("\nan unreachable host is not a bad key");
