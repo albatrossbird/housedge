@@ -23,6 +23,25 @@ Description=MarketSlap weather market recorder
 After=network-online.target
 Wants=network-online.target
 
+# CRASH-LOOP LIMIT, AND IT LIVES IN [Unit] — systemd moved these out of
+# [Service] and IGNORES them there. Ours were in [Service] and the
+# journal said so on every reload:
+#
+#   Unknown key name 'StartLimitIntervalSec' in section 'Service', ignoring
+#
+# So the limit did not exist. That matters because Restart=always is
+# deliberate here — a recorder must survive a bad response from a venue,
+# since the price path cannot be backfilled — and the ONLY thing making
+# that safe is a ceiling on how many times it may restart. Without it, a
+# permanent fault restarts forever: the 15-minute recorder spent
+# fourteen hours re-running against a rejected credential, warning every
+# fifteen seconds, and nothing ever escalated.
+#
+# Ten starts in five minutes, then systemd gives up and the unit sits
+# failed, which is visible in `systemctl status` and never self-clears.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
 [Service]
 Type=simple
 User=marketslap
@@ -34,9 +53,6 @@ Environment=WX_RUN_MINUTES=60
 ExecStart=/usr/bin/node scripts/wx-record.mjs
 Restart=always
 RestartSec=5
-# A crash loop should be loud rather than infinite.
-StartLimitIntervalSec=300
-StartLimitBurst=10
 
 # The box holds a service-role key. Give the unit no more than it needs.
 NoNewPrivileges=true
