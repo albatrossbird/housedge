@@ -3,7 +3,8 @@ import { polyOutcomeIndex, outcomeIndexByName } from "../../lib/sportsKeys.js";
 import { tradeableArb, complementBook, realBook, midpointIsMeaningful, annualizedReturn, daysUntil } from "../../lib/fees.js";
 import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.js";
 import { fetchTokenIdsById, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
-import { kalshiOffers, sortOffers, profitCurve } from "../../lib/depthLadder.js";
+import { kalshiOffers, sortOffers, profitCurve, usPolyOffers } from "../../lib/depthLadder.js";
+import { fetchUsBook } from "../../lib/polymarketUs.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -231,11 +232,25 @@ async function attachDepthLadders(pairs) {
   // twice already, once as a Set that collapsed 79 frozen series into
   // one null and once as a counter that could only be non-zero. The
   // reasons are counted so the next zero is readable.
-  const skipped = { noKalshiBook: 0, noPolyBook: 0, noOffers: 0, noCurve: 0, notPositive: 0 };
+  // POLYMARKET US PUBLISHES A LADDER TOO, and every US leg used to be
+  // skipped as `noPolyBook` because this file believed it did not. That
+  // is the venue the default filter shows, so the feature was invisible
+  // to most readers by construction. `/book` answers 200 with both
+  // sides; see fetchUsBook.
+  const usBooks = new Map();
+  await Promise.all(profitable
+    .filter(p => p.poly && p.poly.usTradable && p._polySlug)
+    .map(async p => {
+      const b = await fetchUsBook(p._polySlug);
+      if (b && !b.error && !b.notListed && b.asks && b.bids) usBooks.set(p._polySlug, b);
+    }));
+
+  const skipped = { noKalshiBook: 0, noPolyBook: 0, noOffers: 0, noCurve: 0, notPositive: 0, usBookMisaligned: 0 };
   let walked = 0, improved = 0;
   for (const p of profitable) {
     const ob = books.get(p.id);
-    const pb = p._polyBook;
+    const isUs = !!(p.poly && p.poly.usTradable);
+    const pb = isUs ? usBooks.get(p._polySlug) : p._polyBook;
     if (!ob) { skipped.noKalshiBook++; continue; }
     if (!pb) { skipped.noPolyBook++; continue; }
 
@@ -243,15 +258,24 @@ async function attachDepthLadders(pairs) {
     // string, so read it once rather than inferring twice.
     const takesKalshiYes = String(p.arb.side || "").startsWith("kalshi-yes");
     const kOffers = kalshiOffers(ob, takesKalshiYes ? "yes" : "no");
-
-    // A binary CLOB's two tokens are exact complements, so token[0]'s
-    // book prices both outcomes: buying the side it quotes lifts its
-    // asks, and buying the other is the complement of its bids.
     const wantYesOnOutcome = !takesKalshiYes;      // the poly leg is the other half
-    const onToken0 = (Number(p._polyIdx) === 0) === wantYesOnOutcome;
-    const pOffers = onToken0
-      ? sortOffers(pb.asks)
-      : sortOffers((pb.bids || []).map(l => ({ price: 1 - Number(l.price), size: Number(l.size) })));
+
+    let pOffers;
+    if (isUs) {
+      // Which outcome this book quotes is PROVEN against the leg's own
+      // touch rather than assumed from a convention — see usPolyOffers.
+      const r = usPolyOffers(pb, p.poly, wantYesOnOutcome);
+      if (r.reason === "misaligned" || r.reason === "ambiguous") { skipped.usBookMisaligned++; continue; }
+      pOffers = r.offers;
+    } else {
+      // A binary CLOB's two tokens are exact complements, so token[0]'s
+      // book prices both outcomes: buying the side it quotes lifts its
+      // asks, and buying the other is the complement of its bids.
+      const onToken0 = (Number(p._polyIdx) === 0) === wantYesOnOutcome;
+      pOffers = onToken0
+        ? sortOffers(pb.asks)
+        : sortOffers((pb.bids || []).map(l => ({ price: 1 - Number(l.price), size: Number(l.size) })));
+    }
     if (!kOffers.length || !pOffers.length) { skipped.noOffers++; continue; }
 
     const curve = profitCurve(
@@ -851,6 +875,10 @@ export default async function handler(req, res) {
           // response is built.
           _polyId: row.polymarket_id || null,
           _polyIdx: idx,
+          // The US book is addressed by MARKET SLUG, which is what
+          // markets.slug holds on polymarket_us (unlike .com, where it
+          // is the event slug — see the note above).
+          _polySlug: row.p_slug || null,
           // Fee parameters travel WITH the pair so the ladder walk
           // prices with the same per-series and per-market figures the
           // touch calculation used. Re-deriving them there would be a
@@ -1052,6 +1080,7 @@ export default async function handler(req, res) {
     for (const m of shaped) {
       delete m._gameDate; delete m._implausible; delete m._spreadPts;
       delete m._polyId; delete m._polyIdx; delete m._polyBook;
+      delete m._polySlug; delete m._polyOffers;
       delete m._kFeeMultiplier; delete m._pFeeSchedule;
     }
 

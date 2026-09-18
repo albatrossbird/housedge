@@ -6,6 +6,7 @@ import { useRouter } from "next/router";
 // came to suppress a bad pair on the page while the API went on
 // publishing `profitable: true` for it.
 import { positionAtSize } from "../lib/fees.js";
+import { positionOnCurve } from "../lib/depthLadder.js";
 import { legsForUsView } from "../lib/venueDisplay.js";
 
 // Brand palette, sampled from the MarketSlap logo artwork rather than
@@ -375,19 +376,41 @@ function Resolution({ label, color, text }) {
 // and where Polymarket publishes no depth that ceiling is itself only
 // a bound taken from the Kalshi leg.
 function ProfitCalculator({ leg }) {
-  const ceiling = leg.arb.maxContracts != null ? Math.floor(leg.arb.maxContracts) : null;
-  // Default to what is actually on offer rather than a round number:
-  // the honest first answer to "what do I make" is "on how much?", and
-  // the book has already answered that.
-  const [raw, setRaw] = useState(String(ceiling && ceiling > 0 ? Math.min(ceiling, 100) : 100));
+  const depth = leg.arb.depth || null;
+  const touchMax = leg.arb.maxContracts != null ? Math.floor(leg.arb.maxContracts) : null;
+  // The size the walk says is best. It is a MAXIMUM of profit, not of
+  // size: past it the next contract costs more than it returns.
+  const bestN = depth && depth.bestContracts ? Math.floor(depth.bestContracts) : null;
+  const deeper = bestN != null && touchMax != null && bestN > touchMax;
+
+  const [raw, setRaw] = useState(String(touchMax && touchMax > 0 ? Math.min(touchMax, 100) : 100));
 
   const pos = useMemo(() => {
     const n = parseInt(raw, 10);
     if (!Number.isFinite(n) || n < 1) return null;
-    return positionAtSize(leg.arb.inputs.kalshi, leg.arb.inputs.poly, n);
-  }, [raw, leg.arb.inputs]);
+
+    // PAST THE TOUCH, PRICE FROM THE LADDER. positionAtSize knows one
+    // price level, so above the touch's own depth it would multiply a
+    // rate that no longer applies and overstate the profit — which is
+    // exactly the contradiction this panel used to carry, quoting
+    // 11,317 contracts beside a calculator that capped at 1,126.
+    if (depth && touchMax != null && n > touchMax) {
+      const r = positionOnCurve(depth.curve, n);
+      if (r) return { ...r, fromLadder: true };
+    }
+    const at = positionAtSize(leg.arb.inputs.kalshi, leg.arb.inputs.poly, n);
+    return at && { contracts: at.contracts, profit: at.profit, capped: at.clamped,
+                   asked: at.asked, costPerPair: at.costPerPair, fromLadder: false };
+  }, [raw, leg.arb.inputs, depth, touchMax]);
 
   const money = v => `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(2)}`;
+  const n = v => Number(v).toLocaleString();
+  const Chip = ({ onClick, children }) => (
+    <button type="button" onClick={onClick} style={{
+      fontSize: 11, padding: "3px 7px", borderRadius: 6, cursor: "pointer",
+      border: `1px solid ${T.border}`, background: "transparent", color: T.muted,
+    }}>{children}</button>
+  );
 
   return (
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${T.border}` }}>
@@ -395,7 +418,7 @@ function ProfitCalculator({ leg }) {
         IF YOU TRADED IT
       </div>
 
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted, flexWrap: "wrap" }}>
         <span>Contracts</span>
         <input
           type="number" min="1" step="1" value={raw}
@@ -406,48 +429,59 @@ function ProfitCalculator({ leg }) {
             border: `1px solid ${T.border}`, borderRadius: 6, background: T.bg, color: T.text,
           }}
         />
-        {ceiling != null && (
-          <button
-            type="button" onClick={() => setRaw(String(ceiling))}
-            style={{
-              fontSize: 11, padding: "3px 7px", borderRadius: 6, cursor: "pointer",
-              border: `1px solid ${T.border}`, background: "transparent", color: T.muted,
-            }}
-          >
-            max {leg.arb.depthKnown ? "" : "≤"}{ceiling}
-          </button>
+        {/* Two sizes worth offering, named for what they ARE rather than
+            as a bare "max" — the old button said max 1126 beside a box
+            advertising 11,317, and the two never explained each other. */}
+        {touchMax != null && (
+          <Chip onClick={() => setRaw(String(touchMax))}>
+            best price{leg.arb.depthKnown ? "" : " ≤"} {n(touchMax)}
+          </Chip>
         )}
+        {deeper && <Chip onClick={() => setRaw(String(bestN))}>most money {n(bestN)}</Chip>}
       </label>
 
       {pos ? (
         <div style={{ marginTop: 6 }}>
-          {[
-            [`Cost, fees included`, money(pos.totalCost)],
-            [`Pays out`, money(pos.payout)],
-          ].map(([k, v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.muted, padding: "1px 0" }}>
-              <span>{k}</span>
-              <span style={{ color: T.text, fontVariantNumeric: "tabular-nums" }}>{v}</span>
-            </div>
-          ))}
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, borderTop: `1px solid ${T.border}`, marginTop: 4, paddingTop: 4 }}>
-            <span style={{ color: T.text }}>{pos.profit >= 0 ? "Profit" : "Loss"} on {pos.contracts} contract{pos.contracts === 1 ? "" : "s"}</span>
-            <span style={{ color: pos.profitable ? T.arb : T.text, fontVariantNumeric: "tabular-nums" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, paddingTop: 2 }}>
+            <span style={{ color: T.text }}>
+              {pos.profit >= 0 ? "Profit" : "Loss"} on {n(pos.contracts)} contract{pos.contracts === 1 ? "" : "s"}
+            </span>
+            <span style={{ color: pos.profit > 0 ? T.arb : T.text, fontVariantNumeric: "tabular-nums" }}>
               {money(pos.profit)}
             </span>
           </div>
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>
+            {(100 * pos.profit / Math.max(pos.contracts, 1)).toFixed(2)}¢ per contract
+            {pos.fromLadder && " · averaged over every price you'd take"}
+          </div>
 
-          {/* Answering a different question from the one asked, silently,
-              is worse than refusing. */}
-          {pos.clamped && (
+          {pos.capped && (
             <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>
-              Sized down from {pos.asked} — the book holds {leg.arb.depthKnown ? "" : "at most "}{pos.contracts} at this price.
+              Sized down from {n(pos.asked ?? raw)} — that is everything the two books hold.
             </div>
           )}
-          {/* The reason this is not edge x contracts, said once, where
-              someone comparing two sizes will notice it. */}
+
+          {/* THE EXPLANATION, IN THE WORDS OF THE TRADE. "Walking the
+              book" is jargon that assumes the reader already knows what
+              this panel is telling them. What they need is the shape:
+              the good price runs out, the next ones are worse, and more
+              contracts at a worse rate can still be more money. */}
+          {deeper && (
+            <div style={{
+              marginTop: 6, padding: "6px 8px", borderRadius: 4,
+              border: `1px solid ${T.border}`, fontSize: 11, color: T.muted, lineHeight: 1.45,
+            }}>
+              The best price only has <b style={{ color: T.text }}>{n(touchMax)}</b> contracts behind it,
+              worth <b style={{ color: T.text }}>{money(depth.atTouchDollars ?? 0)}</b>.
+              Buying more means taking worse prices further down the book — less on each
+              contract, but <b style={{ color: T.arb }}>{money(depth.bestDollars)}</b> in
+              total at <b style={{ color: T.text }}>{n(bestN)}</b>. Past that, the next
+              contract costs more than it pays.
+            </div>
+          )}
+
           <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>
-            {(pos.costPerPair * 100).toFixed(2)}¢ per pair at this size · Kalshi rounds its fee up per order, so small orders cost more each.
+            Kalshi rounds its fee up per order, so small orders cost more each.
           </div>
         </div>
       ) : (
@@ -488,36 +522,12 @@ function Details({ market, legs }) {
               <> · {leg.arb.depthKnown ? "" : "at most "}{Math.floor(leg.arb.maxContracts)} contract{Math.floor(leg.arb.maxContracts) === 1 ? "" : "s"} at this price</>
             )}
           </div>
-          {/* WHAT THE WHOLE BOOK PAYS, not what the first contract earns.
-              The line above is a RATE at the touch; this is the money,
-              and on a live NFL book the two were $15.06 across 500
-              contracts against $142.95 across 7,031 — nine and a half
-              times as much at a cent worse rate. Shown only when the
-              deeper fill actually beats the touch, so a card where the
-              touch IS the best trade does not carry a second number
-              saying the same thing twice. */}
-          {leg.arb.depth && leg.arb.depth.bestDollars > (leg.arb.depth.atTouchDollars ?? 0) + 0.01 && (
-            <div style={{
-              marginTop: 6, padding: "6px 8px", borderRadius: 4,
-              background: T.arbBg || "transparent",
-              border: `1px solid ${T.arb}`,
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: T.arb, fontVariantNumeric: "tabular-nums" }}>
-                ${leg.arb.depth.bestDollars.toFixed(2)} across {leg.arb.depth.bestContracts.toLocaleString()} contracts
-              </div>
-              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
-                Walking the book to {(leg.arb.depth.edgeAtBest * 100).toFixed(2)}¢ each
-                {" "}· the touch alone pays ${(leg.arb.depth.atTouchDollars ?? 0).toFixed(2)}
-              </div>
-              {/* Deeper is not better without limit: past this size the
-                  next contract costs more than it returns. Saying so
-                  stops "walk the book" reading as "take everything". */}
-              <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>
-                Best size — beyond it the next contract loses money.
-              </div>
-            </div>
-          )}
-
+          {/* The walked figure used to live here, in its own box, while
+              the calculator below capped at the touch size — two
+              calculators for one trade, differing by 10x on size and 7x
+              on the money. It is folded into the calculator now: one
+              panel, one number, and the contradiction cannot recur
+              because there is only one place that computes it. */}
           {/* Polymarket publishes no size, so the binding leg may be
               smaller than the one we can see. Saying "at most" is the
               difference between a bound and a promise. */}

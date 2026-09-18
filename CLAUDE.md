@@ -1252,6 +1252,24 @@ rather than a config one.
   `polymarket.com` publishes no depth at all, so a US pair is the only
   one that can report `depthKnown: true` instead of an upper bound taken
   from the Kalshi leg alone.
+- **`/v1/markets/<slug>/book` publishes the FULL LADDER**, and this file
+  said for a long time that it did not. Probed 2026-09-18 against a live
+  MLB market: 200, with **21 bid levels and 23 offer levels**, sizes
+  included. The claim was never tested, only inherited — and it cost the
+  depth walk every US leg, on the venue the site's default filter shows,
+  so the feature was invisible to most readers by construction.
+  **The ask side is keyed `offers`, not `asks`**, which is very likely
+  how it was written off: reading `asks` returns undefined, and an
+  undefined ladder looks exactly like an absent one.
+- **Which outcome a `.us` book quotes is PROVEN per market, never
+  assumed.** `/book` takes a market slug and says nothing about its
+  side, and this venue's `outcomes`/`outcomePrices` are already
+  documented as misaligned. `usPolyOffers()` compares the book's touch
+  against the leg's stored touch: equal means the book is this leg's
+  side, complementary means mirror it, neither means SKIP. A book
+  symmetric about 50c matches both tests and is refused as ambiguous —
+  a ladder for the wrong outcome is worse than no ladder, because it is
+  confident. `scripts/us-book-side.test.mjs` pins all four cases.
 - **Fees differ per venue.** US prices its taker fee off
   `feeCoefficient` (0.06 on the MLB game checked) against `.com`'s
   `feeSchedule.rate` of 0.05. Read it per market; never assume the two
@@ -1386,6 +1404,43 @@ amortised to nothing, so modelling a bigger order changes nothing and
 fixture that lands on a cent boundary passes while proving nothing;
 `scripts/position-size.test.mjs` therefore asserts the strict case at 7
 and the weak case (`never cheaper`) across a range.
+
+### One panel, because two calculators disagreed by 7x
+
+The card showed a walked-ladder figure — "$40.03 across 11,317
+contracts" — in its own box, directly above a size input whose **max
+was 1,126**. Both described the same trade. A reader asked the obvious
+question: which is it?
+
+Both were right about their own arithmetic, which is what made it bad.
+`profitCurve` walks 94 Kalshi levels against 60 Polymarket ones and
+finds the profit-maximising size. `positionAtSize` knows ONE price
+level, so it is exact up to the touch's own depth and cannot price a
+contract past it — the cap was the calculator honestly refusing to
+lie, next to a box advertising a trade it would not let you enter.
+
+**Raising the cap alone would have been worse.** Pricing 11,317 at the
+touch rate gives **$59.10** against the true $40.03: a 48%
+overstatement that looks consistent, where the contradiction at least
+announced itself. `scripts/curve-position.test.mjs` pins that number
+so the shortcut is not taken later.
+
+So there is one panel. Above the touch depth the calculator prices off
+the curve, and **that is exact rather than approximate**: every curve
+point is a level boundary, and between boundaries the marginal price is
+constant, so profit is linear and interpolation is arithmetic rather
+than estimation. It holds only while the curve carries every boundary,
+which is why `profitCurve`'s cap moved 40 -> 250 — measured first, at
+the old cap one leg of 34 was thinned at all and every curve on the
+response cost 36KB of 1.44MB.
+
+**The copy names the trade instead of the technique.** It said "walking
+the book to 0.26c each", which assumes the reader already knows what
+the panel is telling them. It now says the best price only holds N
+contracts worth $X, that buying more means taking worse prices further
+down, and that past the best size the next contract costs more than it
+pays. The two chips are "best price" and "most money" rather than one
+unexplained `max`.
 
 ### Naming the venue is the whole point of the row
 
