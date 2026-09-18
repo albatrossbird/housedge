@@ -21,6 +21,7 @@
 // Reads only, anon key. Writes nothing.
 
 import { pageAll as page } from "../lib/restPage.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -30,7 +31,7 @@ const since = new Date(Date.now() - HOURS * 3600 * 1000).toISOString();
 
 async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();

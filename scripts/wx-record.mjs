@@ -19,6 +19,7 @@ import {
   toWxMarketRow, toWxQuote, quoteChanged, nwsForecast,
 } from "../lib/weather.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -43,7 +44,7 @@ async function post(table, rows, onConflict) {
   const r = await fetch(url, {
     method: "POST",
     headers: {
-      apikey: KEY, Authorization: `Bearer ${KEY}`,
+      ...authHeaders(KEY),
       "Content-Type": "application/json",
       Prefer: onConflict ? "resolution=merge-duplicates,return=minimal" : "return=minimal",
     },

@@ -23,6 +23,7 @@
 // Usage: node scripts/m15-calibrate.mjs [--secs=90] [--tol=45] [SERIES ...]
 
 import { feeOf, pickOnePerTicker, bucketize, simulate } from "../lib/calibrate.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_ANON_KEY;
@@ -52,7 +53,7 @@ if (!series.length) series.push("KXBTC15M");
 
 async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) throw new Error(`GET ${path.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();

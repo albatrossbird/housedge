@@ -1,3 +1,4 @@
+import { authHeaders } from "../lib/supabaseHeaders.js";
 // How fast is this database actually growing, and when does it matter?
 //
 // m15_quotes and wx_quotes are APPEND-ONLY and nothing deletes from
@@ -68,7 +69,7 @@ const WIDE = {
 
 async function count(table, filter = "", mode = "planned") {
   const r = await fetch(`${URL}/rest/v1/${table}?select=*${filter}&limit=1`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: `count=${mode}` },
+    headers: { ...authHeaders(KEY), Prefer: `count=${mode}` },
   });
   if (!r.ok) return { n: null, err: `${r.status} ${(await r.text()).slice(0, 90)}` };
   // Content-Range is "0-0/12345"; the total is after the slash and can

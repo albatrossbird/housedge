@@ -1,3 +1,4 @@
+import { authHeaders } from "../lib/supabaseHeaders.js";
 // What is actually in the 15-minute data, for one series.
 //
 // The FIRST question before any strategy: is there anything here. This
@@ -27,7 +28,7 @@ if (!series.length) series.push("KXGOLD15M", "KXSILVER15M");
 
 async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) throw new Error(`GET ${path.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();

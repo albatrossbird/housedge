@@ -19,6 +19,7 @@
 
 import { indexCandles, refPrice, predict, marginBps, agreementByMargin } from "../lib/cryptoBasis.js";
 import { YAHOO_SYMBOLS, yahooChart, indexYahooChart } from "../lib/yahooCandles.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_ANON_KEY;
@@ -47,7 +48,7 @@ function sourceFor(s) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function rest(path) {
-  const r = await fetch(`${URL}/rest/v1/${path}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
+  const r = await fetch(`${URL}/rest/v1/${path}`, { headers: { ...authHeaders(KEY) } });
   if (!r.ok) throw new Error(`GET ${path.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();
 }

@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { matchNonSportsMarkets } from "../lib/matcher.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const [, , category, ...flags] = process.argv;
 const dry = flags.includes("--dry");
@@ -39,7 +40,7 @@ const POLY_PLATFORMS = ["polymarket", "polymarket_us"];
 
 async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) {
     const body = (await r.text()).slice(0, 200);
@@ -254,7 +255,7 @@ for (let i = 0; i < ids.length; i += 200) {
   const chunk = ids.slice(i, i + 200).map(id => `"${id.replace(/"/g, '\\"')}"`).join(",");
   const r = await fetch(`${URL}/rest/v1/pairs?kalshi_id=in.(${encodeURIComponent(chunk)})`, {
     method: "DELETE",
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) { console.error(`::error::clear failed: ${r.status} ${(await r.text()).slice(0, 200)}`); process.exit(1); }
 }
@@ -263,7 +264,7 @@ for (let i = 0; i < newPairs.length; i += 500) {
   const r = await fetch(`${URL}/rest/v1/pairs?on_conflict=kalshi_id,polymarket_id`, {
     method: "POST",
     headers: {
-      apikey: KEY, Authorization: `Bearer ${KEY}`,
+      ...authHeaders(KEY),
       "Content-Type": "application/json", Prefer: "resolution=merge-duplicates",
     },
     body: JSON.stringify(newPairs.slice(i, i + 500)),

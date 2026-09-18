@@ -22,6 +22,7 @@
 
 import { candleBatch, centsToPrice, candleCovering, CANDLE_BATCH } from "../lib/kairos.js";
 import { pickOnePerTicker } from "../lib/calibrate.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -32,7 +33,7 @@ const series = process.argv.slice(2).filter(a => !a.startsWith("-"))[0] || "KXBT
 const SINCE = new Date(Date.now() - DAYS * 86400000).toISOString();
 
 async function rest(p) {
-  const r = await fetch(`${URL}/rest/v1/${p}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
+  const r = await fetch(`${URL}/rest/v1/${p}`, { headers: { ...authHeaders(KEY) } });
   if (!r.ok) throw new Error(`GET ${p.slice(0, 60)} -> ${r.status}`);
   return r.json();
 }

@@ -11,6 +11,7 @@
 // per series and writes thousands of rows, which is neither a 300s job
 // nor something to spend the Hobby plan's 4 CPU-hours/month on.
 import { listM15Series, kalshiGet, toM15Row } from "../lib/m15.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -33,7 +34,7 @@ async function upsert(table, rows, onConflict) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`, {
       method: "POST",
       headers: {
-        apikey: KEY, Authorization: `Bearer ${KEY}`,
+        ...authHeaders(KEY),
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
