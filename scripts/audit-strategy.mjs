@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { parseSpec, audit } from "../lib/strategyAudit.js";
 import { pickOnePerTicker, feeOf } from "../lib/calibrate.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -22,7 +23,7 @@ const DAYS = arg("days", 21);
 const SINCE = new Date(Date.now() - DAYS * 86400000).toISOString();
 
 async function rest(p) {
-  const r = await fetch(`${URL}/rest/v1/${p}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
+  const r = await fetch(`${URL}/rest/v1/${p}`, { headers: { ...authHeaders(KEY) } });
   if (!r.ok) throw new Error(`GET ${p.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();
 }

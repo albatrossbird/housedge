@@ -1,0 +1,27 @@
+-- Drop an index that cannot serve the query it was added for.
+--
+-- 0023 added `m15_quotes_source_observed_idx (source, observed_at desc)`
+-- "for the comparison this exists for". It cannot serve that comparison.
+-- The coverage query filters on `observed_at` and orders by `id`:
+--
+--   m15_quotes?select=id,ticker,source&observed_at=gte.X&order=id.asc
+--
+-- `source` is the LEADING column, so a predicate that never mentions it
+-- cannot use the index. It was pure write cost.
+--
+-- AND THE WRITE COST IS THE EXPENSIVE PART. m15_quotes is the highest
+-- write-volume table in the project — append-only, roughly 50k rows a
+-- day — and every insert must maintain every index on it. Adding a
+-- third took index maintenance on that table up by half, for a read
+-- that never touched it. A Supabase disk IO budget warning followed the
+-- next day.
+--
+-- `source` is read by a per-source GROUP BY over a bounded time window,
+-- which is a scan of that window either way. If that query ever needs
+-- help, the index to build is on `(observed_at desc, source)` — time
+-- first, because time is what every reader filters on — and it should
+-- be justified with an EXPLAIN before it is paid for on every insert.
+--
+-- Idempotent, like every migration here.
+
+drop index if exists m15_quotes_source_observed_idx;

@@ -88,11 +88,20 @@ Box is provisioned. Two things left, and they are yours to do by hand.
      sudo install -m 600 /dev/null $ENVFILE
      sudo nano $ENVFILE
 
-   Three lines, no quotes, no spaces around '=':
+   Type these three names, then paste each key DIRECTLY after its
+   '=' with nothing else on the line:
 
-     SUPABASE_URL=https://<project>.supabase.co
-     SUPABASE_SERVICE_ROLE_KEY=<the service_role key>
-     SUPABASE_ANON_KEY=<the anon key>
+     SUPABASE_URL=
+     SUPABASE_SERVICE_ROLE_KEY=
+     SUPABASE_ANON_KEY=
+
+   NO ANGLE BRACKETS, no quotes, no spaces around '='. This used to be
+   written as `<the service_role key>` and the brackets were kept along
+   with the key — systemd's EnvironmentFile takes the value literally,
+   so a perfectly good key was sent as `<key>` and refused with
+   `401 Invalid API key` for fourteen hours while the recorder happily
+   restarted. A placeholder you are meant to delete part of is a
+   placeholder that will be pasted over in part.
 
    The anon key belongs here even though the recorders do not write
    with it: scripts/watchdog.mjs reads through it, and being able to

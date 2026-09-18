@@ -21,6 +21,7 @@
 // Reads only, anon key. Writes nothing.
 
 import { pageAll as page } from "../lib/restPage.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -30,7 +31,7 @@ const since = new Date(Date.now() - HOURS * 3600 * 1000).toISOString();
 
 async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();
@@ -121,11 +122,27 @@ if (!haveColumn) {
   console.log("VERDICT: NOTHING IS RECORDING. No quotes at all in the window, on any");
   console.log("source. The price path cannot be backfilled, so treat this as urgent.");
 } else if (!seen.has("box") && !seen.has("actions") && unattributed) {
-  console.log(`VERDICT: not yet. The column exists but all ${unattributed} windows are`);
-  console.log("unattributed, so both recorders are still running code from before the");
-  console.log("stamp landed. The box cycles hourly and an Actions run lasts 330");
-  console.log("minutes, so give it until the current run ends and re-check. Recording");
-  console.log("is healthy meanwhile — this is an attribution gap, not a data gap.");
+  // THIS BRANCH USED TO GUESS, and the guess was wrong for fourteen
+  // hours. It said "both recorders are still running code from before
+  // the stamp landed" and finished with "recording is healthy" — an
+  // assertion about TWO writers from evidence that supports only "at
+  // least one writer is on old code", and a claim about the TABLE
+  // relayed as a claim about the BOX. The box was in fact writing
+  // nothing at all, rejected on every call with 401 Invalid API key,
+  // and this line is what said otherwise.
+  //
+  // Unattributed rows cannot distinguish the two states, so it must not
+  // pretend to. It names the check that can.
+  console.log(`VERDICT: CANNOT TELL, and this is not the same as healthy.`);
+  console.log(`The column exists but all ${unattributed} windows are unattributed, which`);
+  console.log("is equally consistent with both recorders running pre-stamp code AND");
+  console.log("with the box writing nothing while Actions covers for it. The table");
+  console.log("being fresh says nothing about the box — that is the aggregate-vs-");
+  console.log("per-source mistake this project has made before.");
+  console.log("");
+  console.log("Settle it on the box itself, where the answer is unambiguous:");
+  console.log("  sudo journalctl -u marketslap-m15 -n 30 --no-pager");
+  console.log("Then re-run this once the box has cycled (hourly) onto stamped code.");
 } else if (!seen.has("box")) {
   console.log("VERDICT: THE BOX IS NOT WRITING. Other sources are landing rows, so");
   console.log("this is not the column and not the migration. Check the service on the");

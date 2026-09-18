@@ -24,6 +24,7 @@
 // files that each looked complete.
 
 import { WEATHER_CATEGORY, CLI_TO_STATION, kalshiGet, cliFromRules, toWxMarketRow } from "../lib/weather.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -43,7 +44,7 @@ async function upsert(rows) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/wx_markets?on_conflict=ticker`, {
       method: "POST",
       headers: {
-        apikey: KEY, Authorization: `Bearer ${KEY}`,
+        ...authHeaders(KEY),
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates,return=minimal",
       },

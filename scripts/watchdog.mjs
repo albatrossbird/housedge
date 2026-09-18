@@ -21,6 +21,7 @@
 // Reads only, anon key. Writes nothing. Exits non-zero when stale.
 
 import { parseWhen } from "../lib/parseWhen.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -77,7 +78,7 @@ async function newest(table, column, { nullsLast = false } = {}) {
   const order = `${column}.desc${nullsLast ? ".nullslast" : ""}`;
   const r = await fetch(
     `${URL}/rest/v1/${table}?select=${column}&${column}=not.is.null&order=${order}&limit=1`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+    headers: { ...authHeaders(KEY) },
   });
   if (!r.ok) return { at: null, err: `${r.status} ${(await r.text()).slice(0, 100)}` };
   const rows = await r.json();

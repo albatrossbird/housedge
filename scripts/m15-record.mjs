@@ -12,7 +12,9 @@
 // Actions minutes are free and unmetered on a public repo, and a job
 // may run for six hours, so the loop lives here and talks to Kalshi and
 // Supabase directly.
-import { listM15Series, kalshiGet, toM15Row, toM15Quote, quoteChanged } from "../lib/m15.js";
+import { listM15Series, kalshiGet, toM15Row, toM15Quote, quoteChanged, marketChanged } from "../lib/m15.js";
+import { assertCredential } from "../lib/supabaseCredential.js";
+import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -50,6 +52,10 @@ console.log(`source: ${SOURCE}`);
 if (!SUPABASE_URL || !KEY) { console.error("::error::SUPABASE_URL and a key are required"); process.exit(1); }
 console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role" : "anon (writes will be REJECTED by RLS)"}`);
 
+// Proven, not assumed — the line above reports which VARIABLE IS SET
+// and says nothing about whether the value works. See the module.
+await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
+
 // Set once, the first time the database rejects `source`. A deploy can
 // land before the migration does — the same case migration 0004 handles
 // in the price path — so the recorder drops the column and keeps
@@ -63,7 +69,7 @@ async function post(table, rows, onConflict) {
   const r = await fetch(url, {
     method: "POST",
     headers: {
-      apikey: KEY, Authorization: `Bearer ${KEY}`,
+      ...authHeaders(KEY),
       "Content-Type": "application/json",
       Prefer: onConflict ? "resolution=merge-duplicates,return=minimal" : "return=minimal",
     },
@@ -92,6 +98,7 @@ if (!series.length) { console.error("::error::no 15-minute series found"); proce
 console.log(`watching ${series.length} series, every ${POLL_SECONDS}s for ${RUN_MINUTES}m`);
 
 const lastQuote = new Map();   // ticker -> last row WRITTEN, for write-on-change
+const lastMarket = new Map();  // same, for the upserted market row — see marketChanged
 const idleUntil = new Map();   // series -> ms timestamp
 const stats = { ticks: 0, polls: 0, quotes: 0, markets: 0, errors: 0, seriesSeen: new Set() };
 
@@ -113,8 +120,13 @@ async function pollSeries(ticker) {
     if (q && quoteChanged(lastQuote.get(m.ticker), q)) { quotes.push(q); lastQuote.set(m.ticker, q); }
     // The market record is upserted alongside, so a window we watched
     // live is already present before the backfill ever sees it settle.
+    // Gated on change like the quote is: this is an UPDATE of a hot row
+    // rather than an append, so writing it every tick costs far more IO
+    // than the quotes do and buys freshness nothing reads.
     const row = toM15Row(m, ticker);
-    if (row) markets.push(row);
+    if (row && marketChanged(lastMarket.get(m.ticker), row)) {
+      markets.push(row); lastMarket.set(m.ticker, row);
+    }
   }
   return { quotes, markets };
 }
