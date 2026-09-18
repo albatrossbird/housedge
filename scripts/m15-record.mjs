@@ -25,12 +25,24 @@ const CONCURRENCY   = Number(process.env.M15_CONCURRENCY || 6);
 // a dry series is rested — but only briefly, because a 15-minute market
 // that is missed is missed entirely.
 const IDLE_RECHECK_MS = Number(process.env.M15_IDLE_RECHECK_MS || 120000);
+// Which recorder this is. Set to "box" by the systemd unit and "actions"
+// by the workflow; the default is deliberately neither, so a row from an
+// unlabelled caller is visible as one rather than silently attributed to
+// whichever writer happens to be the default.
+const SOURCE = process.env.M15_SOURCE || "unlabelled";
 
 if (!SUPABASE_URL || !KEY) { console.error("::error::SUPABASE_URL and a key are required"); process.exit(1); }
 console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role" : "anon (writes will be REJECTED by RLS)"}`);
 
+// Set once, the first time the database rejects `source`. A deploy can
+// land before the migration does — the same case migration 0004 handles
+// in the price path — so the recorder drops the column and keeps
+// recording rather than losing a window it can never get back.
+let sourceUnsupported = false;
+
 async function post(table, rows, onConflict) {
   if (!rows.length) return true;
+  if (sourceUnsupported) rows = rows.map(({ source, ...rest }) => rest);
   const url = `${SUPABASE_URL}/rest/v1/${table}` + (onConflict ? `?on_conflict=${onConflict}` : "");
   const r = await fetch(url, {
     method: "POST",
@@ -41,7 +53,20 @@ async function post(table, rows, onConflict) {
     },
     body: JSON.stringify(rows),
   });
-  if (!r.ok) { console.log(`::warning::${table} write ${r.status}: ${(await r.text()).slice(0, 200)}`); return false; }
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 300);
+    // PGRST204 / 42703: the column is not there. Say which migration
+    // adds it — "could not find the 'source' column" on its own sends
+    // the next reader looking through the recorder rather than the
+    // schema — then retry without it, once.
+    if (!sourceUnsupported && /source/.test(body) && /PGRST204|42703|column/.test(body)) {
+      sourceUnsupported = true;
+      console.log(`::warning::${table}: no 'source' column — run migration 0023_m15_quotes_source.sql. Recording WITHOUT source attribution until then.`);
+      return post(table, rows, onConflict);
+    }
+    console.log(`::warning::${table} write ${r.status}: ${body.slice(0, 200)}`);
+    return false;
+  }
   return true;
 }
 
@@ -68,7 +93,7 @@ async function pollSeries(ticker) {
   const now = Date.now();
   const quotes = [], markets = [];
   for (const m of open) {
-    const q = toM15Quote(m, now);
+    const q = toM15Quote(m, now, SOURCE);
     if (q && quoteChanged(lastQuote.get(m.ticker), q)) { quotes.push(q); lastQuote.set(m.ticker, q); }
     // The market record is upserted alongside, so a window we watched
     // live is already present before the backfill ever sees it settle.

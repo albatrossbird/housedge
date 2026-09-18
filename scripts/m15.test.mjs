@@ -87,5 +87,27 @@ const SETTLED = { ...LIVE, ticker: "KXBTC15M-26SEP060015-15", result: "no", last
   }
 }
 
+// The source stamp, and the thing that makes it safe to add.
+{
+  const plain = toM15Quote(LIVE, Date.parse("2026-09-06T04:23:00Z"));
+  eq("source" in plain, false,
+     "no source supplied -> the KEY IS ABSENT, not null");
+  // Why that matters: PostgREST rejects a bulk insert whose objects have
+  // different key sets (PGRST102), and the recorder posts many rows in
+  // one call. A null here would also write a row claiming an unknown
+  // writer, where absent means the column was never in play.
+
+  const stamped = toM15Quote(LIVE, Date.parse("2026-09-06T04:23:00Z"), "box");
+  eq(stamped.source, "box", "a supplied source is carried");
+
+  // Everything else must be untouched by the addition — this shapes the
+  // one input that cannot be re-fetched.
+  const { source, ...rest } = stamped;
+  eq(rest, plain, "the stamp changes NOTHING else about the row");
+
+  eq("source" in toM15Quote(LIVE, Date.now(), ""), false,
+     "an empty source is absent, not an empty string");
+}
+
 console.log(bad ? `${bad} failing` : "m15: all cases pass");
 process.exit(bad ? 1 : 0);

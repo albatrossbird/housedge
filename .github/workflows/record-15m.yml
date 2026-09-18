@@ -81,4 +81,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           M15_RUN_MINUTES: ${{ github.event.inputs.minutes || '330' }}
           M15_POLL_SECONDS: ${{ github.event.inputs.pollSeconds || '15' }}
+          # The other half of the overlap. See migration 0023.
+          M15_SOURCE: actions
         run: node scripts/m15-record.mjs

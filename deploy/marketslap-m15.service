@@ -31,6 +31,11 @@ EnvironmentFile=/etc/marketslap/env
 # One hour per cycle. Short enough that a code update lands promptly,
 # long enough that restarts are not the dominant activity.
 Environment=M15_RUN_MINUTES=60
+# Names this recorder in every row it writes, so the two-day overlap
+# with the Actions recorder can be told apart. Union coverage cannot
+# answer "can Actions be turned off" — it reads the same whether the box
+# covers everything or half of it.
+Environment=M15_SOURCE=box
 ExecStart=/usr/bin/node scripts/m15-record.mjs
 Restart=always
 RestartSec=5
