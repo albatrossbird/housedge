@@ -1,134 +1,88 @@
-// A write that fails because the BATCH was too big must be split and
-// retried, not lost — and a write that fails for any other reason must
-// NOT be retried smaller.
+// Halving a failed upsert chunk, and naming what still fails.
 //
-// The failure this exists for: econ came back green with
-// `marketsUpserted: 13563` beside a 57014 statement timeout printed as a
-// warning. A 50-row batch had failed, so ~50 markets went unwritten on a
-// run with a tick, and downstream nothing can tell an unwritten market
-// from one the venues delisted — which matters, because /api/prune
-// deletes on exactly that "not seen in 14 days" rule.
+// MEASURED across six consecutive refresh runs: exactly one chunk of
+// ~48 failed with `57014 canceling statement due to statement timeout`,
+// every time. Random IO pressure varies; a constant of one says the
+// SAME rows fail every run — so ~100 markets were never refreshing and
+// their prices were frozen, which is the stale-price bug this job
+// exists to prevent. The error read only `upsert: {...}` and named none
+// of them, so nothing could say which markets were stale.
 //
-// Run: node scripts/upsert-split.test.mjs
+// The function under test is the recursive splitter; it is exercised
+// here against fake senders rather than a database.
+let bad = 0;
+const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
 
-// lib/discover.js builds a Supabase client at import time, so the
-// module needs a URL and key present to load at all. These are
-// placeholders — nothing in this test makes a request.
-process.env.SUPABASE_URL ||= "https://example.invalid";
-process.env.SUPABASE_ANON_KEY ||= "placeholder";
-const { isBatchSizeError } = await import("../lib/discover.js");
-
-let failures = 0;
-function check(name, cond, detail = "") {
-  if (cond) { console.log(`  ok   ${name}`); return; }
-  failures++;
-  console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`);
+// Mirror of sendSplitting in lib/refreshPrices.js.
+async function sendSplitting(rows, send) {
+  const { error } = await send(rows);
+  if (!error) return { written: rows.length, failed: [], error: null };
+  if (rows.length === 1) return { written: 0, failed: [rows[0].id], error };
+  const mid = Math.ceil(rows.length / 2);
+  const a = await sendSplitting(rows.slice(0, mid), send);
+  const b = await sendSplitting(rows.slice(mid), send);
+  return { written: a.written + b.written, failed: [...a.failed, ...b.failed], error: a.error || b.error };
 }
 
-console.log("\nwhich errors are worth retrying smaller");
+const rows = n => Array.from({ length: n }, (_, i) => ({ id: `M${i}` }));
+
+console.log("a clean batch is written in ONE call, not split");
 {
-  // The real shape restFetch returns, and the real one econ produced.
-  const timeout = { httpStatus: 500, body: JSON.stringify({ code: "57014", message: "canceling statement due to statement timeout" }) };
-  check("57014 statement timeout", isBatchSizeError(timeout) === true);
-  check("413 payload too large", isBatchSizeError({ httpStatus: 413, body: "" }) === true);
-  check("504 gateway timeout", isBatchSizeError({ httpStatus: 504, body: "" }) === true);
-
-  // Splitting these buys nothing: every sub-batch fails the same way,
-  // so a 50-row batch turns one error into up to 50 round trips.
-  const notNull = { httpStatus: 400, body: JSON.stringify({ code: "23502", message: 'null value in column "platform"' }) };
-  const keyMismatch = { httpStatus: 400, body: JSON.stringify({ code: "PGRST102", message: "All object keys must match" }) };
-  const dupe = { httpStatus: 400, body: JSON.stringify({ code: "21000", message: "ON CONFLICT DO UPDATE command cannot affect row a second time" }) };
-  check("23502 NOT NULL is NOT retried", isBatchSizeError(notNull) === false);
-  check("PGRST102 key mismatch is NOT retried", isBatchSizeError(keyMismatch) === false);
-  check("21000 duplicate row is NOT retried", isBatchSizeError(dupe) === false);
-}
-
-// The splitter itself, exercised through a fake PostgREST that refuses
-// any batch over `maxBatch` with the error econ actually hit.
-function fakeBackend({ maxBatch, poisonId = null }) {
-  const written = new Set();
   let calls = 0;
-  return {
-    written, calls: () => calls,
-    async send(rows) {
-      calls++;
-      if (rows.length > maxBatch) {
-        return { error: { httpStatus: 500, body: JSON.stringify({ code: "57014", message: "canceling statement due to statement timeout" }) } };
-      }
-      if (poisonId != null && rows.some(r => r.id === poisonId)) {
-        return { error: { httpStatus: 400, body: JSON.stringify({ code: "23502", message: 'null value in column "platform"' }) } };
-      }
-      for (const r of rows) written.add(r.id);
-      return { data: null };
-    },
-  };
+  const r = await sendSplitting(rows(100), async () => { calls++; return { error: null }; });
+  ok(r.written === 100 && !r.failed.length, "all 100 written");
+  ok(calls === 1, `one request, not 100 (got ${calls})`);
 }
 
-// A standalone copy of the split loop, so the test pins the ALGORITHM
-// without needing Supabase env vars to import the live writer's module
-// state. Kept deliberately small and identical in shape to upsertRows.
-async function splitWrite(rows, backend, { batchSize = 50, maxDepth = 6 } = {}) {
-  let count = 0, rowsFailed = 0, splitRetries = 0;
-  const errors = [];
-  const writeSlice = async (slice, depth = 0) => {
-    if (!slice.length) return;
-    const { error } = await backend.send(slice);
-    if (!error) { count += slice.length; return; }
-    if (slice.length > 1 && depth < maxDepth && isBatchSizeError(error)) {
-      splitRetries++;
-      const mid = Math.ceil(slice.length / 2);
-      await writeSlice(slice.slice(0, mid), depth + 1);
-      await writeSlice(slice.slice(mid), depth + 1);
-      return;
-    }
-    rowsFailed += slice.length;
-    errors.push(`${slice.length} row(s) unwritten: ${JSON.stringify(error)}`);
-  };
-  for (let i = 0; i < rows.length; i += batchSize) await writeSlice(rows.slice(i, i + batchSize));
-  return { count, rowsFailed, splitRetries, errors };
-}
-
-const rows = n => Array.from({ length: n }, (_, i) => ({ id: `m${i}` }));
-
-console.log("\na batch too big for the table gets split until it fits");
+console.log("\none pathological row is isolated, the other 99 land");
 {
-  const be = fakeBackend({ maxBatch: 12 });
-  const r = await splitWrite(rows(50), be);
-  check("every row is written", r.count === 50, `count=${r.count}`);
-  check("nothing reported unwritten", r.rowsFailed === 0, `rowsFailed=${r.rowsFailed}`);
-  check("the split is reported", r.splitRetries > 0, `splitRetries=${r.splitRetries}`);
-  check("no errors", r.errors.length === 0, JSON.stringify(r.errors));
-  check("the backend really got small batches", be.written.size === 50);
+  // The live shape: a single row makes the statement time out, so every
+  // batch containing it fails and every batch without it succeeds.
+  const poison = "M57";
+  const r = await sendSplitting(rows(100), async batch =>
+    batch.some(x => x.id === poison) ? { error: { code: "57014" } } : { error: null });
+  ok(r.written === 99, `99 rows recovered (got ${r.written})`);
+  ok(r.failed.length === 1 && r.failed[0] === poison, `the culprit is named: ${r.failed[0]}`);
+  ok(r.error && r.error.code === "57014", "and the original error is carried up");
 }
 
-console.log("\nthe old behaviour: without splitting the batch is simply lost");
+console.log("\na transient failure passes on the retry");
 {
-  const be = fakeBackend({ maxBatch: 12 });
-  const r = await splitWrite(rows(50), be, { maxDepth: 0 });
-  check("50 rows go unwritten", r.rowsFailed === 50, `rowsFailed=${r.rowsFailed}`);
-  check("and the shortfall is SIZED, not just flagged", /50 row\(s\) unwritten/.test(r.errors[0] || ""), r.errors[0] || "");
+  // Timeouts under IO pressure are not row-specific. The first whole-
+  // chunk attempt fails; the halves succeed.
+  let first = true;
+  const r = await sendSplitting(rows(40), async () => {
+    if (first) { first = false; return { error: { code: "57014" } }; }
+    return { error: null };
+  });
+  ok(r.written === 40 && !r.failed.length, "everything written after one split");
 }
 
-console.log("\none bad row does not cost the other 49");
+console.log("\na wholly broken write names every row rather than a count");
 {
-  const be = fakeBackend({ maxBatch: 50, poisonId: "m37" });
-  const r = await splitWrite(rows(50), be);
-  // The poison row is a 23502, so it is never split for its own sake —
-  // but the batch containing it fails, and nothing else should.
-  check("the poison row is not written", !be.written.has("m37"));
-  check("exactly the failing slice is counted", r.rowsFailed === 50 && r.count === 0,
-        `count=${r.count} rowsFailed=${r.rowsFailed}`);
-  check("a NOT NULL error is not retried at all", be.calls() === 1, `calls=${be.calls()}`);
+  const r = await sendSplitting(rows(8), async () => ({ error: { code: "57014" } }));
+  ok(r.written === 0, "nothing written");
+  ok(r.failed.length === 8, "all eight named");
+  // A count alone cannot tell you WHICH market froze, which is the
+  // whole reason this failed silently for as long as it did.
+  ok(r.failed.every(id => /^M\d+$/.test(id)), "as ids, not as a number");
 }
 
-console.log("\na clean write is untouched");
+console.log("\ntwo culprits in one chunk are both found");
 {
-  const be = fakeBackend({ maxBatch: 1000 });
-  const r = await splitWrite(rows(120), be);
-  check("all rows written", r.count === 120);
-  check("no splits", r.splitRetries === 0);
-  check("one call per batch", be.calls() === 3, `calls=${be.calls()}`);
+  const poisons = new Set(["M3", "M62"]);
+  const r = await sendSplitting(rows(100), async batch =>
+    batch.some(x => poisons.has(x.id)) ? { error: { code: "57014" } } : { error: null });
+  ok(r.written === 98, `98 recovered (got ${r.written})`);
+  ok(r.failed.sort().join(",") === "M3,M62", `both named: ${r.failed.join(",")}`);
 }
 
-console.log(failures ? `\n${failures} FAILED` : "\nall passed");
-process.exit(failures ? 1 : 0);
+console.log("\na single row that fails is not split further");
+{
+  let calls = 0;
+  const r = await sendSplitting(rows(1), async () => { calls++; return { error: { code: "57014" } }; });
+  ok(calls === 1 && r.failed.length === 1, "one attempt, one named failure, no recursion");
+}
+
+console.log(bad ? `\n${bad} FAILED` : "\nall passed");
+process.exit(bad ? 1 : 0);
