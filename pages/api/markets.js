@@ -245,7 +245,7 @@ async function attachDepthLadders(pairs) {
       if (b && !b.error && !b.notListed && b.asks && b.bids) usBooks.set(p._polySlug, b);
     }));
 
-  const skipped = { noKalshiBook: 0, noPolyBook: 0, noOffers: 0, noCurve: 0, notPositive: 0, usBookMisaligned: 0 };
+  const skipped = { noKalshiBook: 0, noPolyBook: 0, noOffers: 0, noCurve: 0, notPositive: 0, usBookMisaligned: 0, impossibleRate: 0 };
   let walked = 0, improved = 0;
   for (const p of profitable) {
     const ob = books.get(p.id);
@@ -284,6 +284,33 @@ async function attachDepthLadders(pairs) {
     );
     if (!curve || !curve.best) { skipped.noCurve++; continue; }
     if (curve.best.totalProfit <= 0) { skipped.notPositive++; continue; }
+
+    // A DEEPER FILL CANNOT EARN MORE PER CONTRACT THAN THE TOUCH.
+    //
+    // The touch is the best price on each side by definition, so every
+    // level below it is worse and the average can only fall. A walk
+    // that reports a HIGHER per-contract edge than `tradeableArb` has
+    // not found a better trade; it has priced something the verified
+    // touch disagrees with, and the card renders that disagreement as
+    // money.
+    //
+    // Live, 2026-09-19: a college football leg reported 0.68c at the
+    // touch and 3.74c walked — same trade, 5.5x apart — and an MLB card
+    // showed "+4.1c at the touch, 12.85c averaged over every price
+    // you'd take" beside copy promising LESS per contract. Two known
+    // causes so far, neither yet fixed: Kalshi's `orderbook_fp` sizes
+    // are fractional and ~10^6, so they are not contract counts, and
+    // `1 - best_no_bid` came back a cent under the quoted `yes_ask`.
+    //
+    // Until both are reconciled the walk is not publishable. Suppressed
+    // rather than shown with a caveat: a reader acting on a fabricated
+    // edge loses real money, and this number is the one they would act
+    // on.
+    const touchEdge = Number(p.arb.edge);
+    if (Number.isFinite(touchEdge) && curve.best.edgePerPair > touchEdge + 1e-9) {
+      skipped.impossibleRate++;
+      continue;
+    }
     walked++;
 
     // The touch figure is KEPT beside the walked one. A number that
