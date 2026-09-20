@@ -209,6 +209,10 @@ async function verifyKalshiDepth(pairs) {
 //
 // The Polymarket book is REUSED from verifyPolyDepth rather than
 // refetched — see `_polyBook`.
+// Three samples is plenty to see a pattern and few enough that a
+// healthy response never notices. The guard should fire never.
+const IMPOSSIBLE_SAMPLE_CAP = 3;
+
 async function attachDepthLadders(pairs) {
   const profitable = pairs.filter(p => p.arb && p.arb.profitable && p.id);
   if (!profitable.length) return { walked: 0, improved: 0 };
@@ -246,6 +250,10 @@ async function attachDepthLadders(pairs) {
     }));
 
   const skipped = { noKalshiBook: 0, noPolyBook: 0, noOffers: 0, noCurve: 0, notPositive: 0, usBookMisaligned: 0, impossibleRate: 0 };
+  // Capped hard: these are only written when the guard fires, which
+  // should be never, and a diagnostic that bloats every healthy
+  // response is one that gets removed before it is ever read.
+  const impossibleSamples = [];
   let walked = 0, improved = 0;
   for (const p of profitable) {
     const ob = books.get(p.id);
@@ -260,13 +268,14 @@ async function attachDepthLadders(pairs) {
     const kOffers = kalshiOffers(ob, takesKalshiYes ? "yes" : "no");
     const wantYesOnOutcome = !takesKalshiYes;      // the poly leg is the other half
 
-    let pOffers;
+    let pOffers, usSide = null;
     if (isUs) {
       // Which outcome this book quotes is PROVEN against the leg's own
       // touch rather than assumed from a convention — see usPolyOffers.
       const r = usPolyOffers(pb, p.poly, wantYesOnOutcome);
       if (r.reason === "misaligned" || r.reason === "ambiguous") { skipped.usBookMisaligned++; continue; }
       pOffers = r.offers;
+      usSide = r.side;                       // "direct" | "mirrored", for the sample below
     } else {
       // A binary CLOB's two tokens are exact complements, so token[0]'s
       // book prices both outcomes: buying the side it quotes lifts its
@@ -289,26 +298,65 @@ async function attachDepthLadders(pairs) {
     //
     // The touch is the best price on each side by definition, so every
     // level below it is worse and the average can only fall. A walk
-    // that reports a HIGHER per-contract edge than `tradeableArb` has
-    // not found a better trade; it has priced something the verified
-    // touch disagrees with, and the card renders that disagreement as
-    // money.
+    // reporting a HIGHER per-contract edge than `tradeableArb` has not
+    // found a better trade; it has priced something the verified touch
+    // disagrees with, and the card renders that disagreement as money.
     //
     // Live, 2026-09-19: a college football leg reported 0.68c at the
-    // touch and 3.74c walked — same trade, 5.5x apart — and an MLB card
-    // showed "+4.1c at the touch, 12.85c averaged over every price
-    // you'd take" beside copy promising LESS per contract. Two known
-    // causes so far, neither yet fixed: Kalshi's `orderbook_fp` sizes
-    // are fractional and ~10^6, so they are not contract counts, and
-    // `1 - best_no_bid` came back a cent under the quoted `yes_ask`.
+    // touch and 3.74c walked, and an MLB card offered $8,981.86 on
+    // 69,885 contracts beside copy promising LESS per contract.
     //
-    // Until both are reconciled the walk is not publishable. Suppressed
-    // rather than shown with a caveat: a reader acting on a fabricated
-    // edge loses real money, and this number is the one they would act
-    // on.
+    // THREE EXPLANATIONS WERE OFFERED FOR THIS AND ALL THREE WERE
+    // WRONG — Kalshi's sizes not being contracts (they are; `_fp` is
+    // fixed-point and the exchange supports fractional contracts), the
+    // ladder pricing a cent under the quote (it does not; measured
+    // same-instant, `1 - no_best_bid` equals `yes_ask` exactly), and
+    // the US alignment check mis-branching (it behaves correctly on
+    // every live leg tested). Each was reasoned from inputs nobody had
+    // actually looked at AT THE MOMENT THE GUARD FIRED, because by the
+    // time anyone looked, the books had turned over.
+    //
+    // So this captures the INPUTS rather than a conclusion. A sample is
+    // the two ladders as walked, the touch each side was priced from,
+    // the branch the US path took, and the head of the curve — enough
+    // to redo the arithmetic by hand without the live book.
     const touchEdge = Number(p.arb.edge);
     if (Number.isFinite(touchEdge) && curve.best.edgePerPair > touchEdge + 1e-9) {
       skipped.impossibleRate++;
+      if (impossibleSamples.length < IMPOSSIBLE_SAMPLE_CAP) {
+        const lv = (rows, n = 6) => (rows || []).slice(0, n)
+          .map(l => [Math.round(l.price * 1e4) / 1e4, Math.round(l.size * 100) / 100]);
+        impossibleSamples.push({
+          kalshiId: p.id,
+          venue: p.poly?.venue || null,
+          polySlug: p._polySlug || p._polyId || null,
+          side: p.arb.side || null,
+          usSide,                              // null for .com, else direct/mirrored
+          // What tradeableArb priced, and how old the quotes were. A
+          // stale stored touch against a live ladder is the leading
+          // suspect precisely because nothing has ruled it out.
+          touch: {
+            edge: touchEdge,
+            pricedAt: p.arb.pricedAt ?? null,
+            maxContracts: p.arb.maxContracts ?? null,
+            ageSeconds: p.poly?.ageSeconds ?? null,
+            kalshi: p.arb.inputs?.kalshi ?? null,
+            poly: p.arb.inputs?.poly ?? null,
+          },
+          // The ladders AS WALKED — already side-resolved and sorted
+          // cheapest-first, so these are the numbers the curve consumed
+          // rather than the raw venue payloads.
+          walked: {
+            kalshiOffers: lv(kOffers),
+            polyOffers: lv(pOffers),
+            kalshiLevels: kOffers.length,
+            polyLevels: pOffers.length,
+          },
+          curveHead: (curve.curve || []).slice(0, 4)
+            .map(c => ({ n: c.contracts, edge: Math.round(c.edgePerPair * 1e4) / 1e4 })),
+          best: { n: curve.best.contracts, edge: curve.best.edgePerPair },
+        });
+      }
       continue;
     }
     walked++;
@@ -342,7 +390,7 @@ async function attachDepthLadders(pairs) {
     };
     if (curve.best.totalProfit > beforeDollars + 0.005) improved++;
   }
-  return { walked, improved, candidates: profitable.length, skipped };
+  return { walked, improved, candidates: profitable.length, skipped, impossibleSamples };
 }
 
 async function verifyPolyDepth(pairs) {
@@ -1272,6 +1320,15 @@ export default async function handler(req, res) {
         laddersImproved: ladderPass.improved,
         laddersCandidates: ladderPass.candidates ?? 0,
         laddersSkipped: ladderPass.skipped || null,
+        // Present ONLY when the impossible-rate guard fired, so an
+        // empty field means the walk and the touch agreed everywhere.
+        // Reported unconditionally rather than behind ?debug=1: the
+        // `hidden` counts spent months behind that flag where no reader
+        // ever saw them, and this is the diagnostic for a number that
+        // was telling someone they had made nine thousand dollars.
+        ...(ladderPass.impossibleSamples?.length
+          ? { impossibleRateSamples: ladderPass.impossibleSamples }
+          : {}),
         // The Polymarket half, reported separately. A polymarket.com
         // leg had no size at all until the CLOB book was wired in, and
         // most of the site's profitable legs are on that venue — so a
