@@ -71,9 +71,30 @@ const windows = await page(rest,
   { key: "ticker" },
 );
 
-const quotes = await page(rest,
+// FILTER ON THE KEY YOU PAGE ON, or Postgres sorts the whole window.
+//
+// This filtered `observed_at` and paged on `id`, so every page had to
+// find the matching rows by time and then ORDER them by id — a sort
+// over the entire window rather than an index walk. Fine at one hour,
+// and at twenty-four it returned
+// `57014 canceling statement due to statement timeout`, which is to
+// say the check that answers "are we recording everything" stopped
+// working at exactly the window worth asking about.
+//
+// m15_quotes is append-only with a bigserial key, so id is monotonic
+// in time: one cheap lookup converts the time boundary into an id
+// boundary, and the scan after it is a pure keyset walk on the primary
+// key with no sort and no time predicate at all.
+const firstRow = await rest(
+  `m15_quotes?select=id&observed_at=gte.${since}&order=observed_at.asc&limit=1`
+);
+const sinceId = firstRow[0]?.id ?? null;
+
+// No rows at all in the window is a real answer, not an error — it is
+// what a stopped recorder looks like, and the verdict below says so.
+const quotes = sinceId == null ? [] : await page(rest,
   "m15_quotes", haveColumn ? "id,ticker,source" : "id,ticker",
-  `observed_at=gte.${since}`,
+  `id=gte.${sinceId}`,
 );
 
 const total = new Set(windows.map(w => w.ticker));
