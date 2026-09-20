@@ -320,8 +320,35 @@ async function attachDepthLadders(pairs) {
     // the two ladders as walked, the touch each side was priced from,
     // the branch the US path took, and the head of the curve — enough
     // to redo the arithmetic by hand without the live book.
+    // HOW MUCH BETTER THE WALK MAY LEGITIMATELY BE.
+    //
+    // The first version of this guard allowed none, on the reasoning
+    // that the touch is the best price so a deeper fill can only be
+    // worse. That is true of the PRICES and false of the EDGE, and the
+    // difference is a fee this file already documents: Kalshi rounds
+    // its taker fee UP TO THE CENT PER ORDER. One cent spread over five
+    // contracts is 0.2c each; over a hundred and eighty it is 0.006c.
+    // A larger order therefore earns genuinely more per contract, which
+    // is the same non-monotonicity `scripts/position-size.test.mjs`
+    // pins from the other direction.
+    //
+    // So the headroom is that rounding, spread over the size the touch
+    // was priced at — a bound derived from the mechanism rather than a
+    // tolerance picked to make the warnings stop. Plus 5e-5 because
+    // `arb.edge` is reported to four decimals and the curve is not:
+    // measured live, two legs were suppressed over 0.0000066 and
+    // 0.0000054 of pure rounding.
+    //
+    // Live check of the three it was suppressing: 0.0011 excess against
+    // a 0.00205 allowance at pricedAt=5, 0.0000066 against 0.00015 at
+    // 100, 0.0000054 against 0.00032 at 37 — all legitimate. And the
+    // card that started this, +4.10c walking to 12.85c at pricedAt=58,
+    // is an excess of 0.0875 against an allowance of 0.00022. Still
+    // refused, by a factor of four hundred.
     const touchEdge = Number(p.arb.edge);
-    if (Number.isFinite(touchEdge) && curve.best.edgePerPair > touchEdge + 1e-9) {
+    const pricedAt = Math.max(Number(p.arb.pricedAt) || 1, 1);
+    const feeHeadroom = 0.01 / pricedAt + 5e-5;
+    if (Number.isFinite(touchEdge) && curve.best.edgePerPair > touchEdge + feeHeadroom) {
       skipped.impossibleRate++;
       if (impossibleSamples.length < IMPOSSIBLE_SAMPLE_CAP) {
         const lv = (rows, n = 6) => (rows || []).slice(0, n)
@@ -337,6 +364,12 @@ async function attachDepthLadders(pairs) {
           // suspect precisely because nothing has ruled it out.
           touch: {
             edge: touchEdge,
+            // What the walk was allowed to exceed the touch by, and by
+            // how much it did. Without both, a reader cannot tell a
+            // real contradiction from a guard set too tight — which is
+            // what the first version of this was.
+            feeHeadroom,
+            excess: curve.best.edgePerPair - touchEdge,
             pricedAt: p.arb.pricedAt ?? null,
             maxContracts: p.arb.maxContracts ?? null,
             ageSeconds: p.poly?.ageSeconds ?? null,
