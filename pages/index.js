@@ -316,9 +316,20 @@ function SpreadBar({ market }) {
           What actually decides it is book width. */}
       {/* paddingLeft lines up with where the bars start: label width
           plus the row gap. */}
+      {/* NAMED AS A COST, because that is what it is.
+          It read "widest book 4.0pt", which is accurate and tells a
+          reader nothing they can use — and next to two bars sitting far
+          apart it reads as confirmation of an opportunity rather than
+          as the reason there isn't one. A reader asked directly why a
+          card showing a wide gap adds up to more than a dollar; 64 of
+          547 legs on that read had a gap of 3pt or more and no edge,
+          one of them 14.5pt apart and costing 105.23c.
+          The bars are MIDPOINTS. You trade at the edges of each book,
+          so you cross this spread on the way in, and it comes straight
+          off the gap the bars appear to offer. */}
       {widestBook != null && (
         <span style={{ fontSize: 10, color: T.muted, letterSpacing: "0.03em", paddingLeft: 106 }}>
-          widest book {widestBook.toFixed(1)}pt
+          costs {widestBook.toFixed(1)}pt to cross
         </span>
       )}
       {/* A global leg that agrees with the US one to within a couple of
@@ -522,6 +533,27 @@ function Details({ market, legs }) {
               <> · {leg.arb.depthKnown ? "" : "at most "}{Math.floor(leg.arb.maxContracts)} contract{Math.floor(leg.arb.maxContracts) === 1 ? "" : "s"} at this price</>
             )}
           </div>
+          {/* WHY A VISIBLE GAP IS NOT AN EDGE, said on the cards where
+              it isn't. The bars are midpoints and the total is what you
+              actually pay, so a card can show two venues far apart and
+              still come to more than a dollar — which reads as the site
+              contradicting itself unless the reason is on the card.
+              Live, 64 of 547 legs had a 3pt gap or more and no edge.
+              Only rendered when both halves are true, so a card that is
+              simply priced level says nothing. */}
+          {!leg.arb.profitable && leg.arb.cost > 1 && (() => {
+            const k = market.kalshi?.yes, p = leg.poly?.yes;
+            const gap = (k == null || p == null) ? null : Math.abs(k - p) * 100;
+            if (gap == null || gap < 2) return null;
+            return (
+              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 3, lineHeight: 1.45 }}>
+                The bars are <b style={{ color: T.text }}>{gap.toFixed(1)}pt</b> apart, but those
+                are midpoints. You buy at the far edge of each book, so crossing both spreads
+                costs more than the gap is worth — {(leg.arb.cost * 100).toFixed(2)}¢ to own
+                both sides, against the $1.00 they pay.
+              </div>
+            );
+          })()}
           {/* The walked figure used to live here, in its own box, while
               the calculator below capped at the touch size — two
               calculators for one trade, differing by 10x on size and 7x
