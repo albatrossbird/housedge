@@ -62,6 +62,18 @@ const CHECKS = [
   // Setting it there would break them the same way.
   { table: "markets", column: "updated_at", budget: 60 * 48,
     nullsLast: true, note: "market discovery / price refresh" },
+  // THE BOX ITSELF, reporting every 5 minutes. Fifteen is three
+  // intervals: long enough that one missed run is not an alarm, short
+  // enough that a host which has stopped is obvious on the next check.
+  //
+  // This is the table that answers "is the machine alive", and it is
+  // deliberately read the same way as every other: a recorder that has
+  // died and a host that has died both show up as a stale timestamp,
+  // so neither needs a special path to be noticed. A recorder writing
+  // nothing while the box looks fine went unnoticed for fourteen hours
+  // because nothing was watching the box at all.
+  { table: "box_health", column: "reported_at", budget: 15,
+    note: "recorder host self-report", optional: true },
 ];
 
 async function newest(table, column, { nullsLast = false } = {}) {
@@ -105,6 +117,19 @@ console.log(`${"table".padEnd(15)} ${"newest".padStart(9)} ${"budget".padStart(8
 let failed = 0, unreadable = 0;
 for (const c of CHECKS) {
   const { at, err } = await newest(c.table, c.column, { nullsLast: c.nullsLast });
+
+  // A CHECK THAT CANNOT YET PASS MUST NOT FAIL EVERY RUN. box_health
+  // does not exist until 0025 is applied and holds nothing until the
+  // host's first report, and a daily error nobody can clear is the
+  // same failure as a counter that can only be non-zero — it teaches
+  // you to ignore the channel. Once a row lands, the check is ordinary
+  // and a stale one is a real alarm.
+  if (c.optional && (at == null || /does not exist|PGRST20[05]|schema cache/.test(String(err || "")))) {
+    console.log(`${c.table.padEnd(15)} ${"—".padStart(9)} ${ago(c.budget).padStart(8)}   `
+      + `not reporting yet (${c.note}) — run supabase/migrations/0025_box_health.sql and enable marketslap-health.timer`);
+    continue;
+  }
+
   if (err) {
     // A read that FAILS is not a table that is fresh. Saying "unknown"
     // rather than passing is the whole point — this repo has been

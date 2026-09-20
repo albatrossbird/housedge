@@ -1,0 +1,18 @@
+# Every five minutes.
+#
+# The number is set by what it is used for: the watchdog treats a stale
+# row as "the box stopped reporting", so the interval has to be short
+# enough that a real outage is obvious within one check and long enough
+# that a single missed run is not an alarm. Five in, fifteen out — the
+# budget in watchdog.mjs is three intervals.
+
+[Unit]
+Description=Report MarketSlap host state every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

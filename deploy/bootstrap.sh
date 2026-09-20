@@ -79,6 +79,11 @@ systemctl daemon-reload
 # recorder is a decision, keeping units in step with the repo is not.
 systemctl enable --now marketslap-sync.timer
 echo "  unit sync enabled: a .service change on main now reaches this box in ~10 minutes"
+# Self-reporting is enabled here for the same reason as the sync timer:
+# it is the thing that stops the NEXT question needing an SSH session.
+# It writes one row and starts nothing.
+systemctl enable --now marketslap-health.timer
+echo "  self-report enabled: unit state and recent errors land in box_health every 5 minutes"
 
 mkdir -p "$(dirname "$ENVFILE")"
 chmod 700 "$(dirname "$ENVFILE")"
