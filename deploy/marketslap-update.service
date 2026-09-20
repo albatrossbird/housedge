@@ -9,19 +9,20 @@
 # rather than `git pull`, because a merge conflict on an unattended box
 # is a recorder that silently stops.
 #
-# IT UPDATES THE REPO, NOT THE MACHINE. Unit files under
-# /etc/systemd/system are copies taken by bootstrap.sh, and nothing here
-# rewrites them or reloads systemd — this runs as `marketslap`, which
-# has no business writing to /etc. So a change to a .service file in
-# deploy/ does NOT deploy: it lands in the repo and is ignored by the
-# running box, silently, which is the worst shape a deploy gap can take.
+# IT UPDATES THE REPO, NOT THE MACHINE, and that used to be the end of
+# the story. This runs as `marketslap`, which has no business writing to
+# /etc, so unit files stayed whatever bootstrap.sh copied once and a
+# .service change landed in git to be ignored by the running box.
 #
-# Anything that must take effect without an SSH session therefore
-# belongs in CODE, which this does update, rather than in unit config.
-# The m15 recorder's source stamp is the worked example: it reads
-# systemd's INVOCATION_ID instead of an Environment= line for exactly
-# this reason. To change a unit for real, re-run bootstrap.sh — it is
-# idempotent and reinstalls the units.
+# marketslap-sync.service closes that. It runs After= this one, as root,
+# and syncs deploy/marketslap-*.service into /etc/systemd/system. The
+# split is deliberate: pulling from a public repo stays unprivileged,
+# and only the copy into /etc is root.
+#
+# The m15 recorder's source stamp still reads systemd's INVOCATION_ID
+# rather than an Environment= line, and should stay that way — deriving
+# a fact from the runtime beats configuring it in two places even when
+# both can deploy.
 
 [Unit]
 Description=MarketSlap self-update from git

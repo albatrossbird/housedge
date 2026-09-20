@@ -1,0 +1,17 @@
+# Ten minutes, matching the code pull it follows.
+#
+# There is no point syncing units more often than the checkout they
+# come from changes, and no point syncing them less often — a unit fix
+# that waits an hour is a unit fix somebody works around by hand, which
+# is the habit this whole mechanism exists to break.
+
+[Unit]
+Description=Sync MarketSlap systemd units every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

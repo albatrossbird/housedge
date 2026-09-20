@@ -73,6 +73,12 @@ ufw status | head -5
 say "systemd units"
 install -m 0644 "$DIR"/deploy/*.service "$DIR"/deploy/*.timer /etc/systemd/system/
 systemctl daemon-reload
+# The sync timer is enabled here rather than left to the operator,
+# because it is the thing that stops unit changes needing an operator.
+# Everything else stays a deliberate `systemctl enable` — starting a
+# recorder is a decision, keeping units in step with the repo is not.
+systemctl enable --now marketslap-sync.timer
+echo "  unit sync enabled: a .service change on main now reaches this box in ~10 minutes"
 
 mkdir -p "$(dirname "$ENVFILE")"
 chmod 700 "$(dirname "$ENVFILE")"
