@@ -213,19 +213,54 @@ async function verifyKalshiDepth(pairs) {
 // healthy response never notices. The guard should fire never.
 const IMPOSSIBLE_SAMPLE_CAP = 3;
 
+// Eight at a time, the same bound discover uses on the series-meta
+// fetch after an unbounded one drew sixteen straight 429s.
+const KALSHI_BOOK_CONCURRENCY = 8;
+
 async function attachDepthLadders(pairs) {
   const profitable = pairs.filter(p => p.arb && p.arb.profitable && p.id);
   if (!profitable.length) return { walked: 0, improved: 0 };
 
+  // BOUNDED, AND IT SAYS WHY WHEN IT FAILS.
+  //
+  // This was an unbounded Promise.all over every profitable leg — 73 of
+  // them on a live read — fired at an API this file documents as
+  // rate-limiting datacenter IPs, with `if (r.ok)` dropping non-200s
+  // and `catch {}` dropping throws. Nothing recorded a status, so
+  // `noKalshiBook: 31` could not distinguish a throttle from a 404 from
+  // a timeout, and 31 of 73 cards silently lost their depth block.
+  //
+  // The same mistake, and the same fix, as the series-meta fetch in
+  // discover: bounded concurrency and a named failure. The retry is
+  // deliberately ONE short attempt rather than the 1.5/3/6/12s ladder
+  // the background jobs use — a browser is waiting on this response, so
+  // a twenty-second backoff would trade a missing block for a dead page.
   const books = new Map();
-  await Promise.all(profitable.map(async p => {
+  const bookStatus = {};
+  const bump = k => { bookStatus[k] = (bookStatus[k] || 0) + 1; };
+
+  const fetchBook = async (p, retried = false) => {
     try {
       const r = await fetch(
         `https://api.elections.kalshi.com/trade-api/v2/markets/${encodeURIComponent(p.id)}/orderbook`
       );
-      if (r.ok) books.set(p.id, await r.json());
-    } catch { /* leave unwalked rather than guessing a ladder */ }
-  }));
+      if (r.ok) { books.set(p.id, await r.json()); bump(200); return; }
+      // A throttle is the one worth a second attempt: it is transient by
+      // definition, where a 404 will still be a 404.
+      if (r.status === 429 && !retried) {
+        const wait = Math.min(Number(r.headers.get("retry-after")) * 1000 || 250, 1000);
+        await new Promise(res => setTimeout(res, wait));
+        return fetchBook(p, true);
+      }
+      bump(r.status);
+    } catch (err) {
+      bump(`err:${String(err?.message || err).slice(0, 40)}`);
+    }
+  };
+
+  for (let i = 0; i < profitable.length; i += KALSHI_BOOK_CONCURRENCY) {
+    await Promise.all(profitable.slice(i, i + KALSHI_BOOK_CONCURRENCY).map(p => fetchBook(p)));
+  }
 
   // A ZERO HAS TO SAY WHICH BRANCH PRODUCED IT.
   //
@@ -423,7 +458,7 @@ async function attachDepthLadders(pairs) {
     };
     if (curve.best.totalProfit > beforeDollars + 0.005) improved++;
   }
-  return { walked, improved, candidates: profitable.length, skipped, impossibleSamples };
+  return { walked, improved, candidates: profitable.length, skipped, impossibleSamples, bookStatus };
 }
 
 async function verifyPolyDepth(pairs) {
@@ -1353,6 +1388,10 @@ export default async function handler(req, res) {
         laddersImproved: ladderPass.improved,
         laddersCandidates: ladderPass.candidates ?? 0,
         laddersSkipped: ladderPass.skipped || null,
+        // What Kalshi actually answered, by status. `noKalshiBook`
+        // counts the failures; this says which kind they were, so a
+        // throttle is never mistaken for a market without a book.
+        kalshiBookStatus: ladderPass.bookStatus || null,
         // Present ONLY when the impossible-rate guard fired, so an
         // empty field means the walk and the touch agreed everywhere.
         // Reported unconditionally rather than behind ?debug=1: the
