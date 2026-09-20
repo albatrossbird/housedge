@@ -1,0 +1,35 @@
+# Sync unit files from the repo, so a .service change deploys like code.
+#
+# WHY THIS IS A SEPARATE UNIT FROM marketslap-update. That one runs as
+# `marketslap` and must stay that way — it pulls code from a public
+# repo and has no business writing outside /opt/marketslap. This one
+# writes to /etc/systemd/system and calls daemon-reload, so it runs as
+# root, and keeping them apart is what stops the pull itself from being
+# a root operation.
+#
+# IT RUNS AFTER THE PULL, NOT ALONGSIDE IT. Syncing unit files from a
+# half-updated checkout would install a unit for code that has not
+# arrived, so the ordering is explicit rather than left to two timers
+# happening to fire in a useful order.
+#
+# THE TRADE THIS MAKES, stated plainly: anything that reaches
+# deploy/marketslap-*.service on main becomes a root-run unit on this
+# box within ten minutes. That is an escalation from the `marketslap`
+# user to root for anyone who can push to the repo.
+#
+# It is a SMALL escalation, because that account already holds the
+# service-role key and already runs whatever main says. Root buys
+# persistence, not access to the data. Weighed against three unit
+# defects in two days that each needed a human at a terminal, and a
+# recorder whose crash-loop ceiling was silently absent on every box,
+# the exposure is worth closing the gap. Revisit if the repo ever gains
+# contributors who are not trusted with the database.
+
+[Unit]
+Description=MarketSlap systemd unit sync
+After=marketslap-update.service
+Requires=marketslap-update.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env DIR=/opt/marketslap /bin/bash /opt/marketslap/deploy/sync-units.sh
