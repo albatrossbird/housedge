@@ -65,11 +65,49 @@ try {
 // is not in produced 273 of 252 — a coverage figure of 108.3%, which
 // is not a stricter measure but a meaningless one.
 const nowIso = new Date().toISOString();
-const windows = await page(rest,
-  "m15_markets", "ticker,close_time",
-  `close_time=gte.${since}&close_time=lte.${nowIso}`,
-  { key: "ticker" },
-);
+
+// SAME DEFECT AS THE QUOTES READ BELOW, four lines apart, and fixed
+// separately because I fixed one and left its twin: this filtered
+// `close_time` and paged on `ticker`, so every page sorted the window
+// by ticker instead of walking an index. It timed out at 48 hours.
+//
+// It cannot use the id trick the quotes read uses — this table's key is
+// a text ticker, not a monotonic serial — so it pages on close_time,
+// which is what the index is on.
+//
+// THE CURSOR IS `gte`, NOT `gt`, AND THAT IS DELIBERATE. Many markets
+// share a close_time: twenty-six series roll over on the same
+// fifteen-minute boundary. `gt` would skip every row sharing the last
+// timestamp of a page, and a skipped window reads as one nobody
+// recorded — turning a coverage check into a false alarm about lost
+// data. `gte` re-reads that boundary instead, which costs a few
+// duplicate rows into a Set that does not care.
+//
+// Safe from looping because a page is 1000 rows and at most ~26 markets
+// can share one close_time, so a page can never be a single timestamp.
+async function pageWindows() {
+  const out = [];
+  let cursor = since;
+  for (;;) {
+    const rows = await rest(
+      `m15_markets?select=ticker,close_time`
+      + `&close_time=gte.${encodeURIComponent(cursor)}&close_time=lte.${encodeURIComponent(nowIso)}`
+      + `&order=close_time.asc&limit=1000`
+    );
+    out.push(...rows);
+    if (rows.length < 1000) return out;
+    const next = rows[rows.length - 1].close_time;
+    if (next === cursor) {
+      // Would mean >1000 markets on one boundary, which cannot happen
+      // with 26 series — but spinning silently is the one outcome worse
+      // than stopping early, so it says so.
+      console.error(`::error::window paging stuck at ${cursor}`);
+      return out;
+    }
+    cursor = next;
+  }
+}
+const windows = await pageWindows();
 
 // FILTER ON THE KEY YOU PAGE ON, or Postgres sorts the whole window.
 //
