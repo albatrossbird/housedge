@@ -88,7 +88,22 @@ echo "  self-report enabled: unit state and recent errors land in box_health eve
 mkdir -p "$(dirname "$ENVFILE")"
 chmod 700 "$(dirname "$ENVFILE")"
 
-cat <<EOF
+# QUOTED HEREDOC, AND IT HAS TO STAY QUOTED. This block is prose about
+# shell, so it is full of the characters shell acts on. Unquoted, bash
+# ran the backticks in the paragraph below as commands and died on
+# `<the service_role key>` with
+#
+#   bash: command substitution: line 92: syntax error near unexpected token `newline'
+#
+# — which is to say the warning about pasting angle brackets was itself
+# eaten by angle brackets, after every unit had already been installed.
+# Nothing broke, but the reader got the error instead of the
+# instructions, at exactly the step where the instructions matter.
+#
+# So: no expansion in here at all. The three paths are written out in
+# full rather than interpolated, which costs a literal and removes the
+# only reason anyone would unquote it again.
+cat <<'EOF'
 
 ========================================================================
 Box is provisioned. Two things left, and they are yours to do by hand.
@@ -96,8 +111,8 @@ Box is provisioned. Two things left, and they are yours to do by hand.
 1. WRITE THE SECRETS. Not through this script and not over a pipe —
    type them into the editor so they stay out of shell history:
 
-     sudo install -m 600 /dev/null $ENVFILE
-     sudo nano $ENVFILE
+     sudo install -m 600 /dev/null /etc/marketslap/env
+     sudo nano /etc/marketslap/env
 
    Type these three names, then paste each key DIRECTLY after its
    '=' with nothing else on the line:
@@ -133,13 +148,13 @@ Box is provisioned. Two things left, and they are yours to do by hand.
    Then confirm nothing else can read it, and that no marker landed
    inside a key:
 
-     sudo chmod 600 $ENVFILE && sudo ls -l $ENVFILE
-     sudo grep -c '200~' $ENVFILE     # must print 0
+     sudo chmod 600 /etc/marketslap/env && sudo ls -l /etc/marketslap/env
+     sudo grep -c '200~' /etc/marketslap/env     # must print 0
 
 2. PROVE THE ADDRESS IS NOT THROTTLED before you commit to this host.
    Ten minutes, no credentials needed:
 
-     sudo -u $USER node $DIR/scripts/venue-probe.mjs --minutes=10
+     sudo -u marketslap node /opt/marketslap/scripts/venue-probe.mjs --minutes=10
 
    Any 429 in that output is the failure that freezes series for hours.
    If you see them, try the other provider — it is the IP range, not
@@ -155,9 +170,9 @@ Then confirm rows are LANDING, not just that a process is running —
 a recorder that runs and writes nothing is this project's most common
 failure:
 
-     sudo -u $USER --preserve-env=SUPABASE_URL,SUPABASE_ANON_KEY \
-       env \$(grep -E '^SUPABASE_(URL|ANON_KEY)=' $ENVFILE | xargs) \
-       node $DIR/scripts/watchdog.mjs
+     sudo -u marketslap --preserve-env=SUPABASE_URL,SUPABASE_ANON_KEY \
+       env $(grep -E '^SUPABASE_(URL|ANON_KEY)=' /etc/marketslap/env | xargs) \
+       node /opt/marketslap/scripts/watchdog.mjs
 
 Leave weather on GitHub Actions for a couple of days and compare. If
 coverage does not actually improve, you have learned that cheaply.
