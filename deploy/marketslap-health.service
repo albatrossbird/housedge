@@ -1,0 +1,21 @@
+# The box reporting on itself, so nobody has to log in to ask.
+#
+# ROOT, and only for reading. journalctl for another unit needs
+# privilege; nothing here writes to the machine. The one credential it
+# holds is the same service-role key the recorders already use, from
+# the same file.
+#
+# ONE-SHOT ON A TIMER rather than a long-lived service: there is
+# nothing to keep running between reports, and a failed report should
+# show up as a stale row rather than as a process nobody looks at.
+
+[Unit]
+Description=MarketSlap host self-report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+ExecStart=/usr/bin/node scripts/report-health.mjs
