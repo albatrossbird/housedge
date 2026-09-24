@@ -1,10 +1,11 @@
-# The 15-minute recorder, as a long-lived service.
+# The weather recorder, as a long-lived service.
 #
 # WHY A SERVICE AND NOT A TIMER. On GitHub Actions this job runs for 330
 # minutes at a stretch, because GitHub does not honour short crons —
 # this repo asks for */30 and measures gaps of 45 minutes to 3.5 hours,
 # so long overlapping runs were the only way to approach continuous
-# coverage. Measured result: 303 of 602 windows captured, about half.
+# coverage. It is also the single largest consumer of Actions minutes
+# here, and the last thing keeping this repository public.
 #
 # A machine we control has no such problem. Restart=always plus a
 # modest RUN_MINUTES gives genuinely continuous coverage, and the
@@ -12,11 +13,20 @@
 # deploy step — marketslap-update.timer pulls, and the next cycle runs
 # the new code.
 #
-# The price path CANNOT BE BACKFILLED. Two independent attempts
-# confirmed it: a settled market reports only its last price, and
-# Kairos 1-minute candles sit inside our recorded book only 11.4% of
-# the time. Every window missed is gone for good, which is why this is
-# Restart=always rather than best effort.
+# NEITHER HALF OF THIS DATASET CAN BE BACKFILLED, which is why it is
+# Restart=always rather than best effort. A settled Kalshi market
+# reports one last price, and NWS serves the CURRENT forecast, never
+# the one it was issuing yesterday afternoon. The whole question the
+# table exists for — was Kalshi mispriced against what was knowable at
+# the time — needs both sides stamped from before the outcome was
+# known. A day not recorded is gone.
+#
+# THE RESTART IS NOT FREE, and the cost is worth stating rather than
+# discovering. Write-on-change is held in memory, so the first tick
+# after every restart has no baseline and writes the whole ladder —
+# about one extra full sweep per hour. That is a few thousand rows a
+# day against a table that is otherwise mostly quiet, and it buys
+# code updates landing within the hour.
 
 [Unit]
 Description=MarketSlap weather market recorder

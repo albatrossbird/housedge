@@ -1,5 +1,13 @@
 name: Record 15-minute markets
 
+# THE BOX ALSO RUNS THIS, and this job is what it is replacing. Both
+# write to m15_quotes, which is safe — append-only and write-on-change,
+# so two recorders cost duplicate rows and never a gap — and every row
+# is stamped with which recorder wrote it (migration 0023). Decide
+# whether to turn this off with the 'M15 coverage' workflow, which
+# reports PER SOURCE; a union figure cannot tell "the box covers
+# everything" from "the box covers half".
+#
 # Kalshi lists exactly ONE open market per 15-minute series at a time,
 # and it lives for fifteen minutes. That single fact decides everything
 # about this job.
