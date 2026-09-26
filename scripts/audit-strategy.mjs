@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { parseSpec, audit } from "../lib/strategyAudit.js";
 import { pickOnePerTicker, feeOf } from "../lib/calibrate.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { pageAll } from "../lib/restPage.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -27,17 +28,18 @@ async function rest(p) {
   if (!r.ok) throw new Error(`GET ${p.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();
 }
-async function readAll(table, select, extra, keyCol = "id") {
-  const out = []; let last = null;
-  for (let i = 0; i < 4000; i++) {
-    const after = last == null ? "" : `&${keyCol}=gt.${encodeURIComponent(last)}`;
-    const rows = await rest(`${table}?select=${select}&${extra}${after}&order=${keyCol}.asc&limit=1000`);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][keyCol];
-  }
-  throw new Error("readAll hit its page cap — TRUNCATED");
-}
+// ONE PAGER, SHARED. Seven scripts had their own copy of this and every
+// one paged on `id` while filtering on `ticker` — so Postgres sorted the
+// whole matching set instead of walking (ticker, observed_at), and each
+// began failing with `57014 canceling statement due to statement
+// timeout` as m15_quotes grew past a million rows. The analysis tooling
+// stopped working because the data got big, which is the opposite of
+// what more data is supposed to do.
+//
+// `key` must be a column the FILTER can use, and `dedupeOn` a unique one
+// — see lib/restPage.js.
+const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
+  pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 // Fee parameters come from the API, never hardcoded.
 async function feeMultiplier(s) {
   try {
@@ -69,7 +71,7 @@ for (const file of files) {
     if (mult == null) { console.log(`::warning::${s}: no fee_multiplier from Kalshi — skipped rather than assumed`); continue; }
 
     const mk = await readAll("m15_markets", "ticker,close_time,result",
-      `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker");
+      `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
     if (!mk.length) { console.log(`\n${s}: nothing settled in ${DAYS}d`); continue; }
     const resultOf = new Map(mk.map(m => [m.ticker, m.result]));
     const dayOf = new Map(mk.map(m => [m.ticker, String(m.close_time).slice(0, 10)]));
@@ -80,7 +82,7 @@ for (const file of files) {
     for (let i = 0; i < tickers.length; i += 200) {
       const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
       q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-        `ticker=in.(${encodeURIComponent(ids)})&secs_to_close=lte.${maxSecs}&secs_to_close=gte.0&`));
+        `ticker=in.(${encodeURIComponent(ids)})&secs_to_close=lte.${maxSecs}&secs_to_close=gte.0&`, "ticker", "id"));
     }
     // One observation per market, nearest the entry moment — the same
     // rule the calibration uses, and for the same reason: counting rows

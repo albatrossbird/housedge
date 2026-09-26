@@ -23,6 +23,7 @@
 import { dailyExtremes, resolves, marginF, roundings, STATION_TZ, MIN_HOURS_FOR_DAY } from "../lib/wxBasis.js";
 import { nwsGet } from "../lib/weather.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { pageAll } from "../lib/restPage.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -38,17 +39,16 @@ async function rest(p) {
   if (!r.ok) throw new Error(`GET ${p.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.json();
 }
-async function readAll(table, select, extra, keyCol = "ticker") {
-  const out = []; let last = null;
-  for (let i = 0; i < 2000; i++) {
-    const after = last == null ? "" : `&${keyCol}=gt.${encodeURIComponent(last)}`;
-    const rows = await rest(`${table}?select=${select}&${extra}${after}&order=${keyCol}.asc&limit=1000`);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][keyCol];
-  }
-  throw new Error("readAll hit its page cap — TRUNCATED");
-}
+// ONE PAGER, SHARED — see lib/restPage.js. Six sibling scripts had
+// their own copy of this and every one of them paged on a column the
+// filter could not use, so Postgres sorted the whole matching set and
+// they began failing with 57014 as the tables grew.
+//
+// wx_markets keeps `ticker`, its primary key: unique, so no dedupe is
+// needed, and this table is a few thousand rows rather than the million
+// that broke the m15 readers.
+const readAll = (table, select, extra, key = "ticker", dedupeOn = null) =>
+  pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 
 const mk = await readAll("wx_markets",
   "ticker,station,cli,target_date,result,strike_type,floor_strike,cap_strike,close_time",

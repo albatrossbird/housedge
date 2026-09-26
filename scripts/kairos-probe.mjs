@@ -23,6 +23,7 @@
 import { candleBatch, centsToPrice, candleCovering, CANDLE_BATCH } from "../lib/kairos.js";
 import { pickOnePerTicker } from "../lib/calibrate.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { pageAll } from "../lib/restPage.js";
 
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
@@ -37,22 +38,23 @@ async function rest(p) {
   if (!r.ok) throw new Error(`GET ${p.slice(0, 60)} -> ${r.status}`);
   return r.json();
 }
-async function readAll(table, select, extra, keyCol = "id") {
-  const out = []; let last = null;
-  for (let i = 0; i < 2000; i++) {
-    const after = last == null ? "" : `&${keyCol}=gt.${encodeURIComponent(last)}`;
-    const rows = await rest(`${table}?select=${select}&${extra}${after}&order=${keyCol}.asc&limit=1000`);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][keyCol];
-  }
-  throw new Error("readAll hit its page cap — TRUNCATED");
-}
+// ONE PAGER, SHARED. Seven scripts had their own copy of this and every
+// one paged on `id` while filtering on `ticker` — so Postgres sorted the
+// whole matching set instead of walking (ticker, observed_at), and each
+// began failing with `57014 canceling statement due to statement
+// timeout` as m15_quotes grew past a million rows. The analysis tooling
+// stopped working because the data got big, which is the opposite of
+// what more data is supposed to do.
+//
+// `key` must be a column the FILTER can use, and `dedupeOn` a unique one
+// — see lib/restPage.js.
+const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
+  pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 
 console.log(`${series}: comparing Kairos 1m candles against our recorded book at T-${TARGET}s\n`);
 
 const mk = await readAll("m15_markets", "ticker,close_time,result",
-  `series=eq.${encodeURIComponent(series)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker");
+  `series=eq.${encodeURIComponent(series)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
 if (!mk.length) { console.log("nothing settled in that window"); process.exit(0); }
 const closeOf = new Map(mk.map(m => [m.ticker, Math.floor(Date.parse(m.close_time) / 1000)]));
 
@@ -61,7 +63,7 @@ const q = [];
 for (let i = 0; i < tickers.length; i += 200) {
   const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
   q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-    `ticker=in.(${encodeURIComponent(ids)})&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`));
+    `ticker=in.(${encodeURIComponent(ids)})&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`, "ticker", "id"));
 }
 const ours = pickOnePerTicker(q, TARGET, { known: new Set(closeOf.keys()) });
 console.log(`settled markets      ${mk.length}`);

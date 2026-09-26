@@ -20,6 +20,7 @@
 import { indexCandles, refPrice, predict, marginBps, agreementByMargin } from "../lib/cryptoBasis.js";
 import { YAHOO_SYMBOLS, yahooChart, indexYahooChart } from "../lib/yahooCandles.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { pageAll } from "../lib/restPage.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_ANON_KEY;
@@ -55,18 +56,18 @@ async function rest(path) {
 
 // Keyset, and a page cap reached is a TRUNCATION rather than a smaller
 // answer, so it throws.
-async function readAll(table, select, extra, keyCol = "id") {
-  const out = [];
-  let last = null;
-  for (let p = 0; p < 4000; p++) {
-    const after = last == null ? "" : `&${keyCol}=gt.${encodeURIComponent(last)}`;
-    const rows = await rest(`${table}?select=${select}&${extra}${after}&order=${keyCol}.asc&limit=1000`);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][keyCol];
-  }
-  throw new Error(`readAll hit its page cap at ${out.length} rows — TRUNCATED`);
-}
+// ONE PAGER, SHARED. Seven scripts had their own copy of this and every
+// one paged on `id` while filtering on `ticker` — so Postgres sorted the
+// whole matching set instead of walking (ticker, observed_at), and each
+// began failing with `57014 canceling statement due to statement
+// timeout` as m15_quotes grew past a million rows. The analysis tooling
+// stopped working because the data got big, which is the opposite of
+// what more data is supposed to do.
+//
+// `key` must be a column the FILTER can use, and `dedupeOn` a unique one
+// — see lib/restPage.js.
+const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
+  pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 
 // Coinbase caps a candle request at 300 buckets and rate-limits public
 // requests, so this walks the period in 300-minute slices with a pause.
@@ -100,7 +101,7 @@ for (const s of series) {
   if (src.kind === "yahoo") console.log(`proxy: ${src.note}; Kalshi settles on ${src.pyth}`);
 
   const mk = await readAll("m15_markets", "ticker,close_time,result,strike",
-    `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker");
+    `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
   console.log(`settled markets, last ${DAYS}d   ${mk.length}`);
   if (!mk.length) { console.log("  nothing settled to compare against"); continue; }
 
