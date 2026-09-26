@@ -131,25 +131,35 @@ async function pollSeries(ticker) {
   const quotes = [], markets = [];
   for (const m of open) {
     const q = toM15Quote(m, now, SOURCE);
-    if (q && quoteChanged(lastQuote.get(m.ticker), q)) {
-      // DEPTH ONLY FOR ROWS BEING WRITTEN. Write-on-change already decided
-      // this observation is new; a book read for a row that is then
-      // discarded is a request spent at an API that rate-limits
-      // datacenter IPs. Depth changing does NOT make a row new on its own
-      // — books move every tick, and letting them trigger writes would
-      // roughly triple the table's append rate. Depth rides along on the
-      // rows price, volume and the heartbeat already produce.
-      //
-      // A failed book read costs the depth, NEVER the quote: bookDepth
-      // returns every field null, which the columns document as "not
-      // fetched", and the price path — the part that cannot be
-      // backfilled — is written regardless.
-      const ob = await kalshiGet(`/markets/${encodeURIComponent(m.ticker)}/orderbook`);
-      stats.books++;
-      if (!ob.ok) stats.bookErrors++;
-      Object.assign(q, bookDepth(ob.ok ? ob.body : null));
-      quotes.push(q); lastQuote.set(m.ticker, q);
-    }
+    if (!q) continue;
+    // THE BOOK IS READ EVERY TICK, BECAUSE THE LIST IS CACHED.
+    //
+    // The /markets list this loop polls is served by CloudFront with
+    // `cache-control: public, max-age=15` — measured 2026-09-26, `x-cache:
+    // Hit from cloudfront, age=2`. Fired at the same instant, the list
+    // agreed with the live book on 1 read in 48, and on KXETH15M it quoted
+    // 0.68/0.69 while the book stood at 0.53/0.54. Every yes_bid/yes_ask
+    // this recorder has ever stored came through that cache.
+    //
+    // `/orderbook` is not cached (`x-cache: Miss`) and it IS the market —
+    // the resting orders themselves, not a summary of them. So its touch,
+    // book_bid/book_ask, is the executable price, and a change in it makes
+    // a row new just as a change in the list's price does. Reading the
+    // book only for rows the stale list had already decided to write
+    // would sample the truth at moments chosen by the cache.
+    //
+    // yes_bid/yes_ask keep their source so the recorded history stays
+    // like-for-like; a column that silently changed meaning mid-series
+    // would corrupt every backtest that spans the change.
+    //
+    // A failed book read costs the depth, NEVER the quote: bookDepth
+    // returns every field null, which the columns document as "not
+    // fetched", and the price path is written regardless.
+    const ob = await kalshiGet(`/markets/${encodeURIComponent(m.ticker)}/orderbook`);
+    stats.books++;
+    if (!ob.ok) stats.bookErrors++;
+    Object.assign(q, bookDepth(ob.ok ? ob.body : null));
+    if (quoteChanged(lastQuote.get(m.ticker), q)) { quotes.push(q); lastQuote.set(m.ticker, q); }
     // The market record is upserted alongside, so a window we watched
     // live is already present before the backfill ever sees it settle.
     // Gated on change like the quote is: this is an UPDATE of a hot row

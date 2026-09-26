@@ -698,10 +698,32 @@ good.
   at all, so fill on the historical path is unknown and every backtest
   over it is an upper bound.**
 
+  **AND THE RECORDED PRICES WERE UP TO 15 SECONDS STALE.** The `/markets`
+  list the recorder polls is served by CloudFront with `cache-control:
+  public, max-age=15` (`x-cache: Hit from cloudfront, age=2`, measured
+  2026-09-26). Fired at the same instant, the list agreed with the live
+  book on **1 read in 48** and on a second sample **4 in 52**; on
+  KXETH15M it quoted **0.68/0.69 while the book stood at 0.53/0.54**.
+  `/orderbook` and `/markets/<ticker>` are not cached. So **every
+  `yes_bid`/`yes_ask` recorded before 2026-09-26 came through that cache**,
+  and a backtest entering in the final minute or two is reading a price
+  the market may already have left — on a trending market, a stale price
+  reads as a better entry than was available, which can MANUFACTURE edge.
+
+  From that date **`book_bid`/`book_ask` are the executable touch; prefer
+  them wherever present.** `yes_bid`/`yes_ask` keep their cached source so
+  the history stays like-for-like — a column that changed meaning
+  mid-series would corrupt every backtest spanning the change.
+
   Rules the recorder keeps, pinned by `scripts/m15-record-depth.test.mjs`,
   which drives the whole script against fake Kalshi and PostgREST:
-  - **Depth rides on rows already being written.** Books move every tick;
-    letting them trigger writes would roughly triple the append rate.
+  - **The book is read every tick, and its touch triggers a write; its
+    depth does not.** Reading it only for rows the cached list had already
+    chosen to write would sample the truth at moments the cache picked.
+    Depth churns every tick and rides along. Measured live: ~14 book reads
+    per 15s tick, zero errors; rows written on ~93% of ticks per live
+    market against ~67% before — roughly 1.4x the append rate, and each
+    row ~64 bytes wider.
   - **A failed book read costs the depth, never the quote.** Every depth
     field goes null — "not fetched" — and the price path is written.
   - **Null and zero differ.** Null is "not fetched"; zero is "fetched,

@@ -12,13 +12,17 @@
 -- WHAT EACH COLUMN MEANS, precisely, because a depth figure read with
 -- the wrong definition is worse than none:
 --
---   book_bid / book_ask   the best YES bid and best YES ask AS THE BOOK
---                         SAW THEM. Fetched in a second request after
---                         /markets, so they can differ from yes_bid /
---                         yes_ask by a tick or two on a fast market. Kept
---                         so a reader can require the two to agree before
---                         trusting that a depth figure describes the
---                         quoted price.
+--   book_bid / book_ask   the best YES bid and best YES ask from the LIVE
+--                         order book. PREFER THESE to yes_bid / yes_ask
+--                         wherever they are present. The /markets list
+--                         the recorder polls is served through a CloudFront
+--                         cache (`max-age=15`), so yes_bid / yes_ask can be
+--                         up to fifteen seconds old: fired at the same
+--                         instant, the list agreed with the book on 1 read
+--                         in 48, and quoted KXETH15M at 0.68/0.69 while the
+--                         book stood at 0.53/0.54. yes_bid / yes_ask keep
+--                         that source so the recorded history stays
+--                         like-for-like across this migration.
 --   bid_depth_Nc          contracts resting on the YES bid within N cents
 --                         of book_bid, INCLUSIVE of the touch level.
 --   ask_depth_Nc          the same on the YES offer side, measured from
@@ -56,7 +60,7 @@ alter table m15_quotes
   add column if not exists ask_depth_5c  double precision;
 
 comment on column m15_quotes.book_bid is
-  'Best YES bid per /orderbook, fetched just after /markets; may differ from yes_bid by a tick. Null = book not fetched.';
+  'Best YES bid from the LIVE order book. Prefer over yes_bid, which comes through a 15s CDN cache. Null = book not fetched.';
 comment on column m15_quotes.bid_depth_1c is
   'Contracts on the YES bid within 1c of book_bid, touch inclusive. Null = book not fetched; 0 = fetched and empty.';
 comment on column m15_quotes.ask_depth_1c is

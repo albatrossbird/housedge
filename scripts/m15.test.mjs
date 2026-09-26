@@ -124,5 +124,21 @@ const SETTLED = { ...LIVE, ticker: "KXBTC15M-26SEP060015-15", result: "no", last
      "an empty source is absent, not an empty string");
 }
 
+// THE BOOK'S TOUCH MAKES A ROW NEW; DEPTH DOES NOT.
+// The list price comes through a 15-second CDN cache, so a live book can
+// move while yes_bid/yes_ask sit still. Depth churns every tick and must
+// not multiply the append rate on its own.
+{
+  const t0 = "2026-09-26T14:00:00.000Z", t1 = "2026-09-26T14:00:15.000Z";
+  const base = { yes_bid: 0.52, yes_ask: 0.53, volume: 100, book_bid: 0.52, book_ask: 0.53, bid_depth_1c: 500, observed_at: t0 };
+  eq(quoteChanged(base, { ...base, observed_at: t1 }), false, "nothing moved -> no row");
+  eq(quoteChanged(base, { ...base, book_bid: 0.54, book_ask: 0.55, observed_at: t1 }), true,
+     "the book moved while the cached list did not -> a row");
+  eq(quoteChanged(base, { ...base, bid_depth_1c: 9000, observed_at: t1 }), false,
+     "depth alone changing -> no row");
+  eq(quoteChanged(base, { ...base, book_bid: null, book_ask: null, observed_at: t1 }), true,
+     "a book that became unknown is a change in what we know");
+}
+
 console.log(bad ? `${bad} failing` : "m15: all cases pass");
 process.exit(bad ? 1 : 0);
