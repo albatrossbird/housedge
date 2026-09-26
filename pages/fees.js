@@ -216,9 +216,10 @@ export default function Fees() {
         <p style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, marginTop: 28, maxWidth: 620 }}>
           Settlement is free on both venues, so a hold-to-expiry trade pays the taker fee once,
           on entry. <strong>Fees are not the only cost.</strong> This says nothing about the
-          spread you cross, or about whether your size is actually available at the touch —
-          Kalshi publishes no depth at all on its 15-minute markets, so there a fill is an
-          assumption rather than an observation. Not financial advice.
+          spread you cross, or about whether your size is actually available at the touch. A
+          quoted price only holds for the contracts resting at it, and both venues publish the
+          full order book — check the size at the price before assuming you can fill there.
+          Not financial advice.
         </p>
       </div>
     </div>

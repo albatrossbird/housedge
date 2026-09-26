@@ -668,11 +668,23 @@ good.
   series would otherwise burn requests every tick at an API that
   rate-limits datacenter IPs — but rest for long and a fifteen-minute
   window is missed entirely.
-- **Kalshi publishes NO depth on this family**: `yes_bid_size` and
-  `yes_ask_size` are null. Stored as null, never 0 — `Number(null)` is
-  `0` and a fabricated zero reads as "nothing offered", which is a claim
-  about the book rather than about our data. That coercion was in the
-  first version and `scripts/m15.test.mjs` caught it.
+- **The `/markets` feed carries no size on this family** — `yes_bid_size`
+  and `yes_ask_size` are null there. Stored as null, never 0:
+  `Number(null)` is `0` and a fabricated zero reads as "nothing offered",
+  which is a claim about the book rather than about our data. That
+  coercion was in the first version and `scripts/m15.test.mjs` caught it.
+
+  **The book is NOT empty, and this file said for weeks that it was.**
+  It read "Kalshi publishes NO depth on this family", and that claim
+  spread into four scripts' printed caveats and into LIVE COPY on
+  `/fees`. Probed 2026-09-26 on `KXBTC15M-26SEP261330-30`:
+  `/markets/<ticker>/orderbook` returned **148 NO levels and 125 YES
+  levels**, thousands of contracts per level. The null was a fact about
+  the endpoint the recorder polls, never about the market — the fourth
+  time this file has recorded "a venue does not publish X" when the fetch
+  had simply not asked. What IS true is that we never recorded depth, so
+  **historical fill is unknown and every backtest net figure is an upper
+  bound**. That is a limit of our data, and it is fixable going forward.
 - `result` arrives as **`""`** on a live market, not null. Stored as
   null, or every open window would look settled with a blank outcome.
 

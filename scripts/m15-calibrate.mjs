@@ -179,7 +179,8 @@ for (const s of series) {
               `SE ${fmt(r.se)}pt = ${(r.edgeOverPrice / (r.se || 1)).toFixed(1)} sigma ` +
               `IF trades were independent`);
   console.log(`  ...they are not: ${r.n} entries across ${days.size} days of one underlying.`);
-  console.log(`\n  NOT MODELLED: fill. Kalshi publishes no size on this family`);
-  console.log(`  (bid_size/ask_size are null), so every entry above assumes the`);
-  console.log(`  whole order filled at the touch. Treat it as an UPPER BOUND.`);
+  console.log(`\n  NOT MODELLED: fill. The recorder stores the touch price but not the`);
+  console.log(`  size resting at it — Kalshi publishes the full book at /orderbook, we`);
+  console.log(`  have not been recording it — so every entry above assumes the whole`);
+  console.log(`  order filled at the touch. Treat it as an UPPER BOUND.`);
 }

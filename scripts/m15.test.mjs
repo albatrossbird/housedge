@@ -55,10 +55,11 @@ const SETTLED = { ...LIVE, ticker: "KXBTC15M-26SEP060015-15", result: "no", last
   eq(q.secs_to_close, 199, "seconds remaining, stored not derived");
   eq(q.yes_bid, 0.061, "bid");
   eq(q.yes_ask, 0.062, "ask");
-  // Kalshi publishes NO depth on this family. Null means unknown; a
-  // zero here would read as "nothing offered", which is a claim about
-  // the book rather than about our data.
-  eq(q.bid_size, null, "no depth published, so null rather than zero");
+  // The /markets feed carries no size on this family (the /orderbook
+  // endpoint does). Null means unknown; a zero here would read as
+  // "nothing offered", which is a claim about the book rather than about
+  // our data.
+  eq(q.bid_size, null, "no size in this feed, so null rather than zero");
   eq(toM15Quote({ ...LIVE, close_time: null }, at), null, "no close time, no usable observation");
 }
 {
