@@ -817,6 +817,19 @@ credentials.
 writes nothing is this project's most common fault, and starting both at
 once means a silent one is hidden by the other's rows.
 
+**m15 is DONE, measured 2026-09-26.** Over a 48-hour window the box
+alone covered **4,164 of 4,164 windows — 100.0%, matching the union**,
+so `record-15m.yml`'s schedule is off. `workflow_dispatch` is kept: the
+box is one machine, and a price path that cannot be backfilled needs a
+way to run somewhere else while that machine is down. **Re-run
+'M15 coverage' before ever putting the schedule back** — a schedule
+restored because it feels safer, against a box that is fine, is the
+state the measurement exists to replace.
+
+Weather is the same move, one step behind: its rows started carrying a
+`source` on the same day, so the comparison is a day or two of overlap
+away. It is the larger consumer of the two.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that
