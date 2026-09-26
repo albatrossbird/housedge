@@ -101,7 +101,7 @@ for (const s of series) {
   if (src.kind === "yahoo") console.log(`proxy: ${src.note}; Kalshi settles on ${src.pyth}`);
 
   const mk = await readAll("m15_markets", "ticker,close_time,result,strike",
-    `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
+    `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "close_time", "ticker");
   console.log(`settled markets, last ${DAYS}d   ${mk.length}`);
   if (!mk.length) { console.log("  nothing settled to compare against"); continue; }
 

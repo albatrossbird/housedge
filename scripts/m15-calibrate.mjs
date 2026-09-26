@@ -112,7 +112,7 @@ for (const s of series) {
   // than the whole backfill.
   const mk = await readAll("m15_markets", "ticker,close_time,result",
     `series=eq.${encodeURIComponent(s)}&result=not.is.null` +
-    `&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
+    `&close_time=gte.${SINCE}&`, "close_time", "ticker");
   const resultOf = new Map(mk.map(m => [m.ticker, m.result]));
   console.log(`settled markets, last ${DAYS}d    ${mk.length}`);
   if (!mk.length) { console.log("  nothing settled in that window to calibrate against"); continue; }

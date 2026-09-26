@@ -71,7 +71,7 @@ for (const file of files) {
     if (mult == null) { console.log(`::warning::${s}: no fee_multiplier from Kalshi — skipped rather than assumed`); continue; }
 
     const mk = await readAll("m15_markets", "ticker,close_time,result",
-      `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
+      `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "close_time", "ticker");
     if (!mk.length) { console.log(`\n${s}: nothing settled in ${DAYS}d`); continue; }
     const resultOf = new Map(mk.map(m => [m.ticker, m.result]));
     const dayOf = new Map(mk.map(m => [m.ticker, String(m.close_time).slice(0, 10)]));

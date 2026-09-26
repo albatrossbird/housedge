@@ -54,7 +54,7 @@ const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
 console.log(`${series}: comparing Kairos 1m candles against our recorded book at T-${TARGET}s\n`);
 
 const mk = await readAll("m15_markets", "ticker,close_time,result",
-  `series=eq.${encodeURIComponent(series)}&result=not.is.null&close_time=gte.${SINCE}&`, "ticker", "close_time", "ticker");
+  `series=eq.${encodeURIComponent(series)}&result=not.is.null&close_time=gte.${SINCE}&`, "close_time", "ticker");
 if (!mk.length) { console.log("nothing settled in that window"); process.exit(0); }
 const closeOf = new Map(mk.map(m => [m.ticker, Math.floor(Date.parse(m.close_time) / 1000)]));
 

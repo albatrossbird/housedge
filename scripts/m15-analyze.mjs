@@ -59,7 +59,7 @@ for (const s of series) {
 
   const mk = await readAll("m15_markets",
     "ticker,close_time,result,last_price,volume,open_interest,strike",
-    `series=eq.${encodeURIComponent(s)}`, "ticker", "close_time", "ticker");
+    `series=eq.${encodeURIComponent(s)}`, "close_time", "ticker");
 
   if (!mk.length) { console.log("  no markets stored"); continue; }
 
