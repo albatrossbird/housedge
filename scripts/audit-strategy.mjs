@@ -111,8 +111,8 @@ for (const file of files) {
     console.log(`  ${r.verdict.why}`);
   }
 
-  console.log(`\n  NOT MODELLED: fill. The recorder stores the touch price but not the`);
-  console.log(`  size resting at it — Kalshi publishes the full book at /orderbook, we`);
-  console.log(`  have not been recording it — so every figure assumes the whole order`);
-  console.log(`  filled at the touch. Treat it as an UPPER BOUND.`);
+  console.log(`\n  NOT MODELLED: fill. Rows recorded before 2026-09-26 carry no size —`);
+  console.log(`  the recorder read the wrong field — so every figure assumes the whole`);
+  console.log(`  order filled at the touch. Treat it as an UPPER BOUND. Rows from that`);
+  console.log(`  date carry touch size and depth (migration 0027).`);
 }

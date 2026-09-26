@@ -247,10 +247,10 @@ for (const s of SERIES) {
 
 console.log("=".repeat(74));
 console.log("WHAT THIS CAN AND CANNOT SAY");
-console.log("  Fill is not modelled: the recorder stores the touch price but not the");
-console.log("  size resting at it. Kalshi publishes the full book at /orderbook; we");
-console.log("  have not been recording it. So every figure assumes the whole order");
-console.log("  filled at the touch, and every net figure above is an UPPER BOUND.");
+console.log("  Fill is not modelled: rows recorded before 2026-09-26 carry no size");
+console.log("  (the recorder read the wrong field), so every figure assumes the whole");
+console.log("  order filled at the touch, and every net figure above is an UPPER");
+console.log("  BOUND. Rows from that date carry touch size and depth (0027).");
 console.log("  The null assumes the market is calibrated, which is the hypothesis");
 console.log("  a strategy must beat. It does NOT model adverse selection: in a");
 console.log("  real book the fills you get are the ones someone wanted to give.");

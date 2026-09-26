@@ -19,7 +19,11 @@ const LIVE = {
   floor_strike: 79984.94, cap_strike: null,
   open_time: "2026-09-06T04:15:00Z", close_time: "2026-09-06T04:30:00Z",
   yes_bid_dollars: "0.0610", yes_ask_dollars: "0.0620",
-  yes_bid_size: null, yes_ask_size: null,
+  // SHAPED LIKE THE API, NOT LIKE THE CODE. This fixture used to carry
+  // `yes_bid_size: null` — a key Kalshi does not send — so it agreed
+  // with the recorder's wrong read and pinned the bug for weeks. These
+  // are the field names a live KXBTC15M market returns (2026-09-26).
+  yes_bid_size_fp: "394402.33", yes_ask_size_fp: "1207.00",
   volume_fp: "1262229.05", open_interest_fp: "457616.67",
   last_price_dollars: "0.0640", result: "",
 };
@@ -55,11 +59,21 @@ const SETTLED = { ...LIVE, ticker: "KXBTC15M-26SEP060015-15", result: "no", last
   eq(q.secs_to_close, 199, "seconds remaining, stored not derived");
   eq(q.yes_bid, 0.061, "bid");
   eq(q.yes_ask, 0.062, "ask");
-  // The /markets feed carries no size on this family (the /orderbook
-  // endpoint does). Null means unknown; a zero here would read as
-  // "nothing offered", which is a claim about the book rather than about
-  // our data.
-  eq(q.bid_size, null, "no size in this feed, so null rather than zero");
+  eq(q.bid_size, 394402.33, "touch size read from yes_bid_size_fp, the key Kalshi actually sends");
+  eq(q.ask_size, 1207, "and the ask side from yes_ask_size_fp");
+
+  // An ABSENT size is null — unknown — never a coerced zero, which would
+  // read as "nothing offered" and is a claim about the book.
+  const { yes_bid_size_fp, yes_ask_size_fp, ...noSize } = LIVE;
+  eq(toM15Quote(noSize, at).bid_size, null, "no size field at all -> null, not 0");
+
+  // A zero the VENUE sends is a fact and is kept: an ask of 1.00 with
+  // size 0.00 is Kalshi saying nothing is offered.
+  eq(toM15Quote({ ...LIVE, yes_ask_size_fp: "0.00" }, at).ask_size, 0, "a venue-sent 0.00 stays 0");
+
+  // The old unsuffixed key is a fallback only, never preferred over _fp.
+  eq(toM15Quote({ ...noSize, yes_bid_size: "5" }, at).bid_size, 5, "unsuffixed key still read as a fallback");
+  eq(toM15Quote({ ...LIVE, yes_bid_size: "5" }, at).bid_size, 394402.33, "but _fp wins when both are present");
   eq(toM15Quote({ ...LIVE, close_time: null }, at), null, "no close time, no usable observation");
 }
 {

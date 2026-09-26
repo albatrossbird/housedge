@@ -54,6 +54,47 @@ const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
 const pct = (n, d) => (d ? `${(100 * n / d).toFixed(1)}%` : "—");
 const med = a => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
 
+// IS SIZE LANDING? Asked of the newest rows across every series, before
+// the per-series detail, because it is the one question this analyzer
+// can answer that nothing else does: the watchdog proves rows are
+// arriving, not that they carry what migration 0027 added.
+//
+// Newest by primary key, so it is an index walk on `id` with no filter —
+// the cheap read, and the one that sees a fresh deploy first.
+//
+// Three answers, and they are kept apart rather than folded into one
+// "depth ok": the columns may not exist yet (migration unrun), may exist
+// with nothing in them (recorder not yet on the new code — the box
+// cycles hourly), or may be filling.
+{
+  console.log(`${"=".repeat(64)}\nSIZE AND DEPTH ON THE NEWEST 500 ROWS\n${"=".repeat(64)}`);
+  const r = await fetch(`${URL}/rest/v1/m15_quotes?select=id,observed_at,source,bid_size,book_bid,bid_depth_1c,ask_depth_1c&order=id.desc&limit=500`,
+    { headers: { ...authHeaders(KEY) } });
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 160);
+    if (/book_bid|bid_depth_1c|ask_depth_1c/.test(body))
+      console.log("  depth columns ABSENT — run supabase/migrations/0027_m15_quotes_depth.sql");
+    else console.log(`  read failed: ${r.status} ${body}`);
+  } else {
+    const rows = await r.json();
+    const n = rows.length;
+    const sized = rows.filter(x => x.bid_size != null).length;
+    const deep = rows.filter(x => x.bid_depth_1c != null).length;
+    const first = rows.filter(x => x.bid_depth_1c != null).map(x => x.observed_at).sort()[0];
+    console.log(`  rows read          ${n}  (newest ${rows[0]?.observed_at || "?"})`);
+    console.log(`  with touch size    ${sized} of ${n}`);
+    console.log(`  with depth         ${deep} of ${n}${first ? `  (earliest in window ${first})` : ""}`);
+    if (!deep) console.log("  NO DEPTH YET. If 0027 is applied, the recorder is still on old code — the box pulls hourly.");
+    else if (deep < n) console.log("  PARTIAL. Expected right after a deploy (older rows predate it). If it persists, book reads are failing — see bookErrors in the box journal.");
+    const withBoth = rows.filter(x => x.bid_depth_1c != null && x.ask_depth_1c != null);
+    if (withBoth.length) {
+      const imb = withBoth.map(x => x.bid_depth_1c / Math.max(1, x.ask_depth_1c)).sort((a, b) => a - b);
+      console.log(`  bid/ask depth at 1c   median ${imb[Math.floor(imb.length / 2)].toFixed(2)}x`);
+    }
+  }
+  console.log("");
+}
+
 for (const s of series) {
   console.log(`\n${"=".repeat(64)}\n${s}\n${"=".repeat(64)}`);
 

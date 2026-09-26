@@ -113,7 +113,7 @@ console.log("\nthe headline case: a 93% win rate that is not an edge");
   check("win rate is 93%", near(r.winRate, 0.93, 1e-6));
   // THE WHOLE POINT. 93% sounds superb; breakeven at a 92c entry is
   // 92.5%, so the entire "edge" is half a cent a contract — smaller
-  // than one tick of slippage on a book whose depth we did not record.
+  // than one tick of slippage, on a path recorded without its sizes.
   check("breakeven is 92.5%, barely under the win rate", near(r.breakeven, 0.9251, 1e-3));
   check("net EV is positive but under 1c", r.netPer > 0 && r.netPer < 0.01);
   // And it is still not a finding: the edge is inside its own

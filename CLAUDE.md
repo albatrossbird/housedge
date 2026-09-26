@@ -668,23 +668,58 @@ good.
   series would otherwise burn requests every tick at an API that
   rate-limits datacenter IPs — but rest for long and a fifteen-minute
   window is missed entirely.
-- **The `/markets` feed carries no size on this family** — `yes_bid_size`
-  and `yes_ask_size` are null there. Stored as null, never 0:
-  `Number(null)` is `0` and a fabricated zero reads as "nothing offered",
-  which is a claim about the book rather than about our data. That
-  coercion was in the first version and `scripts/m15.test.mjs` caught it.
+- **Kalshi publishes size on this family, twice over, and this file said
+  for weeks that it published none.** It read "Kalshi publishes NO depth
+  on this family"; the claim spread into four scripts' printed caveats
+  and into LIVE COPY on `/fees`. Both halves were wrong:
 
-  **The book is NOT empty, and this file said for weeks that it was.**
-  It read "Kalshi publishes NO depth on this family", and that claim
-  spread into four scripts' printed caveats and into LIVE COPY on
-  `/fees`. Probed 2026-09-26 on `KXBTC15M-26SEP261330-30`:
-  `/markets/<ticker>/orderbook` returned **148 NO levels and 125 YES
-  levels**, thousands of contracts per level. The null was a fact about
-  the endpoint the recorder polls, never about the market — the fourth
-  time this file has recorded "a venue does not publish X" when the fetch
-  had simply not asked. What IS true is that we never recorded depth, so
-  **historical fill is unknown and every backtest net figure is an upper
-  bound**. That is a limit of our data, and it is fixable going forward.
+  - **The touch size is on `/markets`**, as `yes_bid_size_fp` /
+    `yes_ask_size_fp` (`"394402.33"` on a live KXBTC15M market,
+    2026-09-26). `toM15Quote` read `yes_bid_size` — a key Kalshi does not
+    send — so every row stored null, and the null was written up as a
+    fact about the venue. The weather recorder read the `_fp` key
+    correctly the whole time.
+  - **The full ladder is on `/markets/<ticker>/orderbook`**: 148 NO
+    levels and 125 YES levels on the same probe, thousands of contracts
+    per level.
+
+  **The test pinned the bug.** Its fixture was hand-written with
+  `yes_bid_size: null`, shaped to match the code rather than captured
+  from the API, so it agreed with the wrong read and passed for weeks.
+  Fixtures are now copied from live responses. That is the fifth time
+  this file recorded "a venue does not publish X" when the fetch had
+  simply not asked — and a first draft of this correction repeated the
+  error, stating "the `/markets` feed carries no size" without looking.
+
+  **From 2026-09-26 the recorder stores both** (migration `0027`): the
+  touch size in `bid_size`/`ask_size`, and `book_bid`/`book_ask` plus
+  cumulative depth within 1/3/5 cents of the touch, `bid_depth_Nc` and
+  `ask_depth_Nc`, touch inclusive. **Rows before that date carry no size
+  at all, so fill on the historical path is unknown and every backtest
+  over it is an upper bound.**
+
+  Rules the recorder keeps, pinned by `scripts/m15-record-depth.test.mjs`,
+  which drives the whole script against fake Kalshi and PostgREST:
+  - **Depth rides on rows already being written.** Books move every tick;
+    letting them trigger writes would roughly triple the append rate.
+  - **A failed book read costs the depth, never the quote.** Every depth
+    field goes null — "not fetched" — and the price path is written.
+  - **Null and zero differ.** Null is "not fetched"; zero is "fetched,
+    nothing resting". A venue-sent `0.00` stays 0.
+  - **Kalshi's book is two BID stacks.** A NO bid at p is a YES offer at
+    1-p, so `ask_depth` is measured on the NO stack, mirrored.
+  - **`book_bid`/`book_ask` come from a second request** and can differ
+    from `yes_bid`/`yes_ask` by a tick; require them to agree before
+    trusting a depth figure describes the quoted price.
+  - **A database missing 0023 or 0027 costs those columns, never the
+    row**, matched by column name on a word boundary — Postgres's own
+    `42703` names a column as `"book_bid"`, which arrives JSON-escaped and
+    matches no quote-shaped test. A first draft matched quotes and would
+    have rejected every quote in the run.
+
+  A null size is still stored as null, never 0: `Number(null)` is `0` and
+  a fabricated zero reads as "nothing offered", which is a claim about the
+  book rather than about our data.
 - `result` arrives as **`""`** on a live market, not null. Stored as
   null, or every open window would look settled with a blank outcome.
 
