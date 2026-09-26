@@ -21,8 +21,8 @@ import { pageAll } from "../lib/restPage.js";
 //        node scripts/m15-analyze.mjs KXGOLD15M KXSILVER15M
 
 const URL = process.env.SUPABASE_URL;
-const KEY = process.env.SUPABASE_ANON_KEY;
-if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the recorded archives are private (migration 0028)"); process.exit(2); }
 
 const series = process.argv.slice(2).filter(a => !a.startsWith("-"));
 if (!series.length) series.push("KXGOLD15M", "KXSILVER15M");

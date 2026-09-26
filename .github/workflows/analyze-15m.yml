@@ -35,5 +35,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # The recorded archives are private (migration 0028); the
+          # anon key alone now gets `permission denied` on them.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SERIES: ${{ github.event.inputs.series }}
         run: node scripts/m15-analyze.mjs $SERIES

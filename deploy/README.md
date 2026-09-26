@@ -95,11 +95,22 @@ SUPABASE_SERVICE_ROLE_KEY=<the service_role key>
 SUPABASE_ANON_KEY=<the anon key>
 ```
 
-The anon key is there so `scripts/watchdog.mjs` can be run **on the
-box**, answering "is anything actually landing" without leaving it. A
-recorder that runs and writes nothing is this project's most common
-failure, and `systemctl status` reports it as active. The anon key is
-public by design — it ships to every browser — so it adds no exposure.
+`scripts/watchdog.mjs` can be run **on the box**, answering "is anything
+actually landing" without leaving it — a recorder that runs and writes
+nothing is this project's most common failure, and `systemctl status`
+reports it as active. It reads with the **service** key: the recorded
+archives are private (migration 0028), and the anon key alone gets
+`permission denied` on them. Run it through systemd so the env file is
+read the way the services read it:
+
+```bash
+sudo systemd-run --quiet --wait --pipe --uid=marketslap \
+  -p EnvironmentFile=/etc/marketslap/env \
+  /usr/bin/node /opt/marketslap/scripts/watchdog.mjs
+```
+
+Grepping the file from your login shell does not work: it is root-owned
+and mode 600.
 
 Then probe the address, then start **one** job:
 

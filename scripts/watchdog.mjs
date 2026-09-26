@@ -23,8 +23,8 @@
 import { parseWhen } from "../lib/parseWhen.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
 
-const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
-if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
+const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the recorded archives are private (migration 0028)"); process.exit(2); }
 
 // Staleness budgets, in minutes. Each is set from what the job
 // actually promises, not from a round number — an alarm that fires on

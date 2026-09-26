@@ -50,6 +50,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # The recorded archives are private (migration 0028); the
+          # anon key alone now gets `permission denied` on them.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SERIES: ${{ github.event.inputs.series || 'KXBTC15M' }}
           SECS: ${{ github.event.inputs.secs || '90' }}
           TOL: ${{ github.event.inputs.tol || '45' }}

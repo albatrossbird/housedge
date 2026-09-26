@@ -23,8 +23,8 @@
 import { pageAll as page } from "../lib/restPage.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
 
-const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
-if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
+const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the recorded archives are private (migration 0028)"); process.exit(2); }
 
 const HOURS = Number(process.argv.find(a => a.startsWith("--hours="))?.split("=")[1] || 48);
 const since = new Date(Date.now() - HOURS * 3600 * 1000).toISOString();

@@ -35,6 +35,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # The recorded archives are private (migration 0028); the
+          # anon key alone now gets `permission denied` on them.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SPEC: ${{ github.event.inputs.spec || 'strategies/late-favourite-btc-15m.json' }}
           DAYS: ${{ github.event.inputs.days || '21' }}
         run: node scripts/audit-strategy.mjs "$SPEC" "--days=$DAYS"

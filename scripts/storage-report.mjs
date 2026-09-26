@@ -24,8 +24,8 @@ import { authHeaders } from "../lib/supabaseHeaders.js";
 //
 // Reads only, anon key. Writes nothing.
 
-const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_ANON_KEY;
-if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
+const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the recorded archives are private (migration 0028)"); process.exit(2); }
 
 // Supabase Pro includes 8 GB.
 const CEILING_GB = Number(process.env.CEILING_GB || 8);
