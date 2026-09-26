@@ -1,4 +1,5 @@
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { pageAll } from "../lib/restPage.js";
 // What is actually in the 15-minute data, for one series.
 //
 // The FIRST question before any strategy: is there anything here. This
@@ -37,18 +38,18 @@ async function rest(path) {
 // KEYSET, like every other pager in this repo. An OFFSET pager over a
 // table that grows ~50k rows a day is the bug this project has fixed
 // four times.
-async function readAll(table, select, extra, keyCol = "id") {
-  const out = [];
-  let last = null;
-  for (let page = 0; page < 2000; page++) {
-    const after = last == null ? "" : `&${keyCol}=gt.${encodeURIComponent(last)}`;
-    const rows = await rest(`${table}?select=${select}&${extra}${after}&order=${keyCol}.asc&limit=1000`);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][keyCol];
-  }
-  throw new Error(`readAll hit its page cap at ${out.length} rows — TRUNCATED`);
-}
+// ONE PAGER, SHARED. Seven scripts had their own copy of this and every
+// one paged on `id` while filtering on `ticker` — so Postgres sorted the
+// whole matching set instead of walking (ticker, observed_at), and each
+// began failing with `57014 canceling statement due to statement
+// timeout` as m15_quotes grew past a million rows. The analysis tooling
+// stopped working because the data got big, which is the opposite of
+// what more data is supposed to do.
+//
+// `key` must be a column the FILTER can use, and `dedupeOn` a unique one
+// — see lib/restPage.js.
+const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
+  pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 
 const pct = (n, d) => (d ? `${(100 * n / d).toFixed(1)}%` : "—");
 const med = a => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
@@ -58,7 +59,7 @@ for (const s of series) {
 
   const mk = await readAll("m15_markets",
     "ticker,close_time,result,last_price,volume,open_interest,strike",
-    `series=eq.${encodeURIComponent(s)}`, "ticker");
+    `series=eq.${encodeURIComponent(s)}`, "close_time", "ticker");
 
   if (!mk.length) { console.log("  no markets stored"); continue; }
 
@@ -114,7 +115,7 @@ for (const s of series) {
     .slice(0, 300)
     .map(m => m.ticker);
   const q = await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-    `ticker=in.(${recent.map(t => `"${t}"`).join(",")})&`);
+    `ticker=in.(${recent.map(t => `"${t}"`).join(",")})&`, "ticker", "id");
   const covered = new Set(q.map(r => r.ticker));
   console.log(`  quote rows         ${q.length} across ${covered.size} of the 300 most recent markets`);
   if (recent.length) {

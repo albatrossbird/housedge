@@ -79,5 +79,72 @@ console.log("\na short page ends the read, and a non-default key works");
   ok(got.length === 1, "a page under the limit is the last page");
 }
 
+
+// ---------------------------------------------------------------------
+// Paging on a key that REPEATS.
+//
+// This mode exists because the column you must page on is usually not
+// unique. m15_quotes is filtered by `ticker IN (...)` against an index
+// on (ticker, observed_at), so `ticker` is the only key that lets
+// Postgres walk the index instead of sorting a million rows — and a
+// ticker carries ~75 quotes.
+//
+// Ordering by the primary key instead is what broke the analysis
+// tooling: seven scripts paged on `id` while filtering on `ticker`, and
+// every one of them started returning 57014 once the table outgrew the
+// statement timeout.
+
+console.log("\npaging on a key that repeats");
+{
+  // Three tickers, four quotes each, page size 5 — so every page
+  // boundary lands mid-ticker, which is the case `gt` gets wrong.
+  const rows = [];
+  for (const t of ["AAA", "BBB", "CCC"]) for (let i = 0; i < 4; i++) rows.push({ id: `${t}-${i}`, ticker: t });
+
+  const serve = (q) => {
+    const m = /ticker=(gte?)\.([^&]+)/.exec(q);
+    let out = rows;
+    if (m) out = rows.filter(r => (m[1] === "gt" ? r.ticker > decodeURIComponent(m[2]) : r.ticker >= decodeURIComponent(m[2])));
+    const lim = Number(/limit=(\d+)/.exec(q)[1]);
+    return out.slice(0, lim);
+  };
+
+  const got = await pageAll(async q => serve(q), "m15_quotes", "id,ticker", "x=1",
+                            { key: "ticker", pageSize: 5, dedupeOn: "id" });
+  ok(got.length === 12, "every row is returned");
+  ok(new Set(got.map(r => r.id)).size === 12, "and none is returned twice");
+
+  // THE BUG THIS REPLACES: `gt` on a repeating key drops the rest of
+  // whichever ticker the page boundary fell inside.
+  const withGt = await pageAll(async q => serve(q), "m15_quotes", "id,ticker", "x=1",
+                               { key: "ticker", pageSize: 5 });
+  ok(withGt.length < 12, `a gt cursor on a repeating key LOSES rows (got ${withGt.length} of 12)`);
+}
+
+console.log("\nand it still refuses to spin");
+{
+  // One ticker with more rows than a page. Under gte the cursor cannot
+  // move and every page is the same page — so it must throw, not loop.
+  const rows = Array.from({ length: 9 }, (_, i) => ({ id: `Z-${i}`, ticker: "ZZZ" }));
+  let threw = null;
+  try {
+    await pageAll(async q => rows.slice(0, Number(/limit=(\d+)/.exec(q)[1])),
+                  "m15_quotes", "id,ticker", "x=1", { key: "ticker", pageSize: 3, dedupeOn: "id" });
+  } catch (e) { threw = e; }
+  ok(threw, "a key value larger than a page throws");
+  ok(/did not advance/.test(String(threw?.message)), "and says the cursor did not advance");
+}
+
+console.log("\nthe dedupe column must be selected too");
+{
+  let threw = null;
+  try {
+    await pageAll(async () => [], "m15_quotes", "ticker,yes_bid", "x=1",
+                  { key: "ticker", dedupeOn: "id" });
+  } catch (e) { threw = e; }
+  ok(threw && /dedupe column/.test(String(threw.message)),
+     "an unselected dedupe column is refused before any request");
+}
+
 console.log(bad ? `\n${bad} FAILED` : "\nall passed");
 process.exit(bad ? 1 : 0);

@@ -24,6 +24,7 @@
 
 import { feeOf, pickOnePerTicker, bucketize, simulate } from "../lib/calibrate.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { pageAll } from "../lib/restPage.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_ANON_KEY;
@@ -63,18 +64,18 @@ async function rest(path) {
 // an OFFSET pager over it is the bug this repo has fixed four times.
 // A page cap reached is a TRUNCATION, not a smaller answer, so it
 // throws rather than returning what it has.
-async function readAll(table, select, extra, keyCol = "id") {
-  const out = [];
-  let last = null;
-  for (let page = 0; page < 4000; page++) {
-    const after = last == null ? "" : `&${keyCol}=gt.${encodeURIComponent(last)}`;
-    const rows = await rest(`${table}?select=${select}&${extra}${after}&order=${keyCol}.asc&limit=1000`);
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-    last = rows[rows.length - 1][keyCol];
-  }
-  throw new Error(`readAll hit its page cap at ${out.length} rows — TRUNCATED`);
-}
+// ONE PAGER, SHARED. Seven scripts had their own copy of this and every
+// one paged on `id` while filtering on `ticker` — so Postgres sorted the
+// whole matching set instead of walking (ticker, observed_at), and each
+// began failing with `57014 canceling statement due to statement
+// timeout` as m15_quotes grew past a million rows. The analysis tooling
+// stopped working because the data got big, which is the opposite of
+// what more data is supposed to do.
+//
+// `key` must be a column the FILTER can use, and `dedupeOn` a unique one
+// — see lib/restPage.js.
+const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
+  pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 
 // Fee parameters come from the API, never hardcoded: Kalshi's
 // multiplier is per series and a constant in code goes stale silently
@@ -111,7 +112,7 @@ for (const s of series) {
   // than the whole backfill.
   const mk = await readAll("m15_markets", "ticker,close_time,result",
     `series=eq.${encodeURIComponent(s)}&result=not.is.null` +
-    `&close_time=gte.${SINCE}&`, "ticker");
+    `&close_time=gte.${SINCE}&`, "close_time", "ticker");
   const resultOf = new Map(mk.map(m => [m.ticker, m.result]));
   console.log(`settled markets, last ${DAYS}d    ${mk.length}`);
   if (!mk.length) { console.log("  nothing settled in that window to calibrate against"); continue; }
@@ -129,7 +130,7 @@ for (const s of series) {
     const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
     q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
       `ticker=in.(${encodeURIComponent(ids)})` +
-      `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`));
+      `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`, "ticker", "id"));
   }
   console.log(`quotes in the window         ${q.length}`);
 
