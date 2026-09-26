@@ -1,0 +1,38 @@
+# Per-source coverage for the weather recorder.
+#
+# The weather twin of m15-coverage.yml, and a separate workflow for the
+# same reason every other job here is paired (record-15m / record-weather,
+# backfill-15m / backfill-weather): the two cutovers are decided
+# independently, and a combined run would make you read past the answer
+# you did not ask for to reach the one you did.
+#
+# Exists so the "can Actions be turned off" question can be asked from
+# anywhere, including from a phone, without SSH to the box and without
+# credentials on the asker's machine. workflow_dispatch only — this is a
+# question you ask, not an alarm; watchdog.yml is the alarm.
+#
+# Reads only. See migration 0026_wx_quotes_source.sql for why union
+# coverage cannot answer the question on its own.
+name: Weather coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Window to report over, in hours"
+        required: false
+        default: "48"
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Coverage by source
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node scripts/wx-coverage.mjs --hours=${{ github.event.inputs.hours || '48' }}

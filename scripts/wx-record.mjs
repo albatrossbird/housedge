@@ -20,6 +20,7 @@ import {
 } from "../lib/weather.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { recorderSource } from "../lib/recorderSource.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -28,6 +29,11 @@ const POLL_MINUTES = Number(process.env.WX_POLL_MINUTES || 10);
 // The forecast moves far more slowly than the book — NWS issues a few
 // times a day — so re-asking every tick is requests spent for nothing.
 const FORECAST_EVERY_MINUTES = Number(process.env.WX_FORECAST_MINUTES || 60);
+
+// Which recorder this is, and why it is derived rather than set in
+// the unit file: lib/recorderSource.js.
+const SOURCE = recorderSource(process.env, "WX_SOURCE");
+console.log(`source: ${SOURCE}`);
 
 if (!SUPABASE_URL || !KEY) { console.error("::error::SUPABASE_URL and a key are required"); process.exit(1); }
 console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role" : "anon (writes will be REJECTED by RLS)"}`);
@@ -38,8 +44,27 @@ console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role
 // nothing. See lib/supabaseCredential.js.
 await assertCredential(SUPABASE_URL, KEY, { table: "wx_quotes" });
 
+// Set once, the first time the database rejects `source`. A deploy can
+// land before the migration does — the same case migration 0004 handles
+// in the price path — so the recorder drops the column and keeps
+// recording rather than losing hours it can never get back. An
+// unattributed row is a worse reading; an unrecorded one is a hole.
+let sourceUnsupported = false;
+
+// SCOPED TO wx_quotes, AND IT HAS TO BE. wx_forecasts has a `source`
+// column of its own that means something else entirely — the forecast
+// PROVIDER, 'nws' — and it is NOT NULL. A degrade triggered by
+// wx_quotes lacking its column would otherwise strip the provider off
+// every forecast row and fail all of them with a null-violation, which
+// is the recorder reacting to a missing column by breaking a table
+// that was fine. Both the strip and the detection are scoped, or a
+// 400 naming wx_forecasts.source would set the flag in the first
+// place.
+const STAMPED = "wx_quotes";
+
 async function post(table, rows, onConflict) {
   if (!rows.length) return { ok: true, n: 0 };
+  if (sourceUnsupported && table === STAMPED) rows = rows.map(({ source, ...rest }) => rest);
   const url = `${SUPABASE_URL}/rest/v1/${table}` + (onConflict ? `?on_conflict=${onConflict}` : "");
   const r = await fetch(url, {
     method: "POST",
@@ -50,7 +75,19 @@ async function post(table, rows, onConflict) {
     },
     body: JSON.stringify(rows),
   });
-  if (!r.ok) return { ok: false, n: 0, err: `${r.status} ${(await r.text()).slice(0, 180)}` };
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 300);
+    // PGRST204 / 42703: the column is not there. Name the migration —
+    // "could not find the 'source' column" on its own sends the next
+    // reader through the recorder rather than the schema — then retry
+    // without it, once.
+    if (table === STAMPED && !sourceUnsupported && /source/.test(body) && /PGRST204|42703|column/.test(body)) {
+      sourceUnsupported = true;
+      console.log(`::warning::${table}: no 'source' column — run migration 0026_wx_quotes_source.sql. Recording WITHOUT source attribution until then.`);
+      return post(table, rows, onConflict);
+    }
+    return { ok: false, n: 0, err: `${r.status} ${body.slice(0, 180)}` };
+  }
   return { ok: true, n: rows.length };
 }
 
@@ -117,7 +154,7 @@ while (Date.now() < deadline) {
     for (const m of ms) {
       marketsSeen++;
       marketRows.push(toWxMarketRow(m, { series: s, cli }));
-      const q = toWxQuote(m, tickStart);
+      const q = { ...toWxQuote(m, tickStart), source: SOURCE };
       if (quoteChanged(lastQuote.get(m.ticker), q)) { quoteRows.push(q); lastQuote.set(m.ticker, q); }
     }
     await sleep(400);   // Kalshi rate-limits datacenter IPs.

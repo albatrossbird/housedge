@@ -1,5 +1,17 @@
 name: Record 15-minute markets
 
+# THE BOX RUNS THIS NOW, and this job is the one it replaced. Its
+# schedule is off — see the `on:` block below for the measurement that
+# decided it — and what remains is a manual fallback for while the box
+# is down.
+#
+# Every row in m15_quotes is stamped with which recorder wrote it
+# (migration 0023), which is what made the comparison possible at all:
+# a union figure cannot tell "the box covers everything" from "the box
+# covers half". Running this by hand alongside the box is safe —
+# append-only and write-on-change, so two recorders cost duplicate rows
+# and never a gap.
+#
 # Kalshi lists exactly ONE open market per 15-minute series at a time,
 # and it lives for fifteen minutes. That single fact decides everything
 # about this job.
@@ -48,8 +60,30 @@ name: Record 15-minute markets
 # to make it is before the table forces it.
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
+  # SCHEDULE OFF, 2026-09-26, ON MEASUREMENT. The box now records this
+  # family, and the per-source check says it does so alone:
+  #
+  #   box                4164 windows   100.0%
+  #   actions            4164 windows   100.0%
+  #   union              4164 windows   100.0%
+  #   VERDICT: the box alone covers 100.0%, matching the union.
+  #
+  # over a 48-hour window ('M15 coverage' workflow, run 11). Every
+  # window this job caught, the box caught too, so what it adds is
+  # duplicate rows and Actions minutes — and those minutes are what
+  # keeps this repository public.
+  #
+  # TURNED OFF BY DELETING THE SCHEDULE, NOT THE JOB. workflow_dispatch
+  # stays, so bringing this back is one click and no commit: the box is
+  # one machine, and a recorder whose data cannot be backfilled needs a
+  # way to run somewhere else while that machine is down.
+  #
+  # BEFORE UNCOMMENTING, RE-RUN 'M15 coverage'. A schedule turned back
+  # on because it feels safer, against a box that is in fact fine, is
+  # the state this measurement exists to replace.
+  #
+  # schedule:
+  #   - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       minutes:

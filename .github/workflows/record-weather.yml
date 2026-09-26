@@ -20,6 +20,15 @@
 # market moves on forecast revisions and order flow, not tick by tick,
 # and NWS issues a handful of times a day. The forecast is fetched on
 # its own hourly clock inside the loop.
+#
+# THE BOX ALSO RUNS THIS, and this job is what it is replacing. Both
+# write to wx_quotes, which is safe — append-only and write-on-change,
+# so two recorders cost duplicate rows and never a gap — and every row
+# is stamped with which recorder wrote it (migration 0026). Decide
+# whether to turn this off with the 'Weather coverage' workflow, which
+# reports PER SOURCE; a union figure cannot tell "the box covers
+# everything" from "the box covers half".
+#
 name: Record weather markets
 
 on:

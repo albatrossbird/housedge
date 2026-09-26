@@ -702,6 +702,134 @@ weekend run catching them is the schedule working, not a fluke. At that
 rate write-on-change produces roughly 50k rows/day, against ~150k if
 every tick were stored.
 
+### The recorders run on a box, not in Actions
+
+Both long-running recorders — the 15-minute one and the weather one —
+are moving off GitHub Actions onto a small VPS. `deploy/` holds the
+systemd units, `deploy/bootstrap.sh` sets the box up, and the
+instructions it prints at the end are the operator's copy.
+
+**Why they moved.** Actions does not honour short crons: this repo asks
+for `*/30` and measures gaps of 45 minutes to 3.5 hours, so the only way
+to approach continuous coverage was 330-minute overlapping runs, which
+captured **303 of 602 m15 windows — about half**. They are also the
+largest consumer of Actions minutes here, weather most of all, and that
+consumption is the last thing keeping this repository public.
+
+- **`marketslap-update.timer` pulls the repo**, so code deploys without
+  a deploy step: each recorder runs for `RUN_MINUTES=60` and the next
+  cycle picks up new code.
+- **`marketslap-sync.timer` syncs the UNIT FILES**, which the pull does
+  not. Units are copies in `/etc/systemd/system` and the update job runs
+  as `marketslap`, which cannot write there — so a `.service` change
+  landed in git and was ignored by the running box, silently. That cost
+  three separate defects in two days, each needing a human to re-run
+  bootstrap. `deploy/sync-units.sh` restarts only units that were
+  **already enabled and running**: "start recording something" is not a
+  change that should arrive by git pull.
+- **`StartLimitIntervalSec` / `StartLimitBurst` belong in `[Unit]`.**
+  systemd moved them out of `[Service]` and **ignores them there**,
+  saying so in the journal on every reload. Ours were in `[Service]`, so
+  the crash-loop ceiling did not exist — and `Restart=always` is
+  deliberate on a recorder whose data cannot be backfilled, with that
+  ceiling as the only thing making it safe. Without it a permanent fault
+  restarts forever: the m15 recorder spent **fourteen hours** re-running
+  against a rejected credential, warning every fifteen seconds, and
+  nothing escalated.
+- **A recorder prints which credential it is using, and then proves it**
+  (`lib/supabaseCredential.js`). Printing which variable is *set* says
+  nothing about whether the value works, which is exactly how those
+  fourteen hours passed looking healthy.
+
+#### Can Actions be turned off? Only a PER-SOURCE answer decides it
+
+Both recorders run in two places during the cutover. That overlap is
+safe — both tables are append-only and write-on-change, so two writers
+cost duplicate rows and never a gap — but it makes the one question
+worth asking unanswerable from the table alone.
+
+**Union coverage is not the answer, and it is the number that will be
+reached for.** Two recorders covering every window reads identically
+whether the box covered all of them or half. Neither price path is
+backfillable, so turning Actions off on a union figure risks learning
+the difference through a week of lost data.
+
+So every row carries a `source`: migration `0023_m15_quotes_source.sql`
+for `m15_quotes`, `0026_wx_quotes_source.sql` for `wx_quotes`.
+`scripts/m15-coverage.mjs` and `scripts/wx-coverage.mjs` report coverage
+per source and state a verdict, and each has a `workflow_dispatch`
+workflow so the question can be asked from a phone without SSH or
+credentials.
+
+- **The source is DERIVED, not configured** (`lib/recorderSource.js`).
+  The obvious place is an env var in the systemd unit, and that was
+  tried: an `M15_SOURCE` set there could never reach the box, so rows
+  went out unlabelled and the comparison measured nothing. Both runtimes
+  already identify themselves — `GITHUB_ACTIONS` on a runner,
+  `INVOCATION_ID` on a systemd service — so ask them. Anything else is
+  **`unlabelled`**, which is a third real case (a shell on the box, a
+  laptop) and not a default to be absorbed into one of the other two.
+  Shared between the two recorders because two copies of this rule would
+  drift into mislabelling rather than into breaking.
+  `scripts/recorder-source.test.mjs` pins it.
+- **A recorder whose table has no `source` column drops it and keeps
+  recording**, naming the migration in a warning. A deploy can land
+  before a hand-run migration does — the same case migration `0004`
+  handles in the price path. An unattributed row is a worse reading; an
+  unrecorded one is a hole.
+  **The degrade must be scoped to the stamped table.** A first version
+  was not, and `wx_forecasts.source` is a different, `NOT NULL` column
+  holding the forecast provider — so `wx_quotes` missing its column
+  would have stripped the provider off every forecast row and failed
+  all of them on a null violation, the recorder breaking a healthy
+  table in reaction to a missing one.
+  `scripts/wx-record-source.test.mjs` drives the whole recorder against
+  a fake Kalshi, NWS and PostgREST and fails on exactly that.
+- **`m15_quotes` and `wx_quotes` only.** `m15_markets` / `wx_markets`
+  are upserted on ticker, so a source there records whichever recorder
+  wrote last, not who was running — a value that looks like attribution
+  and is not. `wx_forecasts` already has a `source` column meaning the
+  forecast **provider** (`nws`); recorder attribution there would either
+  collide or give one concept two names, and it is unnecessary because
+  forecasts are written from inside the quote loop.
+- **Weather coverage is measured in HOURS, not windows.** A daily
+  temperature market is open for a day, so "markets that existed" is not
+  a unit of recording — the thing covered is time. The denominator is
+  wall-clock complete hours, which can be short for a reason that is not
+  a recorder fault (an hour in which Kalshi listed no open daily
+  temperature markets); it would hit both sources equally, so the
+  per-source comparison still holds, but check the union row before
+  calling it an outage.
+- **Longest gap is reported beside the percentage.** A source can score
+  100% of hours while never recording two consecutive polls, and the
+  window edges count — a source silent for the first six hours has a
+  six-hour gap, not a clean run starting late.
+- **The verdict branches must not guess.** m15's once asserted "both
+  recorders are still running pre-stamp code" and finished "recording is
+  healthy" — a claim about two writers from evidence supporting only
+  "at least one writer is on old code", and a claim about the table
+  relayed as a claim about the box. The box was writing nothing,
+  rejected with `401 Invalid API key`, for fourteen hours. Unattributed
+  rows cannot distinguish those states, so that branch now says it
+  cannot tell and names the check that can.
+
+**Start one recorder at a time, in order.** A recorder that runs and
+writes nothing is this project's most common fault, and starting both at
+once means a silent one is hidden by the other's rows.
+
+**m15 is DONE, measured 2026-09-26.** Over a 48-hour window the box
+alone covered **4,164 of 4,164 windows — 100.0%, matching the union**,
+so `record-15m.yml`'s schedule is off. `workflow_dispatch` is kept: the
+box is one machine, and a price path that cannot be backfilled needs a
+way to run somewhere else while that machine is down. **Re-run
+'M15 coverage' before ever putting the schedule back** — a schedule
+restored because it feels safer, against a box that is fine, is the
+state the measurement exists to replace.
+
+Weather is the same move, one step behind: its rows started carrying a
+`source` on the same day, so the comparison is a day or two of overlap
+away. It is the larger consumer of the two.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that

@@ -174,7 +174,34 @@ failure:
        env $(grep -E '^SUPABASE_(URL|ANON_KEY)=' /etc/marketslap/env | xargs) \
        node /opt/marketslap/scripts/watchdog.mjs
 
-Leave weather on GitHub Actions for a couple of days and compare. If
-coverage does not actually improve, you have learned that cheaply.
+Once that is landing, start the weather recorder the same way:
+
+     sudo systemctl enable --now marketslap-weather.service
+     sudo journalctl -u marketslap-weather -f
+
+ONE AT A TIME, AND THIS ORDER, because the two failures look alike from
+the outside. A recorder that runs and writes nothing is this project's
+most common fault, and starting both at once means a silent one is
+hidden by the other's rows.
+
+LEAVE record-weather.yml RUNNING while you do. Both recorders write to
+the same table, which is safe — wx_quotes is append-only and
+write-on-change, so an overlap costs duplicate rows and never a gap —
+and the overlap is what makes the decision measurable. Every row is
+stamped with which recorder wrote it, so after a day or two, ask:
+
+  GitHub -> Actions -> Weather coverage -> Run workflow
+
+It reports coverage per source, not as a union, and says outright
+whether the box alone covers what the two cover together. Union
+coverage cannot answer it: two recorders covering every hour reads
+identically whether the box covered all of them or half, and neither
+the book nor the forecast can be backfilled, so getting that wrong
+costs a week of data nobody can recover.
+
+The same question for the 15-minute recorder is 'M15 coverage' in the
+same menu.
+
+If coverage does not actually improve, you have learned that cheaply.
 ========================================================================
 EOF
