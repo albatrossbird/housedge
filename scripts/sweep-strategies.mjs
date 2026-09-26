@@ -247,9 +247,11 @@ for (const s of SERIES) {
 
 console.log("=".repeat(74));
 console.log("WHAT THIS CAN AND CANNOT SAY");
-console.log("  Fill is not modelled: Kalshi publishes no size on the 15m family,");
-console.log("  so every figure assumes the whole order filled at the touch. Every");
-console.log("  net figure above is an UPPER BOUND.");
+console.log("  Fill is not modelled: rows recorded before 2026-09-26 carry no size");
+console.log("  (the recorder read the wrong field), so every figure assumes the whole");
+console.log("  order filled at the touch, and every net figure above is an UPPER");
+console.log("  BOUND. Those prices are also up to 15s STALE — they came through a");
+console.log("  CDN-cached feed. From that date book_bid/book_ask are the live touch.");
 console.log("  The null assumes the market is calibrated, which is the hypothesis");
 console.log("  a strategy must beat. It does NOT model adverse selection: in a");
 console.log("  real book the fills you get are the ones someone wanted to give.");

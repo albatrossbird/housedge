@@ -668,11 +668,80 @@ good.
   series would otherwise burn requests every tick at an API that
   rate-limits datacenter IPs — but rest for long and a fifteen-minute
   window is missed entirely.
-- **Kalshi publishes NO depth on this family**: `yes_bid_size` and
-  `yes_ask_size` are null. Stored as null, never 0 — `Number(null)` is
-  `0` and a fabricated zero reads as "nothing offered", which is a claim
-  about the book rather than about our data. That coercion was in the
-  first version and `scripts/m15.test.mjs` caught it.
+- **Kalshi publishes size on this family, twice over, and this file said
+  for weeks that it published none.** It read "Kalshi publishes NO depth
+  on this family"; the claim spread into four scripts' printed caveats
+  and into LIVE COPY on `/fees`. Both halves were wrong:
+
+  - **The touch size is on `/markets`**, as `yes_bid_size_fp` /
+    `yes_ask_size_fp` (`"394402.33"` on a live KXBTC15M market,
+    2026-09-26). `toM15Quote` read `yes_bid_size` — a key Kalshi does not
+    send — so every row stored null, and the null was written up as a
+    fact about the venue. The weather recorder read the `_fp` key
+    correctly the whole time.
+  - **The full ladder is on `/markets/<ticker>/orderbook`**: 148 NO
+    levels and 125 YES levels on the same probe, thousands of contracts
+    per level.
+
+  **The test pinned the bug.** Its fixture was hand-written with
+  `yes_bid_size: null`, shaped to match the code rather than captured
+  from the API, so it agreed with the wrong read and passed for weeks.
+  Fixtures are now copied from live responses. That is the fifth time
+  this file recorded "a venue does not publish X" when the fetch had
+  simply not asked — and a first draft of this correction repeated the
+  error, stating "the `/markets` feed carries no size" without looking.
+
+  **From 2026-09-26 the recorder stores both** (migration `0027`): the
+  touch size in `bid_size`/`ask_size`, and `book_bid`/`book_ask` plus
+  cumulative depth within 1/3/5 cents of the touch, `bid_depth_Nc` and
+  `ask_depth_Nc`, touch inclusive. **Rows before that date carry no size
+  at all, so fill on the historical path is unknown and every backtest
+  over it is an upper bound.**
+
+  **AND THE RECORDED PRICES WERE UP TO 15 SECONDS STALE.** The `/markets`
+  list the recorder polls is served by CloudFront with `cache-control:
+  public, max-age=15` (`x-cache: Hit from cloudfront, age=2`, measured
+  2026-09-26). Fired at the same instant, the list agreed with the live
+  book on **1 read in 48** and on a second sample **4 in 52**; on
+  KXETH15M it quoted **0.68/0.69 while the book stood at 0.53/0.54**.
+  `/orderbook` and `/markets/<ticker>` are not cached. So **every
+  `yes_bid`/`yes_ask` recorded before 2026-09-26 came through that cache**,
+  and a backtest entering in the final minute or two is reading a price
+  the market may already have left — on a trending market, a stale price
+  reads as a better entry than was available, which can MANUFACTURE edge.
+
+  From that date **`book_bid`/`book_ask` are the executable touch; prefer
+  them wherever present.** `yes_bid`/`yes_ask` keep their cached source so
+  the history stays like-for-like — a column that changed meaning
+  mid-series would corrupt every backtest spanning the change.
+
+  Rules the recorder keeps, pinned by `scripts/m15-record-depth.test.mjs`,
+  which drives the whole script against fake Kalshi and PostgREST:
+  - **The book is read every tick, and its touch triggers a write; its
+    depth does not.** Reading it only for rows the cached list had already
+    chosen to write would sample the truth at moments the cache picked.
+    Depth churns every tick and rides along. Measured live: ~14 book reads
+    per 15s tick, zero errors; rows written on ~93% of ticks per live
+    market against ~67% before — roughly 1.4x the append rate, and each
+    row ~64 bytes wider.
+  - **A failed book read costs the depth, never the quote.** Every depth
+    field goes null — "not fetched" — and the price path is written.
+  - **Null and zero differ.** Null is "not fetched"; zero is "fetched,
+    nothing resting". A venue-sent `0.00` stays 0.
+  - **Kalshi's book is two BID stacks.** A NO bid at p is a YES offer at
+    1-p, so `ask_depth` is measured on the NO stack, mirrored.
+  - **`book_bid`/`book_ask` come from a second request** and can differ
+    from `yes_bid`/`yes_ask` by a tick; require them to agree before
+    trusting a depth figure describes the quoted price.
+  - **A database missing 0023 or 0027 costs those columns, never the
+    row**, matched by column name on a word boundary — Postgres's own
+    `42703` names a column as `"book_bid"`, which arrives JSON-escaped and
+    matches no quote-shaped test. A first draft matched quotes and would
+    have rejected every quote in the run.
+
+  A null size is still stored as null, never 0: `Number(null)` is `0` and
+  a fabricated zero reads as "nothing offered", which is a claim about the
+  book rather than about our data.
 - `result` arrives as **`""`** on a live market, not null. Stored as
   null, or every open window would look settled with a blank outcome.
 

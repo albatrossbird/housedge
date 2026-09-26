@@ -179,7 +179,9 @@ for (const s of series) {
               `SE ${fmt(r.se)}pt = ${(r.edgeOverPrice / (r.se || 1)).toFixed(1)} sigma ` +
               `IF trades were independent`);
   console.log(`  ...they are not: ${r.n} entries across ${days.size} days of one underlying.`);
-  console.log(`\n  NOT MODELLED: fill. Kalshi publishes no size on this family`);
-  console.log(`  (bid_size/ask_size are null), so every entry above assumes the`);
+  console.log(`\n  NOT MODELLED: fill. Rows recorded before 2026-09-26 carry no size —`);
+  console.log(`  the recorder read the wrong field — so every entry above assumes the`);
   console.log(`  whole order filled at the touch. Treat it as an UPPER BOUND.`);
+  console.log(`  AND THOSE PRICES ARE UP TO 15s STALE: they came through a CDN-cached`);
+  console.log(`  feed. From that date book_bid/book_ask are the live touch (0027).`);
 }
