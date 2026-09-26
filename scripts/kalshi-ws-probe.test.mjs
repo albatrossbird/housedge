@@ -39,7 +39,7 @@ function run({ keyType = "ed25519", fake = {}, wrongKey = false }) {
     process.env.PROBE_SECONDS = "3";
     process.env.PROBE_SAMPLE_MS = "120";
     delete process.env.CREDENTIALS_DIRECTORY;
-    installFakeKalshi({ publicKeyPem: ${JSON.stringify(pub)}, ...${JSON.stringify(fake)} });
+    installFakeKalshi({ publicKeyPem: ${JSON.stringify(pub)}, markets: ["KXBTC15M-26SEP261500-00", "KXBTC15M-26SEP261515-15"], statuses: { "KXBTC15M-26SEP261515-15": "initialized" }, ...${JSON.stringify(fake)} });
     await import(${JSON.stringify(join(HERE, "kalshi-ws-probe.mjs"))});
   `);
   try { return { code: 0, out: execFileSync(process.execPath, [file], { stdio: "pipe" }).toString() }; }

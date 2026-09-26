@@ -1,0 +1,50 @@
+# The 15-minute markets from Kalshi's WebSocket: every book change, the
+# settlement index at 5Hz, trades. Runs BESIDE marketslap-m15.service
+# (the 15-second poller), not instead of it — the poller's table is what
+# every existing script reads, and a second, independent recorder is
+# what lets the two be checked against each other.
+#
+# NOT enabled by bootstrap or by the sync timer: starting a recorder is a
+# human decision. Prove the stream from this box first:
+#
+#   scripts/kalshi-ws-probe.mjs   (instructions in deploy/README.md)
+#
+# THE KALSHI KEY never enters an environment variable. LoadCredential
+# hands the service a private copy under $CREDENTIALS_DIRECTORY, readable
+# only by this unit while it runs; at rest the file stays root-only. The
+# key is READ-ONLY (scripts/kalshi-key-setup.mjs mints it that way and
+# the probe fails on a key that can trade).
+
+[Unit]
+Description=MarketSlap 15-minute market stream recorder
+After=network-online.target
+Wants=network-online.target
+# In [Unit] — systemd ignores these in [Service]. See marketslap-m15.service.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=marketslap
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+LoadCredential=kalshi.pem:/etc/marketslap/kalshi-read.pem
+# /var/lib/marketslap-stream, owned by the service user. NOT under
+# /opt/marketslap, which the update timer resets to origin/main.
+StateDirectory=marketslap-stream
+# Cycles hourly so new code lands, and the script chooses minute 1-2 of
+# a window to do it — furthest from any window's final two minutes.
+Environment=STREAM_RUN_MINUTES=60
+ExecStart=/usr/bin/node scripts/m15-stream.mjs
+Restart=always
+RestartSec=2
+# SIGTERM closes the current file cleanly; give it time to.
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

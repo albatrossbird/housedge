@@ -899,6 +899,62 @@ Weather is the same move, one step behind: its rows started carrying a
 `source` on the same day, so the comparison is a day or two of overlap
 away. It is the larger consumer of the two.
 
+### The 15-minute markets from the WebSocket
+
+`scripts/m15-stream.mjs` (`marketslap-m15-stream.service`) records the
+15-minute markets from Kalshi's authenticated WebSocket, beside the
+15-second poller. **Measured 2026-09-26: KXBTC15M's book changed at
+least 151 times a second and its touch moved 59 times in 30s** — a
+15-second sample is a different book from the one a final-minute entry
+would have met.
+
+- **Hybrid storage**: each book once a second when changed (touch,
+  depth, top 10 levels); EVERY change in each window's final two minutes
+  from a full-depth book, so that stretch replays exactly; every trade;
+  CF Benchmarks indices at 5Hz (BTC/ETH/SOL/XRP/DOGE) and 1Hz (all).
+  `scripts/m15-stream.test.mjs` replays the final-window record against
+  every once-a-second snapshot, and fails on a flipped side or a 3% loss.
+- **Not Postgres.** Hourly gzipped NDJSON in the PRIVATE bucket
+  `stream-archive` (migration `0029`), deleted locally only after a
+  confirmed upload. Kalshi's data terms allow personal use and forbid
+  handing archived Kalshi data to anyone else: **never add a read policy
+  or make the bucket public.**
+- **Markets are subscribed before they open.** Kalshi lists each window
+  a day ahead as `initialized`; subscribing then puts the first order of
+  every window on the tape.
+- **`use_yes_price: true` is always sent explicitly.** Kalshi is flipping
+  the default and then removing the flag; a misread encoding still looks
+  like a book. `lib/kalshiBook.js` explains, and the probe cross-checks
+  the socket's book against REST's (a control proves it catches it).
+- **Gaps are recorded, not papered over.** `seq` is per subscription, so
+  a lost frame marks every market on it untrusted until `get_snapshot`
+  repairs it. A reconnect, a silent socket (30s with no frame) and a
+  restart are all written as `conn` lines.
+- **The key is read-only and never in an env var.** Kalshi's web page
+  issues full-access keys only; `scripts/kalshi-key-setup.mjs` uses one
+  once to mint an ed25519 key with `scopes: ["read"]`, proves the scope
+  from Kalshi's own key list, and deletes the temporary key. The unit
+  reads it through `LoadCredential`. Signing (`lib/kalshiAuth.js`) was
+  verified against OpenSSL, not transcribed.
+- **Prove it from the box first**: `scripts/kalshi-ws-probe.mjs` fails on
+  a key that can trade, a skewed clock, a bad handshake, a book that
+  disagrees with REST, or a sequence gap. Steps in `deploy/README.md`.
+- Node 22+ (built-in WebSocket with handshake headers). Node 20 has none.
+- `scripts/fake-kalshi.mjs` is the test double for all of the above: it
+  verifies signatures and serves one book in both encodings.
+
+### The recorded archives are private (migration 0028)
+
+`m15_*` and `wx_*` were readable with the anon key, which ships in the
+browser bundle of a public site — so the whole recorded dataset was
+public. `0028` drops their read policies and revokes SELECT from `anon`
+and `authenticated`; every analysis script and workflow reads with
+`SUPABASE_SERVICE_ROLE_KEY`. **Revoking the grant matters as much as the
+policy**: RLS with no policy returns zero rows with a 200, which reads as
+an empty table; without the grant anon gets `42501 permission denied`,
+which reads as what it is. A new table in `public` is anon-granted by
+default — revoke it in the same migration that creates it.
+
 ### Retention
 
 `/api/prune` (`?dry=1`, `?days=`) deletes rows from `markets` that

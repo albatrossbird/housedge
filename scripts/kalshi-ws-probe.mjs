@@ -77,13 +77,18 @@ if (!keys.ok) {
 }
 
 // ── A live market to watch ─────────────────────────────────────────────
+// `second` is the NEXT window, listed ahead as `initialized`. Subscribing
+// to it before it opens is how the recorder avoids missing the first
+// seconds of every window, so the add/remove test uses it.
 let ticker = null, second = null;
-for (const s of ["KXBTC15M", "KXETH15M", "KXSOL15M"]) {
-  const r = await fetch(`${KALSHI_REST}/markets?status=open&limit=5&series_ticker=${s}`).then(r => r.json()).catch(() => null);
-  const t = r?.markets?.[0]?.ticker;
-  if (t && !ticker) ticker = t; else if (t && !second) second = t;
+{
+  const now = Math.floor(Date.now() / 1000);
+  const r = await fetch(`${KALSHI_REST}/markets?series_ticker=KXBTC15M&min_close_ts=${now}&max_close_ts=${now + 2400}&limit=20`).then(r => r.json()).catch(() => null);
+  const ms = (r?.markets || []).sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time));
+  ticker = ms.find(m => m.status === "active")?.ticker || null;
+  second = ms.find(m => m.status !== "active" && m.ticker !== ticker)?.ticker || null;
 }
-check("live market", !!ticker, ticker ? `${ticker}${second ? ` (+ ${second} for the add/remove test)` : ""}` : "no open 15-minute market in BTC, ETH or SOL");
+check("live market", !!ticker, ticker ? `${ticker}${second ? ` (+ next window ${second}, not yet open, for the add/remove test)` : " (no upcoming window listed)"}` : "no open KXBTC15M market");
 if (!ticker) finish();
 
 // ── The socket ─────────────────────────────────────────────────────────

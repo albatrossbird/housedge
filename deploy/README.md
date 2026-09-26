@@ -199,3 +199,42 @@ systemctl status marketslap-m15
 journalctl -u marketslap-m15 -n 50 --no-pager
 systemctl list-timers 'marketslap-*'
 ```
+
+## The WebSocket recorder (`marketslap-m15-stream.service`)
+
+Records every book change on the 15-minute markets, the settlement index
+at 5Hz and every trade, from Kalshi's authenticated WebSocket. Runs
+beside the 15-second poller, not instead of it. Files go to the private
+Storage bucket `stream-archive` (migration `0029`), an hour per file.
+
+It needs a Kalshi API key. **The key on the box is read-only**: Kalshi's
+web page only issues full-access keys, so a temporary one is used once to
+mint a read-only key and is then deleted by the script.
+
+1. On kalshi.com: Account -> Profile -> API Keys -> Create New API Key.
+   Keep the page open; it shows the Key ID and the private key once.
+2. On the box, put the private key in a root-only file (paste it into
+   nano, then Ctrl-O, Enter, Ctrl-X):
+
+       sudo install -m 600 /dev/null /etc/marketslap/kalshi-temp.pem
+       sudo nano /etc/marketslap/kalshi-temp.pem
+
+3. Mint the read-only key and delete the temporary one. Type the Key ID
+   after the `=` with no brackets or quotes:
+
+       sudo KALSHI_TEMP_KEY_ID=paste-the-key-id-here node /opt/marketslap/scripts/kalshi-key-setup.mjs
+
+   It must end with `DONE`. It verifies the new key's scope with Kalshi's
+   own key list and refuses to finish on a key that can trade.
+4. Prove the stream from this box (about a minute, writes nothing):
+
+       sudo systemd-run --quiet --wait --pipe --uid=marketslap \
+         -p EnvironmentFile=/etc/marketslap/env \
+         -p LoadCredential=kalshi.pem:/etc/marketslap/kalshi-read.pem \
+         /usr/bin/node /opt/marketslap/scripts/kalshi-ws-probe.mjs
+
+   It must end with `ALL REQUIRED CHECKS PASSED`.
+5. Start it, then check it is writing:
+
+       sudo systemctl enable --now marketslap-m15-stream.service
+       sudo journalctl -u marketslap-m15-stream -n 25 --no-pager

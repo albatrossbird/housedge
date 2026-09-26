@@ -29,6 +29,7 @@ export function installFakeKalshi({
   publicKeyPem, keyId = "test-key-id", scopes = ["read"],
   markets = ["KXBTC15M-26SEP261500-00", "KXETH15M-26SEP261500-00"],
   closeTimes = {},              // ticker -> ISO close time
+  statuses = {},                // ticker -> status (default active)
   seqSkipAt = null,             // skip one seq number after this many frames on a sid
   dropSocketAfterMs = null,     // server closes the first socket after this long
   tickMs = 40, idxMs = 200,
@@ -90,7 +91,7 @@ export function installFakeKalshi({
     if (path === "/markets" && u.searchParams.get("series_ticker")) {
       const s = u.searchParams.get("series_ticker");
       return json({ markets: markets.filter(t => t.startsWith(s + "-")).map(t => ({
-        ticker: t, event_ticker: t.split("-").slice(0, 2).join("-"), status: "active",
+        ticker: t, event_ticker: t.split("-").slice(0, 2).join("-"), status: statuses[t] || "active", floor_strike: 80000,
         close_time: closeTimes[t] || new Date(Date.now() + 600000).toISOString(),
         open_time: new Date(Date.now() - 300000).toISOString(),
       })) });
@@ -262,5 +263,9 @@ export function installFakeKalshi({
     }
   }
   globalThis.WebSocket = FakeWebSocket;
-  return { log, books };
+  const addMarket = (t, { status = "active", close = null } = {}) => {
+    markets.push(t); statuses[t] = status; if (close) closeTimes[t] = close;
+    books.set(t, { yes: new Map([[350, 100]]), no: new Map([[600, 100]]) });
+  };
+  return { log, books, addMarket };
 }
