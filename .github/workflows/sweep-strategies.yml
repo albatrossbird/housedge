@@ -35,6 +35,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # The recorded archives are private (migration 0028); the
+          # anon key alone now gets `permission denied` on them.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DAYS: ${{ github.event.inputs.days || '21' }}
           DRAWS: ${{ github.event.inputs.draws || '400' }}
         run: node scripts/sweep-strategies.mjs "--days=$DAYS" "--draws=$DRAWS"

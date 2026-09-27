@@ -129,11 +129,11 @@ Box is provisioned. Two things left, and they are yours to do by hand.
    restarted. A placeholder you are meant to delete part of is a
    placeholder that will be pasted over in part.
 
-   The anon key belongs here even though the recorders do not write
-   with it: scripts/watchdog.mjs reads through it, and being able to
-   ask the box "is anything actually landing" without leaving the box
-   is the difference between checking and assuming. It is public by
-   design — it ships to every browser — so it adds no exposure.
+   The anon key is harmless here — it ships to every browser — but it
+   is no longer what the watchdog reads with: the recorded archives are
+   private (migration 0028), so scripts/watchdog.mjs uses the service
+   key. Being able to ask the box "is anything actually landing" without
+   leaving it is the difference between checking and assuming.
 
    Save with Ctrl+X, then Y, then Enter. Ctrl+O also saves, but a
    browser-based terminal hands that shortcut to the browser instead,
@@ -170,9 +170,13 @@ Then confirm rows are LANDING, not just that a process is running —
 a recorder that runs and writes nothing is this project's most common
 failure:
 
-     sudo -u marketslap --preserve-env=SUPABASE_URL,SUPABASE_ANON_KEY \
-       env $(grep -E '^SUPABASE_(URL|ANON_KEY)=' /etc/marketslap/env | xargs) \
-       node /opt/marketslap/scripts/watchdog.mjs
+     sudo systemd-run --quiet --wait --pipe --uid=marketslap \
+       -p EnvironmentFile=/etc/marketslap/env \
+       /usr/bin/node /opt/marketslap/scripts/watchdog.mjs
+
+   (This reads the env file the way the services do. An earlier version
+   of this line grepped the file as your login user, which cannot read a
+   root-owned 600 file, so the watchdog started with no credentials.)
 
 Once that is landing, start the weather recorder the same way:
 

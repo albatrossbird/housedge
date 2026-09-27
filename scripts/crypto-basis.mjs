@@ -23,8 +23,8 @@ import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
 
 const URL = process.env.SUPABASE_URL;
-const KEY = process.env.SUPABASE_ANON_KEY;
-if (!URL || !KEY) { console.error("::error::SUPABASE_URL / SUPABASE_ANON_KEY not set"); process.exit(2); }
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the recorded archives are private (migration 0028)"); process.exit(2); }
 
 const arg = (n, d) => {
   const h = process.argv.find(a => a.startsWith(`--${n}=`));
