@@ -239,3 +239,25 @@ mint a read-only key and then deletes the full-access one.
 
        sudo systemctl enable --now marketslap-m15-stream.service
        sudo journalctl -u marketslap-m15-stream -n 25 --no-pager
+
+## The price refresh (`marketslap-refresh.timer`)
+
+Updates the site's prices every 5 minutes, which GitHub Actions only
+promises and delivers every 45 minutes to 3.5 hours. It is the same
+`scripts/refresh-prices.mjs` the `Refresh prices` workflow runs, with the
+same alarms, and it uses `SUPABASE_URL` and `SUPABASE_ANON_KEY` from
+`/etc/marketslap/env`, which bootstrap already asked for.
+
+    sudo systemctl start marketslap-sync.service
+    sudo systemctl enable --now marketslap-refresh.timer
+
+After about 5 minutes, check it ran cleanly (the last line reads
+`kalshi updated: N/M fetched, polymarket updated: ...`, and the unit is
+not `failed`):
+
+    sudo journalctl -u marketslap-refresh -n 15 --no-pager
+    systemctl status marketslap-refresh --no-pager | head -5
+
+The Actions workflow keeps running until the box has been seen to keep
+prices fresh; both writing the same prices is harmless. Its schedule is
+turned off in a follow-up once that is measured.

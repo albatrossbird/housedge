@@ -190,6 +190,15 @@ public repo, so the loop moved to the runner — the same move
   because refreshing nothing because the read broke is the silent no-op
   this job keeps being rewritten to stop.
 
+**And now on the box.** `deploy/marketslap-refresh.timer` runs the same
+`scripts/refresh-prices.mjs` every 5 minutes for real, where Actions asks
+for `*/5` and gets 45 minutes to 3.5 hours. Oneshot, `Nice=10` beside
+the recorders, killed at 4 minutes so a hung run cannot pile up; a
+failed alarm shows as the unit going `failed`. The Actions workflow runs
+alongside until the box is measured keeping prices fresh — check
+`priceAgeSeconds` per category on `/api/markets`, not in aggregate — and
+is then switched off the same way the recorders were.
+
 ### Discovery runs in the runner too
 
 Same move, same reasons, applied to the second largest consumer.

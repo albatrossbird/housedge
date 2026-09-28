@@ -1,0 +1,16 @@
+# Every 5 minutes, measured from the START of the previous run, so runs
+# never overlap: a oneshot that is still running is not started again.
+#
+# Not enabled by bootstrap or the sync timer — starting a job is a human
+# decision. See deploy/README.md.
+
+[Unit]
+Description=MarketSlap price refresh every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
