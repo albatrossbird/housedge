@@ -332,8 +332,18 @@ function onFrame(f, now) {
       write({ k: "err", t: now, id: f.id ?? null, code: f.msg?.code, msg: f.msg?.msg });
       log(`::warning::socket error ${f.msg?.code} ${f.msg?.msg}${f.msg?.code === 26 ? " — per-subscription market limit reached" : ""}`);
       return;
+    case "ok": {
+      // Advances the book subscription's sequence — see lib/kalshiBook.js.
+      const r = book.apply(f);
+      if (r.gap) {
+        stats.gaps++;
+        write({ k: "gap", t: now, sid: r.gap.sid, expected: r.gap.expected, got: r.gap.got, m: r.gap.tickers });
+        if (r.gap.tickers.length) send("update_subscription", { sids: [r.gap.sid], market_tickers: r.gap.tickers, action: "get_snapshot" });
+      }
+      return;
+    }
     default:
-      return;   // ok, list_subscriptions, *_indexlist
+      return;   // list_subscriptions, *_indexlist
   }
 }
 

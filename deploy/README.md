@@ -207,9 +207,10 @@ at 5Hz and every trade, from Kalshi's authenticated WebSocket. Runs
 beside the 15-second poller, not instead of it. Files go to the private
 Storage bucket `stream-archive` (migration `0029`), an hour per file.
 
-It needs a Kalshi API key. **The key on the box is read-only**: Kalshi's
-web page only issues full-access keys, so a temporary one is used once to
-mint a read-only key and is then deleted by the script.
+It needs a Kalshi API key. **The key on the box is read-only.** Choose
+read-only on kalshi.com if it offers it; the script below then just puts
+that key in place. Given a full-access key instead, it uses it once to
+mint a read-only key and then deletes the full-access one.
 
 1. On kalshi.com: Account -> Profile -> API Keys -> Create New API Key.
    Keep the page open; it shows the Key ID and the private key once.

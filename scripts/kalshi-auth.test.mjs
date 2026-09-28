@@ -14,7 +14,7 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { kalshiAuthHeaders, signMessage, loadKalshiKey, keyPath, WS_PATH } from "../lib/kalshiAuth.js";
+import { kalshiAuthHeaders, signMessage, loadKalshiKey, keyPath, WS_PATH, parsePastedKey } from "../lib/kalshiAuth.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -86,6 +86,40 @@ console.log("\nwhere the key comes from, and what is refused");
   ok(e1 && /paste markers/.test(e1.message), "a key with bracketed-paste junk is refused by name, not by a later 401");
   let e2 = null; try { kalshiAuthHeaders("", key, "GET", "/x"); } catch (e) { e2 = e; }
   ok(e2 && /KALSHI_KEY_ID/.test(e2.message), "a missing key id names the variable");
+}
+
+console.log("\na key mangled by a phone paste");
+{
+  // Every case here made OpenSSL throw "DECODER routines::unsupported".
+  const pem = privateKey.export({ type: "pkcs1", format: "pem" });
+  const lines = pem.trim().split("\n");
+  const want = privateKey.export({ type: "pkcs1", format: "der" }).toString("hex");
+  const same = k => k.export({ type: "pkcs1", format: "der" }).toString("hex") === want;
+  const cases = {
+    "newlines turned into spaces": pem.replace(/\n/g, " "),
+    "every line indented": pem.split("\n").map(l => "  " + l).join("\n"),
+    "first line run into the second": lines[0] + lines.slice(1).join("\n"),
+    "Windows line endings": pem.replace(/\n/g, "\r\n"),
+    // What actually reached the box on 2026-09-28: a blank line after
+    // every line (27 empty, 24 x 64, one 52, both markers).
+    "a blank line after every line": pem.split("\n").join("\n\n"),
+    "PKCS#1 body under a PKCS#8 label": pem.replace(/RSA PRIVATE KEY/g, "PRIVATE KEY"),
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    let k = null; try { k = parsePastedKey(text); } catch {}
+    ok(k && same(k), `recovers: ${name}`);
+  }
+  const ed = generateKeyPairSync("ed25519").privateKey;
+  const edPem = ed.export({ type: "pkcs8", format: "pem" }).replace(/\n/g, " ");
+  let edk = null; try { edk = parsePastedKey(edPem); } catch {}
+  ok(edk?.asymmetricKeyType === "ed25519", "recovers an Ed25519 key too");
+
+  const cut = lines.slice(0, 10).join("\n") + "\n" + lines.at(-1);
+  let e3 = null; try { parsePastedKey(cut); } catch (e) { e3 = e; }
+  ok(e3 && /cut short/.test(e3.message) && /\d+ characters/.test(e3.message), "a paste cut short says so, with its length");
+  ok(e3 && !lines.slice(1, 10).some(l => e3.message.includes(l.slice(0, 12))), "and prints no part of the key");
+  let e4 = null; try { parsePastedKey(lines.slice(1).join("\n")); } catch (e) { e4 = e; }
+  ok(e4 && /no -----BEGIN line/.test(e4.message), "a paste missing its first line says so");
 }
 
 console.log(bad ? `\n${bad} FAILED` : "\nall passed");
