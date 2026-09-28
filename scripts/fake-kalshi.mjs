@@ -198,11 +198,11 @@ export function installFakeKalshi({
         const tickers = p.market_tickers || [];
         if (p.action === "add_markets") {
           tickers.forEach(t => sub.tickers.add(t));
-          this.frame({ id: c.id, type: "ok", sid, seq: sub.seq, msg: { market_tickers: [...sub.tickers] } });
-          for (const t of tickers) if (books.has(t)) this.push(sid, "orderbook_snapshot", snapshotMsg(t, sub.yesLeg));
+          sub.seq++; this.frame({ id: c.id, type: "ok", sid, seq: sub.seq, msg: { market_tickers: [...sub.tickers] } });
+          if (sub.channel === "orderbook_delta") for (const t of tickers) if (books.has(t)) this.push(sid, "orderbook_snapshot", snapshotMsg(t, sub.yesLeg));
         } else if (p.action === "delete_markets") {
           tickers.forEach(t => sub.tickers.delete(t));
-          this.frame({ id: c.id, type: "ok", sid, seq: sub.seq, msg: { market_tickers: [...sub.tickers] } });
+          sub.seq++; this.frame({ id: c.id, type: "ok", sid, seq: sub.seq, msg: { market_tickers: [...sub.tickers] } });
         } else if (p.action === "get_snapshot") {
           for (const t of tickers) if (books.has(t)) this.push(sid, "orderbook_snapshot", snapshotMsg(t, sub.yesLeg));
         } else if (p.action === "indexlist") {

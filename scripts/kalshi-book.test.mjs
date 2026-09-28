@@ -97,5 +97,23 @@ console.log("\ndepth uses the polling recorder's definition");
   ok(d.ask_1c === 15 && d.ask_5c === 24, "ask within 1c and 5c, measured upward from the best ask");
 }
 
+console.log("\nKalshi's ok reply to add/delete consumes a sequence number");
+{
+  // Measured on the box 2026-09-28: every add_markets and delete_markets
+  // showed up as a one-number gap until `ok` was counted.
+  const bs = new BookSet({ yesLeg: true });
+  const snap = (seq, t) => ({ type: "orderbook_snapshot", sid: 1, seq, msg: { market_ticker: t, yes_dollars_fp: [["0.4000", "10"]], no_dollars_fp: [["0.5500", "10"]] } });
+  const delta = seq => ({ type: "orderbook_delta", sid: 1, seq, msg: { market_ticker: "A", side: "yes", price_dollars: "0.4000", delta_fp: "1" } });
+  bs.apply(snap(1, "A")); bs.apply(delta(2));
+  const okR = bs.apply({ id: 9, type: "ok", sid: 1, seq: 3, msg: { market_tickers: ["A", "B"] } });
+  bs.apply(snap(4, "B"));
+  const d = bs.apply(delta(5));
+  ok(!okR.gap && !d.gap && bs.stats.gaps === 0 && bs.isFresh("A"), "an ok between frames is not a gap");
+  const other = bs.apply({ id: 10, type: "ok", sid: 2, seq: 7, msg: {} });
+  ok(!other.gap && !bs.lastSeq.has(2), "an ok on a subscription the book does not follow (trades) is ignored");
+  const g = bs.apply(delta(7));
+  ok(g.gap?.expected === 6, "a real missing frame is still a gap");
+}
+
 console.log(bad ? `\n${bad} FAILED` : "\nall passed");
 process.exit(bad ? 1 : 0);

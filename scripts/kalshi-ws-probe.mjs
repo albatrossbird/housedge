@@ -108,11 +108,27 @@ try {
 const opened = await new Promise(res => {
   ws.addEventListener("open", () => res(true), { once: true });
   ws.addEventListener("error", e => res(e?.message || "error"), { once: true });
-  ws.addEventListener("close", e => res(`closed ${e.code} ${e.reason || ""}`), { once: true });
+  // A gap still FAILS the run, but is repaired the way the recorder repairs
+// it, so one lost frame does not also blind the book-vs-REST cross-check
+// for the rest of the run.
+function repair(gap) {
+  seen.gaps.push(gap);
+  if (gap.tickers.length) send(ws, "update_subscription", { sids: [gap.sid], market_tickers: gap.tickers, action: "get_snapshot" }, "repair");
+}
+
+ws.addEventListener("close", e => res(`closed ${e.code} ${e.reason || ""}`), { once: true });
   setTimeout(() => res("timeout after 15s"), 15000);
 });
 check("ws connect", opened === true, opened === true ? `open in ${Date.now() - t0} ms` : `${opened} — a 401 here with REST passing means the WS path was signed wrong`);
 if (opened !== true) finish();
+
+// A gap still FAILS the run, but is repaired the way the recorder repairs
+// it, so one lost frame does not also blind the book-vs-REST cross-check
+// for the rest of the run.
+function repair(gap) {
+  seen.gaps.push(gap);
+  if (gap.tickers.length) send(ws, "update_subscription", { sids: [gap.sid], market_tickers: gap.tickers, action: "get_snapshot" }, "repair");
+}
 
 ws.addEventListener("close", e => { seen.closed = { code: e.code, reason: e.reason, atS: Math.round((Date.now() - t0) / 1000) }; });
 ws.addEventListener("message", ev => {
@@ -126,12 +142,17 @@ ws.addEventListener("message", ev => {
   if (f.type === "ok") {
     if (label === "add") seen.added = true;
     if (label === "remove") seen.removed = true;
+    // An `ok` consumes a sequence number on the book subscription —
+    // lib/kalshiBook.js. Not feeding it here is what made the first box
+    // run report two gaps that were not gaps.
+    const r = book.apply(f);
+    if (r.gap) repair(r.gap);
     return;
   }
   if (/_indexlist$/.test(f.type)) { seen.indexlist = f.msg; return; }
   if (f.type === "orderbook_snapshot" || f.type === "orderbook_delta") {
     const r = book.apply(f);
-    if (r.gap) seen.gaps.push(r.gap);
+    if (r.gap) repair(r.gap);
     if (f.type === "orderbook_delta" && f.msg?.ts_ms) seen.deltaLagMs.push(now - f.msg.ts_ms);
     if (f.type === "orderbook_snapshot" && f.msg?.market_ticker === second) seen.addedSnapshot = true;
     if (f.type === "orderbook_snapshot" && label === "snap") seen.getSnapshot = true;

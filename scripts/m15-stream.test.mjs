@@ -112,6 +112,7 @@ console.log("a normal run");
   ok(kinds("i5").length > 5 && kinds("i1").length > 0, "index ticks recorded (5Hz and 1Hz)", r);
   ok(kinds("final").some(l => l.m === "KXBTC15M-A") && kinds("d").some(l => l.m === "KXBTC15M-A"), "final window: marked, and every change recorded", r);
   ok(!kinds("d").some(l => l.m === "KXBTC15M-NEXT"), "no per-change record outside a final window", r);
+  ok(kinds("gap").length === 0, "a clean run records NO gaps, though markets are added and removed (Kalshi's ok replies consume a sequence number)", r);
   const adds = r.log.commands.filter(c => c.params?.action === "add_markets").flatMap(c => c.params.market_tickers);
   ok(adds.includes("KXSOL15M-NEW") && kinds("b").some(l => l.m === "KXSOL15M-NEW"), "a market listed mid-run is added and recorded", r);
   const dels = r.log.commands.filter(c => c.params?.action === "delete_markets").flatMap(c => c.params.market_tickers);
