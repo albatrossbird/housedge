@@ -21,19 +21,44 @@
 # and NWS issues a handful of times a day. The forecast is fetched on
 # its own hourly clock inside the loop.
 #
-# THE BOX ALSO RUNS THIS, and this job is what it is replacing. Both
-# write to wx_quotes, which is safe — append-only and write-on-change,
-# so two recorders cost duplicate rows and never a gap — and every row
-# is stamped with which recorder wrote it (migration 0026). Decide
-# whether to turn this off with the 'Weather coverage' workflow, which
-# reports PER SOURCE; a union figure cannot tell "the box covers
-# everything" from "the box covers half".
+# THE BOX RUNS THIS NOW, and this job is the one it replaced. Its
+# schedule is off — see the `on:` block below for the measurement that
+# decided it — and what remains is a manual fallback for while the box
+# is down. Every row in wx_quotes is stamped with which recorder wrote
+# it (migration 0026), which is what made the comparison possible: a
+# union figure cannot tell "the box covers everything" from "the box
+# covers half". Running this by hand alongside the box is safe —
+# append-only and write-on-change, so two recorders cost duplicate rows
+# and never a gap.
 #
 name: Record weather markets
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
+  # SCHEDULE OFF, 2026-09-28, ON MEASUREMENT. The box now records this
+  # family, and the per-source check says it does so alone:
+  #
+  #   source        hours seen   coverage   longest gap
+  #   box                   48     100.0%           10m
+  #   actions               45      93.8%          161m
+  #   union                 48     100.0%           10m
+  #   VERDICT: the box alone covers 100.0%, matching the union.
+  #
+  # over a 48-hour window ('Weather coverage' workflow, run 1). The box
+  # never went more than one 10-minute poll without a row; this job's
+  # longest silence was 2h41m. What it adds is duplicate rows and the
+  # largest share of this repository's Actions minutes.
+  #
+  # TURNED OFF BY DELETING THE SCHEDULE, NOT THE JOB. workflow_dispatch
+  # stays, so bringing this back is one click and no commit: the box is
+  # one machine, and a recorder whose data cannot be backfilled needs a
+  # way to run somewhere else while that machine is down.
+  #
+  # BEFORE UNCOMMENTING, RE-RUN 'Weather coverage'. A schedule turned
+  # back on because it feels safer, against a box that is in fact fine,
+  # is the state this measurement exists to replace.
+  #
+  # schedule:
+  #   - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       minutes:

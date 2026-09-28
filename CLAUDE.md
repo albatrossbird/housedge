@@ -895,9 +895,15 @@ way to run somewhere else while that machine is down. **Re-run
 restored because it feels safer, against a box that is fine, is the
 state the measurement exists to replace.
 
-Weather is the same move, one step behind: its rows started carrying a
-`source` on the same day, so the comparison is a day or two of overlap
-away. It is the larger consumer of the two.
+**Weather is DONE too, measured 2026-09-28.** Over 48 hours the box
+covered **48 of 48 hours with a longest gap of 10 minutes** — one poll
+interval — against Actions' 45 of 48 and a 161-minute gap, so
+`record-weather.yml`'s schedule is off on the same terms: workflow
+dispatch kept as the fallback, and **re-run 'Weather coverage' before
+ever putting the schedule back**. It was the largest consumer of
+Actions minutes here, so this is the step that makes a private repo
+affordable; what remains scheduled is small (refresh, discovery,
+matching, two backfills, the watchdog).
 
 ### The 15-minute markets from the WebSocket
 
