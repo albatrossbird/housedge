@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 const HERE = new URL(".", import.meta.url).pathname;
 
-function run({ tempId = "temp-1", registeredId = "temp-1", preexisting = false, genScopes = null, envBefore = "SUPABASE_URL=https://x.supabase.co\nKALSHI_KEY_ID=old\n" } = {}) {
+function run({ tempId = "temp-1", registeredId = "temp-1", preexisting = false, genScopes = null, tempScopes = ["read", "write"], envBefore = "SUPABASE_URL=https://x.supabase.co\nKALSHI_KEY_ID=old\n" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "keysetup-"));
   // What kalshi.com's web page issues: RSA, PKCS#1.
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -27,7 +27,7 @@ function run({ tempId = "temp-1", registeredId = "temp-1", preexisting = false, 
     process.env.KALSHI_READ_KEY_FILE = ${JSON.stringify(out)};
     process.env.MARKETSLAP_ENV_FILE = ${JSON.stringify(env)};
     const fake = installFakeKalshi({ publicKeyPem: ${JSON.stringify(publicKey.export({ type: "spki", format: "pem" }))},
-      keyId: ${JSON.stringify(registeredId)}, scopes: ["read", "write"] });
+      keyId: ${JSON.stringify(registeredId)}, scopes: ${JSON.stringify(tempScopes)} });
     ${genScopes ? `const f = globalThis.fetch; globalThis.fetch = (u, i = {}) => {
       if (String(u).endsWith("/api_keys/generate")) i = { ...i, body: JSON.stringify({ ...JSON.parse(i.body), scopes: ${JSON.stringify(genScopes)} }) };
       return f(u, i); };` : ""}
@@ -53,6 +53,15 @@ console.log("the normal path");
   ok(r.log.deleted.includes("temp-1"), "deletes the temporary key at Kalshi", r);
   ok(!existsSync(r.temp), "and removes it from disk", r);
   ok(!/BEGIN/.test(r.text), "prints no key material", r);
+}
+
+console.log("\nthe web page already issued a read-only key (the first real run)");
+{
+  const r = run({ tempScopes: ["read"] });
+  ok(r.code === 0 && /already read-only/.test(r.text), "adopts it instead of failing", r);
+  ok(r.log.generated.length === 0 && r.log.deleted.length === 0, "mints nothing and deletes nothing", r);
+  ok(existsSync(r.out) && (statSync(r.out).mode & 0o777) === 0o600 && !existsSync(r.temp), "moves it into place, root-only", r);
+  ok(/^KALSHI_KEY_ID=temp-1$/m.test(r.env) && !/KALSHI_KEY_ID=old/.test(r.env), "and records its id", r);
 }
 
 console.log("\nthe Key ID typed wrong");

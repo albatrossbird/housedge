@@ -931,9 +931,16 @@ would have met.
   repairs it. A reconnect, a silent socket (30s with no frame) and a
   restart are all written as `conn` lines.
 - **The key is read-only and never in an env var.** Kalshi's web page
-  issues full-access keys only; `scripts/kalshi-key-setup.mjs` uses one
-  once to mint an ed25519 key with `scopes: ["read"]`, proves the scope
-  from Kalshi's own key list, and deletes the temporary key. The unit
+  CAN issue a read-only key — the Kalshi docs describe no scope picker,
+  and this file first said it could not, which was wrong (measured
+  2026-09-28: minting from the web key returned `403 insufficient scope:
+  write required`). `scripts/kalshi-key-setup.mjs` adopts a key that is
+  already read-only as it is; given a full-access one, it mints an
+  ed25519 key with `scopes: ["read"]`, proves the scope from Kalshi's own
+  key list, and deletes the full-access key. **A phone or browser paste
+  into nano doubled every line break** on the first real run — OpenSSL's
+  bare `DECODER routines::unsupported`; `parsePastedKey()` reads the key
+  from between its markers so layout no longer matters. The unit
   reads it through `LoadCredential`. Signing (`lib/kalshiAuth.js`) was
   verified against OpenSSL, not transcribed.
 - **Prove it from the box first**: `scripts/kalshi-ws-probe.mjs` fails on

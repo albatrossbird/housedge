@@ -1,13 +1,13 @@
-// Turn a temporary full-access Kalshi key into a READ-ONLY one for the
-// box, then delete the temporary key. Run once, as root, on the box.
+// Put a READ-ONLY Kalshi key on the box. Run once, as root, on the box.
 //
-// WHY. Kalshi's web page issues keys with full access — read AND trade —
-// and shows no scope picker. The recorder only reads. A key that can
-// place orders, sitting on an internet-facing machine that runs code
-// pulled from a public repo every few minutes, is risk with no upside.
-// The API can mint a key with `scopes: ["read"]`, but only when asked by
-// an existing key, so the web key is used exactly once, for that, and
-// then deleted.
+// WHY. The recorder only reads. A key that can place orders, sitting on
+// an internet-facing machine that runs code pulled from a public repo
+// every few minutes, is risk with no upside.
+//
+// A key made on kalshi.com that is ALREADY read-only is adopted as it
+// is. (Kalshi's docs describe no scope picker; the first real run proved
+// the page issues read-only keys anyway.) A full-access key is used
+// exactly once, to mint a key with `scopes: ["read"]`, and then deleted.
 //
 // Steps, each verified before the next:
 //   1. mint an ed25519 key with scopes ["read"], signed by the temp key
@@ -18,7 +18,7 @@
 //   5. delete the temp key at Kalshi, then shred the temp file
 //
 // Nothing secret is printed. Key ids are identifiers, not credentials.
-import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync, openSync, writeSync, closeSync, fsyncSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync, openSync, writeSync, closeSync, fsyncSync, renameSync, chmodSync } from "node:fs";
 import { loadKalshiKey, kalshiAuthed } from "../lib/kalshiAuth.js";
 import { createPrivateKey } from "node:crypto";
 
@@ -43,6 +43,24 @@ const asTemp = { keyId: TEMP_ID, key: temp };
 const before = await kalshiAuthed("GET", "/api_keys", asTemp);
 if (!before.ok) die(`Kalshi refused the temporary key: GET /api_keys -> ${before.status} ${JSON.stringify(before.body).slice(0, 200)}. Check the Key ID matches the key you pasted.`);
 step(`temporary key accepted (${(before.body.api_keys || []).length} key(s) on the account)`);
+
+// ALREADY READ-ONLY. Kalshi's web page CAN issue a read-only key — the
+// first real run hit exactly that, and minting from it failed with
+// `403 insufficient scope: write required` while telling the operator to
+// delete a key that was the one we wanted. A read-only key is adopted as
+// it is: moved into place, recorded, and NOT deleted.
+{
+  const mine = (before.body.api_keys || []).find(k => k.api_key_id === TEMP_ID);
+  if (mine?.scopes?.length && !mine.scopes.some(s => s.startsWith("write"))) {
+    step(`this key is already read-only (scopes [${mine.scopes.join(", ")}]) — using it as it is`);
+    renameSync(TEMP_FILE, OUT);
+    chmodSync(OUT, 0o600);
+    step(`moved to ${OUT} (mode 600)`);
+    recordKeyId(TEMP_ID);
+    console.log("\nDONE — the box has a read-only Kalshi key and no key that can trade.");
+    process.exit(0);
+  }
+}
 
 // 1. Mint.
 const gen = await kalshiAuthed("POST", "/api_keys/generate", {
@@ -76,12 +94,7 @@ if (writes.length) {
 step(`verified by Kalshi: scopes [${mine.scopes.join(", ")}]`);
 
 // 4. Record the id where the services read it.
-const env = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
-const lines = env.split("\n").filter(l => !/^KALSHI_KEY_ID=/.test(l));
-while (lines.length && lines[lines.length - 1] === "") lines.pop();
-lines.push(`KALSHI_KEY_ID=${newId}`, "");
-writeFileSync(ENV_FILE, lines.join("\n"), { mode: 0o600 });
-step(`KALSHI_KEY_ID recorded in ${ENV_FILE}`);
+recordKeyId(newId);
 
 // 5. Retire the temp key: at Kalshi first, then on disk.
 const del = await kalshiAuthed("DELETE", `/api_keys/${encodeURIComponent(TEMP_ID)}`, asTemp);
@@ -98,3 +111,12 @@ step(`temporary key deleted at Kalshi`);
 const others = (left.body.api_keys || []).filter(k => k.api_key_id !== newId);
 if (others.length) console.log(`note: ${others.length} other key(s) remain on the account: ${others.map(k => `${k.name} [${(k.scopes || []).join(",")}]`).join("; ")}`);
 console.log("\nDONE — the box has a read-only Kalshi key and no key that can trade.");
+
+function recordKeyId(id) {
+  const env = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
+  const lines = env.split("\n").filter(l => !/^KALSHI_KEY_ID=/.test(l));
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  lines.push(`KALSHI_KEY_ID=${id}`, "");
+  writeFileSync(ENV_FILE, lines.join("\n"), { mode: 0o600 });
+  step(`KALSHI_KEY_ID recorded in ${ENV_FILE}`);
+}
