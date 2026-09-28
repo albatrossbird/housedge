@@ -1,0 +1,30 @@
+name: Stream report
+
+# Reads back the WebSocket archive (scripts/m15-stream.mjs) from the
+# private Storage bucket and reports: is the record whole, how wrong was
+# the 15-second poller against it, and what the close looks like. Manual
+# only — it is a question to ask, not a job to run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Window to report over, in hours"
+        required: false
+        default: "24"
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Stream report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          # The archive bucket is private (migration 0029).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/m15-stream-report.mjs --hours=${{ github.event.inputs.hours || '24' }}
