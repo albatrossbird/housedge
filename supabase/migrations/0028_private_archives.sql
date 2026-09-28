@@ -1,10 +1,14 @@
--- Close public read on the recorded archives.
+-- Close anon read on the recorded archives.
 --
 -- WHY. Every table below was created readable by anyone holding the
 -- anon key — `create policy ... for select using (true)` in 0016 and
--- 0021 — and the anon key is public by design: it ships in the site's
--- JavaScript. So the entire recorded 15-minute and weather archive could
--- be pulled by anyone, which reads closely on Kalshi's Data Terms of Use:
+-- 0021. That key is NOT shipped to browsers here (every Supabase client
+-- is server-side; there is no NEXT_PUBLIC_ key), so the archive was never
+-- open to the public. A first draft of this comment said it was, without
+-- checking. But Supabase designs the anon key to be publishable, so one
+-- change — a client-side read, a leaked secret — would expose the whole
+-- recorded 15-minute and weather archive, which reads closely on Kalshi's
+-- Data Terms of Use:
 --
 --   "providing archived or cached data sets containing Kalshi Data to
 --    another person or entity"
