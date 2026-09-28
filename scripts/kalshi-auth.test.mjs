@@ -100,6 +100,9 @@ console.log("\na key mangled by a phone paste");
     "every line indented": pem.split("\n").map(l => "  " + l).join("\n"),
     "first line run into the second": lines[0] + lines.slice(1).join("\n"),
     "Windows line endings": pem.replace(/\n/g, "\r\n"),
+    // What actually reached the box on 2026-09-28: a blank line after
+    // every line (27 empty, 24 x 64, one 52, both markers).
+    "a blank line after every line": pem.split("\n").join("\n\n"),
     "PKCS#1 body under a PKCS#8 label": pem.replace(/RSA PRIVATE KEY/g, "PRIVATE KEY"),
   };
   for (const [name, text] of Object.entries(cases)) {
