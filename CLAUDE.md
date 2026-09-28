@@ -895,9 +895,15 @@ way to run somewhere else while that machine is down. **Re-run
 restored because it feels safer, against a box that is fine, is the
 state the measurement exists to replace.
 
-Weather is the same move, one step behind: its rows started carrying a
-`source` on the same day, so the comparison is a day or two of overlap
-away. It is the larger consumer of the two.
+**Weather is DONE too, measured 2026-09-28.** Over 48 hours the box
+covered **48 of 48 hours with a longest gap of 10 minutes** — one poll
+interval — against Actions' 45 of 48 and a 161-minute gap, so
+`record-weather.yml`'s schedule is off on the same terms: workflow
+dispatch kept as the fallback, and **re-run 'Weather coverage' before
+ever putting the schedule back**. It was the largest consumer of
+Actions minutes here, so this is the step that makes a private repo
+affordable; what remains scheduled is small (refresh, discovery,
+matching, two backfills, the watchdog).
 
 ### The 15-minute markets from the WebSocket
 
@@ -952,9 +958,14 @@ would have met.
 
 ### The recorded archives are private (migration 0028)
 
-`m15_*` and `wx_*` were readable with the anon key, which ships in the
-browser bundle of a public site — so the whole recorded dataset was
-public. `0028` drops their read policies and revokes SELECT from `anon`
+`m15_*` and `wx_*` were readable by anyone holding the anon key. **That
+key is NOT in the browser bundle** — every `createClient` here is
+server-side and there is no `NEXT_PUBLIC_SUPABASE_*` var — so it lives
+only in Vercel, the repository secrets and the box. The first draft of
+this section, and of 0028's header, said it "ships in the site's
+JavaScript" and so the data was public; that was never checked, and was
+wrong. 0028 is defence in depth — a leaked or later-exposed anon key
+reads nothing recorded — not the closing of an open door. `0028` drops their read policies and revokes SELECT from `anon`
 and `authenticated`; every analysis script and workflow reads with
 `SUPABASE_SERVICE_ROLE_KEY`. **Revoking the grant matters as much as the
 policy**: RLS with no policy returns zero rows with a 200, which reads as
