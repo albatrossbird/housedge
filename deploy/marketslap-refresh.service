@@ -1,0 +1,42 @@
+# The site's price refresh, on the box instead of GitHub Actions.
+#
+# WHY. refresh-prices.yml asks GitHub for every 5 minutes and GETS 45
+# minutes to 3.5 hours — scheduled runs on this repo are throttled — so
+# the stored prices a visitor lands on can be hours old until the page's
+# own on-demand refresh catches up. A timer on the box actually runs
+# every 5 minutes. It is also Actions minutes this repository will have
+# to pay for once it is private.
+#
+# Same script, same alarms: scripts/refresh-prices.mjs calls the shared
+# runRefresh() (lib/refreshPrices.js) that /api/refresh also uses, and
+# exits non-zero on every failure the workflow used to fail on — a
+# venue fetched and none written, a throttled or never-polled Kalshi
+# series. Here that shows as this unit going `failed`, visible in
+# `systemctl status` and the journal.
+#
+# Needs no npm install: the script reads Supabase over REST.
+#
+# NICE, because the recorders share this machine and their data cannot
+# be backfilled; a price refresh that runs a few seconds slower costs
+# nothing.
+
+[Unit]
+Description=MarketSlap price refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=marketslap
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+ExecStart=/usr/bin/node scripts/refresh-prices.mjs
+# A normal run takes ~70s. Well under the 5-minute interval, so a hung
+# run is killed before the next one is due rather than piling up.
+TimeoutStartSec=240
+Nice=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
