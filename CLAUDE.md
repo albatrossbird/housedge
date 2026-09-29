@@ -965,6 +965,53 @@ would have met.
 - `scripts/fake-kalshi.mjs` is the test double for all of the above: it
   verifies signatures and serves one book in both encodings.
 
+### Polymarket US lists the same 15-minute Bitcoin market
+
+**`BTC Up or Down: 15 min` on polymarket.us is Kalshi's `KXBTC15M`,
+not a correlated cousin.** Both settle on CF Benchmarks' **BRTI** (the
+press coverage says Chainlink; the market's own rules and data say
+BRTI), each end of the window is the simple average of the 60 index
+prices in the minute before it rounded to the cent, and a tie pays Up /
+Yes on both. Checked 2026-09-28: all 24 windows settled that day had the
+same price to beat, the same settlement to the cent and the same
+outcome. Up is YES.
+
+- **No index lists them.** Not in `/v1/events?closed=false`, and
+  `/v1/markets?slug=` returns nothing. The market slug is a function of
+  the window's UTC start: `cpc-btc-updown-15m-2026-09-28-2130z`. The
+  Kalshi ticker for the same window names its close in ET
+  (`KXBTC15M-26SEP281745-45`). `lib/pmus15.js` builds both.
+- **The public REST `/book` is not live.** Cloudflare caches it for 30s
+  and its origin has been seen frozen for minutes. The live source is
+  the key-gated socket.
+- **Fees make small gaps worthless.** Kalshi 0.07 x p(1-p) on this
+  series, .us 0.0695 x p(1-p): ~3.5c for the pair near 50c. Paired reads
+  on launch day showed the two touches within 1c nearly every time. .us
+  pays makers 0.0125 x p(1-p).
+
+`scripts/pmus15-stream.mjs` (`marketslap-pmus15-stream.service`)
+records every whole .us book, when it changed, on the box's clock — the
+clock the Kalshi archive uses — to `stream-archive` under `pmus15/`. The
+archive code is `lib/streamArchive.js`, shared with the Kalshi recorder
+so the two cannot drift into mismatched hours.
+
+- **It uses the box's .us key, and that key CAN TRADE.** Polymarket US
+  issues no read-only keys. It is used only for the market-data socket;
+  `scripts/no-order-endpoints.test.mjs` fails if any tracked file names
+  an order route. The account stays at $0 while the key exists.
+- **Shared key, so: one socket**, backoff 1s doubling to 60s, and a
+  backoff that resets only after a connection held for a minute.
+- **A deleted key must read as a failure, an outage must not.** Node
+  hides a refused handshake's status, so the recorder asks the public
+  gateway: up while the socket refuses means the key, and it exits 3,
+  which `RestartPreventExitStatus` does not restart — with a 60s cap, a
+  restart loop would sit under `StartLimitBurst` forever. Down too means
+  an outage, and it keeps trying.
+- **`scripts/pmus15-probe.mjs` proves the side**, against Kalshi's live
+  book for the same window, with a mirrored control that must fail.
+  Signing was checked byte-for-byte against the SDK's own Ed25519
+  library.
+
 ### The recorded archives are private (migration 0028)
 
 `m15_*` and `wx_*` were readable by anyone holding the anon key. **That

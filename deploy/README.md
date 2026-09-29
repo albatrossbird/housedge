@@ -240,6 +240,51 @@ mint a read-only key and then deletes the full-access one.
        sudo systemctl enable --now marketslap-m15-stream.service
        sudo journalctl -u marketslap-m15-stream -n 25 --no-pager
 
+## The Polymarket US recorder (`marketslap-pmus15-stream.service`)
+
+Records Polymarket US's 15-minute Bitcoin "Up or Down" books, beside the
+Kalshi recorder, so the same window can be compared on both venues at the
+same instant. They are the same claim as Kalshi's `KXBTC15M` (same index,
+same averaging, same tie rule). Files go to `stream-archive` under
+`pmus15/`.
+
+It uses the box's .us key **in place**: the id in `/etc/polyus/id.env`,
+the secret in `/etc/polyus/polyus.key`. Nothing needs creating. **That
+key can trade**, so this repo only ever opens the market-data socket with
+it, and the account must stay at $0 while the key exists.
+
+All commands are for the **box terminal**, one at a time.
+
+1. Pick up the new unit file:
+
+       sudo systemctl start marketslap-update.service
+       sudo systemctl start marketslap-sync.service
+
+2. Prove the socket from this box (about 40 seconds, writes nothing):
+
+       sudo systemd-run --quiet --wait --pipe --uid=marketslap \
+         -p EnvironmentFile=/etc/polyus/id.env \
+         -p LoadCredential=polyus.key:/etc/polyus/polyus.key \
+         /usr/bin/node /opt/marketslap/scripts/pmus15-probe.mjs
+
+   It must end with `ALL REQUIRED CHECKS PASSED`. `same side` compares
+   the book against Kalshi's live book for the same window.
+3. Start it, then check it is writing (after about a minute):
+
+       sudo systemctl enable --now marketslap-pmus15-stream.service
+       sudo journalctl -u marketslap-pmus15-stream -n 25 --no-pager
+
+   Look for `socket open` and no `::error::`. The first stats line
+   (`books=... booksWritten=... uploads=...`) prints after 5 minutes; the
+   first upload lands at the top of the next hour.
+
+If the .us key is ever deleted, the unit fails within a minute with
+`refused 5 handshakes in a row while the gateway is up` and does not
+restart. That is expected; disable it with
+`sudo systemctl disable marketslap-pmus15-stream.service`. (If the
+gateway is down too, it treats that as an outage and keeps retrying
+every 60 seconds.)
+
 ## The price refresh (`marketslap-refresh.timer`)
 
 Updates the site's prices every 5 minutes, which GitHub Actions only
