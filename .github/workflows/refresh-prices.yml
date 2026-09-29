@@ -16,7 +16,15 @@ name: Refresh prices
 # matters: someone is looking at it right now.
 
 on:
-  schedule:
+  # SCHEDULE OFF, measured 2026-09-29: the box's marketslap-refresh.timer
+  # runs the same scripts/refresh-prices.mjs every 5 minutes, and every
+  # category on /api/markets read ~3 minutes old while this workflow's
+  # last run was 3 hours earlier. This schedule was ~600 of the 2,000
+  # Actions minutes a private repo gets a month. workflow_dispatch is kept
+  # as the fallback for when the box is down; check per-category
+  # priceAgeSeconds before ever putting the schedule back.
+  #
+  # schedule:
     # GitHub does not honour this: measured gaps between scheduled runs
     # on this public repo were 45 minutes to 3.5 hours. Asking for */5
     # rather than */15 does not make it five minutes -- it just means the
@@ -34,7 +42,7 @@ on:
     # and still serves the browser's on-demand refresh. The page also asks for a refresh of its own when what it
     # is showing is over three minutes old, which covers the case that
     # actually matters: someone is looking at it.
-    - cron: "*/5 * * * *"   # UTC
+    # - cron: "*/5 * * * *"   # UTC
 
   workflow_dispatch:          # manual trigger from the Actions tab
 

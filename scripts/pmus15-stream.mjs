@@ -15,8 +15,11 @@
 // WHAT IS KEPT. Every whole book the socket sends, when it changed (10s
 // heartbeat otherwise), with the exchange's transactTime and the box's
 // receive time `t` — the same clock the Kalshi archive uses, which is what
-// makes the two files comparable. Books here are shallow (10-15 levels),
-// so every level is stored. Every public trade too.
+// makes the two files comparable. Every level is stored: the first probe
+// from the box (2026-09-29) saw 46 bid and 53 offer levels, where a REST
+// read on launch day had shown 10-15 and a 50-level cap was set on that
+// basis — which silently cut the deep offers. MAX_LEVELS is now only a
+// guard against a runaway message. Every public trade too.
 //
 //   k:"pb"   book: b = bids best-first, a = offers best-first, [price, qty]
 //            Prices are for the market as published: "Up" (the long side),
@@ -62,7 +65,7 @@ const UPLOAD_MS = Number(env.STREAM_UPLOAD_MS || 60000);
 const BACKOFF_MS = Number(env.PMUS_BACKOFF_MS || 1000);
 const MAX_BACKOFF_MS = 60000;
 const MAX_DRIFT_MS = Number(env.PMUS_MAX_DRIFT_MS || 10000);
-const MAX_LEVELS = 50;
+const MAX_LEVELS = 500;
 const SOURCE = recorderSource(env, "PMUS_SOURCE");
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));

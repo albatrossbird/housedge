@@ -1012,6 +1012,33 @@ so the two cannot drift into mismatched hours.
   Signing was checked byte-for-byte against the SDK's own Ed25519
   library.
 
+### Going private: what breaks, measured before the switch
+
+Three things depend on the repo being public, and none of them fails
+loudly:
+
+- **The box's code pull.** `marketslap-update.service` fetched over
+  anonymous HTTPS; on a private repo that fails and the recorders keep
+  running their last code. `deploy/git-deploy-key.sh` moves it to SSH
+  with a READ-ONLY deploy key in `/var/lib/marketslap-git` — not the
+  service account's home, which is the checkout the timer resets. Run it
+  while the repo is still public.
+- **Vercel Hobby deploys a private repo's commit only if its AUTHOR is
+  the account owner.** Squash-merged commits on `main` are authored by
+  `albatrossbird` (checked on #171), so production is fine. Branch
+  commits pushed from a Claude session are authored "Claude", so PR
+  preview deploys show as blocked — cosmetic, since only `main` deploys
+  the site. **Never merge with a plain merge commit that fast-forwards a
+  Claude-authored commit onto `main`**; squash.
+- **Actions minutes stop being free**: 2,000 a month on GitHub Free,
+  billed per job rounded up to the minute. Measured 2026-09-22..28:
+  `refresh-prices` 5-7 runs a day at 2-3 min (~600/month, and it is
+  duplicated by the box's refresh timer), `discover-markets` 15-20 min
+  and `match-markets` 13-16 min daily (~1,000/month together). The
+  refresh schedule is OFF as of 2026-09-29 (the box held every category
+  at ~3 minutes old); moving discovery and matching to the box is what
+  brings the total well under the cap.
+
 ### The recorded archives are private (migration 0028)
 
 `m15_*` and `wx_*` were readable by anyone holding the anon key. **That

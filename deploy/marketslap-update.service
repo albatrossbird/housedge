@@ -5,9 +5,13 @@
 # The recorders cycle hourly, so new code is live within the hour with
 # no manual step.
 #
-# The repo is public, so this needs no credential. `git reset --hard`
-# rather than `git pull`, because a merge conflict on an unattended box
-# is a recorder that silently stops.
+# It fetches over SSH with a READ-ONLY deploy key once
+# deploy/git-deploy-key.sh has run — the repo is going private, and the
+# old public-HTTPS fetch would then fail while the recorders carried on
+# with whatever code they last had. The key and the remote live in
+# /var/lib/marketslap-git and the checkout's own git config, so nothing
+# here changes. `git reset --hard` rather than `git pull`, because a
+# merge conflict on an unattended box is a recorder that silently stops.
 #
 # IT UPDATES THE REPO, NOT THE MACHINE, and that used to be the end of
 # the story. This runs as `marketslap`, which has no business writing to
@@ -16,8 +20,8 @@
 #
 # marketslap-sync.service closes that. It runs After= this one, as root,
 # and syncs deploy/marketslap-*.service into /etc/systemd/system. The
-# split is deliberate: pulling from a public repo stays unprivileged,
-# and only the copy into /etc is root.
+# split is deliberate: pulling the repo stays unprivileged, and only the
+# copy into /etc is root.
 #
 # The m15 recorder's source stamp still reads systemd's INVOCATION_ID
 # rather than an Environment= line, and should stay that way — deriving

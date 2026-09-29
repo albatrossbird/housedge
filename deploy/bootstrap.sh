@@ -46,12 +46,15 @@ say "service account"
 id -u "$USER" >/dev/null 2>&1 || adduser --system --group --home "$DIR" --shell /usr/sbin/nologin "$USER"
 
 say "code"
-# The repo is public, so no deploy key — and therefore no credential on
-# the box that could push back to GitHub.
+# Once the repo is private, a fresh box cannot clone it over HTTPS: see
+# "A new box, once the repo is private" in deploy/README.md, which clones
+# over SSH with a read-only deploy key first. An existing checkout
+# fetches through whatever remote deploy/git-deploy-key.sh configured.
 if [ -d "$DIR/.git" ]; then
-  git -C "$DIR" fetch --quiet origin main && git -C "$DIR" reset --hard --quiet origin/main
-else
-  git clone --quiet "$REPO" "$DIR"
+  sudo -u "$USER" git -C "$DIR" fetch --quiet origin main && sudo -u "$USER" git -C "$DIR" reset --hard --quiet origin/main
+elif ! git clone --quiet "$REPO" "$DIR"; then
+  echo "cannot clone $REPO — if the repo is private, follow 'A new box, once the repo is private' in deploy/README.md"
+  exit 1
 fi
 chown -R "$USER:$USER" "$DIR"
 git config --global --add safe.directory "$DIR"
