@@ -42,8 +42,10 @@ The frontend never calls Kalshi/Polymarket directly. Data flows through three AP
 ### Automation
 
 Both jobs run from GitHub Actions, not Vercel cron: the Hobby plan caps
-crons at once per *day*, which is not a fix for stale prices. The repo is
-public, so Actions minutes are free and unmetered.
+crons at once per *day*, which is not a fix for stale prices. **The repo
+has been PRIVATE since 2026-09-29**, so Actions minutes are metered —
+2,000 a month on GitHub Free — and much of what follows describes the
+public-repo era: see "Going private" below for what moved and why.
 
 - `.github/workflows/refresh-prices.yml` — `/api/refresh`. The cron says
   `*/15` but **GitHub does not honour that**: measured gaps between
@@ -66,7 +68,7 @@ public, so Actions minutes are free and unmetered.
   `scripts/match-category.mjs`, so the two cannot drift — the same
   reason `matchNonSportsMarkets` was already shared between `matchonly`
   and normal mode. Needs `SUPABASE_URL` and `SUPABASE_ANON_KEY` as
-  **repository secrets** (the repo is public).
+  **repository secrets** — never inline, private repo or not.
 
   **A blocking index was tried first and rejected on measurement**:
   scoring only pairs that share a content word lost **55 of 208
@@ -1014,7 +1016,12 @@ so the two cannot drift into mismatched hours.
 
 ### Going private: what breaks, measured before the switch
 
-Three things depend on the repo being public, and none of them fails
+**Done 2026-09-29.** The box pulls with its deploy key (`DONE`, and
+`marketslap-update` clean afterwards), a manual watchdog run passed
+after the switch, and the commit adding this paragraph was the test of
+Vercel deploying from the private repo.
+
+Three things depended on the repo being public, and none of them fails
 loudly:
 
 - **The box's code pull.** `marketslap-update.service` fetched over
