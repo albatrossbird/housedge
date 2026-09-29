@@ -31,15 +31,13 @@
 //
 // Prices are YES-leg throughout: "b" is the YES bid stack, "a" the YES
 // ask stack (Kalshi's NO bids, already converted by use_yes_price).
-import { createGzip, constants as zc } from "node:zlib";
-import { createWriteStream, mkdirSync, readdirSync, renameSync, readFileSync, unlinkSync, statSync, statfsSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
 import { KALSHI_REST, KALSHI_WS, WS_PATH, keyPath, loadKalshiKey, kalshiAuthHeaders } from "../lib/kalshiAuth.js";
 import { BookSet } from "../lib/kalshiBook.js";
 import { M15_SUFFIX, M15_CATEGORIES } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
-import { authHeaders } from "../lib/supabaseHeaders.js";
 import { recorderSource } from "../lib/recorderSource.js";
+import { createArchive } from "../lib/streamArchive.js";
 
 const env = process.env;
 const SUPABASE_URL = env.SUPABASE_URL;
@@ -75,99 +73,17 @@ await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
 mkdirSync(DIR, { recursive: true });
 log(`source: ${SOURCE}, archive ${DIR} -> ${BUCKET}, run ${RUN_MINUTES}m`);
 
-// The bucket is proven the same way the credential is: by using it. A
-// missing bucket would otherwise surface an hour from now as a failed
-// upload, with an hour of data piling up on a small disk.
+const stats = { frames: 0, deltas: 0, finalDeltas: 0, snaps: 0, trades: 0, i5: 0, i1: 0, gaps: 0, reconnects: 0, errors: 0 };
+const archive = createArchive({
+  dir: DIR, bucket: BUCKET, supabaseUrl: SUPABASE_URL, key: KEY, prefix: "m15", source: SOURCE, rotateMs: ROTATE_MS, log,
+  meta: now => ({ k: "meta", t: now, source: SOURCE, yesLeg: true, levels: LEVELS, snapshotMs: SNAPSHOT_MS, finalSeconds: FINAL_MS / 1000, v: 1 }),
+});
+const write = archive.write;
 {
-  const r = await upload(`m15/_probe/${SOURCE}.txt`, Buffer.from(new Date().toISOString()), "text/plain");
-  if (!r.ok) {
-    console.error(`::error::cannot write to Storage bucket '${BUCKET}': ${r.status} ${r.body}`);
-    if (/bucket not found|404/i.test(`${r.status} ${r.body}`)) console.error("::error::run migration 0029_stream_archive_bucket.sql");
-    process.exit(1);
-  }
+  const bad = await archive.probe();
+  if (bad) { for (const l of bad) console.error(`::error::${l}`); process.exit(1); }
 }
-
-// ── The archive: hourly gzip files, uploaded then deleted ──────────────
-const stats = { frames: 0, deltas: 0, finalDeltas: 0, snaps: 0, trades: 0, i5: 0, i1: 0, gaps: 0, reconnects: 0, lines: 0, uploads: 0, uploadFails: 0, errors: 0 };
-let out = null;   // { gz, slot, part, final }
-
-function fileName(startMs) {
-  const d = new Date(startMs).toISOString();   // 2026-09-26T15:01:30.123Z
-  return `${d.slice(0, 10)}_${d.slice(11, 13)}_${d.replace(/[-:.]/g, "").slice(0, 18)}Z_${SOURCE}.ndjson.gz`;
-}
-// 2026-09-26_15_20260926T150130123Z_box.ndjson.gz -> m15/2026-09-26/15/20260926T150130123Z_box.ndjson.gz
-// Milliseconds in the name: two files may start in the same second (a
-// restart right after a rotation) and must not overwrite each other.
-const remotePath = name => { const [day, hour, ...rest] = name.split("_"); return `m15/${day}/${hour}/${rest.join("_")}`; };
-
-function openFile(now) {
-  const final = join(DIR, fileName(now));
-  const part = final + ".part";
-  const gz = createGzip(), file = createWriteStream(part);
-  gz.pipe(file);
-  out = { gz, file, slot: Math.floor(now / ROTATE_MS), part, final };
-  write({ k: "meta", t: now, source: SOURCE, yesLeg: true, levels: LEVELS, snapshotMs: SNAPSHOT_MS, finalSeconds: FINAL_MS / 1000, v: 1 });
-}
-
-// Finish the gzip and only then drop the .part suffix, so a file without
-// it is always complete. A crash leaves a .part, which the next run
-// uploads under a "-truncated" name: gzip is readable up to its last
-// flush, and the flush below runs every few seconds.
-function closeFile() {
-  if (!out) return Promise.resolve();
-  const { gz, file, part, final } = out;
-  out = null;
-  return new Promise(res => {
-    const done = () => { try { renameSync(part, final); } catch {} res(); };
-    file.on("finish", done);
-    file.on("error", () => res());
-    gz.end();
-  });
-}
-
-function write(obj) {
-  if (!out) return;
-  out.gz.write(JSON.stringify(obj) + "\n");
-  stats.lines++;
-}
-
-function rotateIfDue(now) {
-  if (out && Math.floor(now / ROTATE_MS) !== out.slot) {
-    const old = closeFile();
-    openFile(now);
-    old.then(uploadAll);
-  }
-}
-
-async function upload(path, body, type = "application/gzip") {
-  try {
-    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
-      method: "POST", body,
-      headers: authHeaders(KEY, { "Content-Type": type, "x-upsert": "true" }),
-    });
-    return { ok: r.ok, status: r.status, body: r.ok ? "" : (await r.text()).slice(0, 200) };
-  } catch (e) { return { ok: false, status: 0, body: e.message }; }
-}
-
-let uploading = false;
-async function uploadAll() {
-  if (uploading) return;
-  uploading = true;
-  try {
-    for (const name of readdirSync(DIR).filter(n => n.endsWith(".ndjson.gz")).sort()) {
-      const body = readFileSync(join(DIR, name));
-      const r = await upload(remotePath(name), body);
-      if (r.ok) { unlinkSync(join(DIR, name)); stats.uploads++; }
-      else { stats.uploadFails++; log(`::warning::upload ${name} failed: ${r.status} ${r.body} — kept locally, will retry`); }
-    }
-  } finally { uploading = false; }
-}
-
-// Leftovers from a run that died mid-file.
-for (const name of readdirSync(DIR).filter(n => n.endsWith(".ndjson.gz.part"))) {
-  renameSync(join(DIR, name), join(DIR, name.replace(/\.ndjson\.gz\.part$/, "-truncated.ndjson.gz")));
-  log(`::warning::found ${name} from a run that did not finish; uploading it as truncated`);
-}
+archive.recoverLeftovers();
 
 // ── Markets: current window plus the next ones, subscribed AHEAD ───────
 // Kalshi lists each 15-minute market about a day before it opens, as
@@ -406,14 +322,14 @@ function connect() {
 
 // ── Run ────────────────────────────────────────────────────────────────
 const started = Date.now();
-openFile(started);
+archive.open(started);
 let stopping = false;
 const stop = async (why) => {
   if (stopping) return; stopping = true;
   log(`stopping: ${why}`);
   write({ k: "conn", t: Date.now(), ev: "stop", why });
   try { ws?.close(); } catch {}
-  await closeFile();
+  await archive.close();
   printStats();
   process.exit(0);
 };
@@ -421,11 +337,9 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
 function printStats() {
-  let backlog = 0;
-  try { backlog = readdirSync(DIR).filter(n => n.endsWith(".ndjson.gz")).length; } catch {}
-  let free = null;
-  try { const s = statfsSync(DIR); free = (s.bavail * s.bsize / 1e9).toFixed(1); } catch {}
-  log(`frames=${stats.frames} deltas=${stats.deltas} finalDeltas=${stats.finalDeltas} snaps=${stats.snaps} trades=${stats.trades} i5=${stats.i5} i1=${stats.i1} gaps=${stats.gaps} reconnects=${stats.reconnects} errors=${stats.errors} markets=${markets.size} uploads=${stats.uploads} uploadFails=${stats.uploadFails} backlog=${backlog} diskFreeGB=${free}`);
+  const backlog = archive.backlog(), free = archive.diskFreeGB();
+  const { lines, uploads, uploadFails } = archive.stats;
+  log(`frames=${stats.frames} deltas=${stats.deltas} finalDeltas=${stats.finalDeltas} snaps=${stats.snaps} trades=${stats.trades} i5=${stats.i5} i1=${stats.i1} gaps=${stats.gaps} reconnects=${stats.reconnects} errors=${stats.errors} markets=${markets.size} lines=${lines} uploads=${uploads} uploadFails=${uploadFails} backlog=${backlog} diskFreeGB=${free}`);
   if (free != null && Number(free) < 1) log(`::warning::less than 1GB free under ${DIR} — uploads are not keeping up`);
 }
 
@@ -436,7 +350,7 @@ log(`${series.length} series, ${markets.size} markets in the next ${LOOKAHEAD_S 
 // the gap stays visible while disconnected.
 setInterval(() => {
   const now = Date.now();
-  rotateIfDue(now);
+  archive.rotateIfDue(now);
   snapshotTick(now);
   if (ws && ws.readyState === 1) {
     // A socket that stays open and says nothing is the failure a close
@@ -450,11 +364,11 @@ setInterval(() => {
     if (!ALIGN_EXIT || (inWindow >= 60 && inWindow < 120) || ran >= RUN_MINUTES + 16) stop("cycle");
   }
 }, SNAPSHOT_MS);
-setInterval(() => out?.gz.flush(zc.Z_SYNC_FLUSH), 5000);
+setInterval(archive.flush, 5000);
 setInterval(() => { retireClosed(Date.now()); discover().catch(e => log(`::warning::discovery: ${e.message}`)); }, DISCOVER_MS);
-setInterval(() => uploadAll().catch(e => log(`::warning::upload: ${e.message}`)), UPLOAD_MS);
+setInterval(() => archive.uploadAll().catch(e => log(`::warning::upload: ${e.message}`)), UPLOAD_MS);
 setInterval(printStats, Number(env.STREAM_STATS_MS || 300000));
-uploadAll().catch(() => {});
+archive.uploadAll().catch(() => {});
 
 // A handshake that keeps failing is a credential or clock problem, which
 // retrying will not fix. Exit, so StartLimitBurst stops the unit and it
@@ -467,7 +381,7 @@ while (!stopping) {
   refusedInARow = opened ? 0 : refusedInARow + 1;
   if (refusedInARow >= Number(env.STREAM_MAX_REFUSED || 5)) {
     console.error(`::error::the socket refused ${refusedInARow} handshakes in a row — check the Kalshi key (run scripts/kalshi-ws-probe.mjs) and the clock`);
-    await closeFile();
+    await archive.close();
     process.exit(1);
   }
   stats.reconnects++;

@@ -1,0 +1,55 @@
+# Polymarket US's 15-minute "Up or Down" books from its WebSocket, beside
+# marketslap-m15-stream.service (Kalshi), so the same window can be read
+# on both venues on one clock. See scripts/pmus15-stream.mjs.
+#
+# NOT enabled by bootstrap or by the sync timer: starting a recorder is a
+# human decision. Prove the socket from this box first:
+#
+#   scripts/pmus15-probe.mjs   (instructions in deploy/README.md)
+#
+# THE KEY is the box's .us key, used in place. It CAN TRADE — Polymarket
+# US issues no read-only keys — so this repo only ever opens the market-
+# data socket with it (scripts/no-order-endpoints.test.mjs). LoadCredential
+# hands the service a private copy under $CREDENTIALS_DIRECTORY while it
+# runs; at rest the file stays root-only. It is shared with another
+# service on this box: one socket, backoff to 60s, and a refused key stops
+# the unit rather than retrying forever.
+
+[Unit]
+Description=MarketSlap Polymarket US 15-minute stream recorder
+After=network-online.target
+Wants=network-online.target
+# In [Unit] — systemd ignores these in [Service]. See marketslap-m15.service.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=marketslap
+WorkingDirectory=/opt/marketslap
+# Supabase (the private archive bucket), then the .us key id.
+EnvironmentFile=/etc/marketslap/env
+EnvironmentFile=/etc/polyus/id.env
+LoadCredential=polyus.key:/etc/polyus/polyus.key
+# /var/lib/marketslap-pmus15, owned by the service user. NOT under
+# /opt/marketslap, which the update timer resets to origin/main.
+StateDirectory=marketslap-pmus15
+# Cycles hourly so new code lands, at minute 1-2 of a window.
+Environment=STREAM_RUN_MINUTES=60
+ExecStart=/usr/bin/node scripts/pmus15-stream.mjs
+Restart=always
+# 3 = the .us key was refused while the gateway was up: a deleted key,
+# which restarting cannot fix. The unit stops and shows as failed.
+RestartPreventExitStatus=3
+# Not 2s like the Kalshi recorder: a restart is a new handshake on a key
+# another service shares, and the script already backs off inside a run.
+RestartSec=10
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
