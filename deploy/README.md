@@ -180,6 +180,49 @@ is what keeps this workable from a phone.
 It uses `git reset --hard` rather than `git pull`: a merge conflict on
 an unattended box is a recorder that silently stops.
 
+### Before the repo goes private: a read-only deploy key
+
+The pull used to be anonymous HTTPS, which stops working the moment the
+repo is private — and nothing breaks visibly: the recorders keep running
+their last code and new code simply stops arriving. So the box pulls
+over SSH with a **read-only deploy key**, set up while the repo is still
+public. **Box terminal**:
+
+    sudo bash /opt/marketslap/deploy/git-deploy-key.sh
+
+The first run makes the key and prints its public half with where to
+paste it on GitHub (Settings -> Deploy keys; leave write access
+UNTICKED). Run the same command again afterwards; it must end with
+`DONE`. Then prove the update job itself works:
+
+    sudo systemctl start marketslap-update.service
+    systemctl status marketslap-update --no-pager | head -5
+
+It must not say `failed`.
+
+### A new box, once the repo is private
+
+`curl ... bootstrap.sh | bash` cannot work any more: the raw URL needs
+a login. Make the key first, clone over SSH, then bootstrap from the
+clone. **Box terminal**, one at a time:
+
+    sudo adduser --system --group --home /opt/marketslap --shell /usr/sbin/nologin marketslap
+    sudo install -d -o marketslap -g marketslap -m 700 /var/lib/marketslap-git
+    sudo -u marketslap ssh-keygen -q -t ed25519 -N "" -f /var/lib/marketslap-git/deploy_key
+    sudo cat /var/lib/marketslap-git/deploy_key.pub
+
+Add that line at GitHub -> the repo -> Settings -> Deploy keys (write
+access unticked), then:
+
+    echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' | sudo -u marketslap tee /var/lib/marketslap-git/known_hosts
+    sudo -u marketslap env GIT_SSH_COMMAND="ssh -i /var/lib/marketslap-git/deploy_key -o UserKnownHostsFile=/var/lib/marketslap-git/known_hosts" git clone git@github.com:albatrossbird/housedge.git /opt/marketslap/repo-tmp
+    sudo bash -c 'shopt -s dotglob && mv /opt/marketslap/repo-tmp/* /opt/marketslap/ && rmdir /opt/marketslap/repo-tmp'
+    sudo bash /opt/marketslap/deploy/bootstrap.sh
+    sudo bash /opt/marketslap/deploy/git-deploy-key.sh
+
+(The host key line is GitHub's published Ed25519 key, from
+docs.github.com's "GitHub's SSH key fingerprints" page.)
+
 ## Knowing when it dies
 
 A dead box produces no red workflow — it produces **silence**, which
