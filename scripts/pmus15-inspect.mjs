@@ -42,7 +42,9 @@ for (const f of pFiles) await reader.eachLine(f.path, o => {
   if (o.k === "tr") push(tr, o.m, o);
 });
 const needle = `"m":"${KALSHI_SERIES}-`;
-for (const f of kFiles) await reader.eachLine(f.path, o => push(kal, o.m, o), line => line.startsWith('{"k":"b"') && line.includes(needle));
+const ktr = new Map();
+for (const f of kFiles) await reader.eachLine(f.path, o => o.k === "b" ? push(kal, o.m, o) : push(ktr, o.m, o),
+  line => (line.startsWith('{"k":"b"') || line.startsWith('{"k":"tr"')) && line.includes(needle));
 console.log(`line kinds: ${JSON.stringify(lineKinds)}`);
 
 const q = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
@@ -135,6 +137,46 @@ for (const [ticker, ks] of [...kal.entries()].sort()) {
   console.log(`   ${slug.padEnd(36)} ${ticker.padEnd(26)} ${String(ks.length).padStart(6)} ${String(n).padStart(7)}  ${pct(inn, n).padStart(8)}  ${String(q(ds, 0.5) ?? "—").padStart(6)}c  ${f(q(ages, 0.5))}/${f(q(ages, 0.9))}  ${q(mids, 0.5)?.toFixed(3) ?? "—"}`);
 }
 console.log(`   Kalshi touch age at write, all lines, seconds: ${dist(stale.map(a => Math.round(a)))}`);
+
+// 6. Kalshi's own trades against Kalshi's recorded touch — the Kalshi
+// half of test 3. A reconstructed book that has drifted from the real one
+// shows up here whatever the .us side is doing.
+{
+  let n = 0, inn = 0, crossedK = 0, linesK = 0; const ds = [];
+  for (const ks of kal.values()) for (const k of ks) { if (k.b == null || k.a == null) continue; linesK++; if (k.b >= k.a) crossedK++; }
+  for (const [ticker, ts] of ktr) {
+    const ks = kal.get(ticker); if (!ks) continue;
+    for (const x of ts) {
+      const i = at(ks, x.t); if (i < 0 || x.t - ks[i].t > 15000 || ks[i].b == null || ks[i].a == null || !Number.isFinite(x.yp)) continue;
+      const k = ks[i], lo = Math.min(k.b, k.a), hi = Math.max(k.b, k.a), d = x.yp < lo ? lo - x.yp : x.yp > hi ? x.yp - hi : 0;
+      n++; if (d <= 0.0105) inn++; ds.push(Math.round(d * 100));
+    }
+  }
+  console.log(`\n6. KALSHI TRADES vs Kalshi's recorded touch (1-second record, ≤15s old)`);
+  console.log(`   within 1c: ${pct(inn, n)} of ${n.toLocaleString()}   distance, cents: ${dist(ds)}`);
+  console.log(`   Kalshi recorded books self-crossed (bid >= ask): ${pct(crossedK, linesK)} of ${linesK.toLocaleString()}`);
+}
+
+// 7. Trade against trade: each .us trade beside the nearest Kalshi trade
+// on the same window within 1 second. Neither book reconstruction is
+// involved, so this is the cleanest test that the two are one market.
+{
+  const ds = []; let n = 0, inn = 0;
+  for (const [ticker, kts] of ktr) {
+    const ts = tr.get(slugOf.get(ticker)); if (!ts) continue;
+    kts.sort((a, b) => a.t - b.t);
+    for (const x of ts) {
+      if (!Number.isFinite(x.p)) continue;
+      const i = at(kts, x.t);
+      const cands = [kts[i], kts[i + 1]].filter(k => k && Math.abs(k.t - x.t) <= 1000 && Number.isFinite(k.yp));
+      if (!cands.length) continue;
+      const k = cands.sort((a, b) => Math.abs(a.t - x.t) - Math.abs(b.t - x.t))[0];
+      const d = Math.abs(k.yp - x.p); n++; if (d <= 0.0205) inn++; ds.push(Math.round(d * 100));
+    }
+  }
+  console.log(`\n7. .us TRADE vs nearest KALSHI TRADE within 1s (Up = YES)`);
+  console.log(`   within 2c: ${pct(inn, n)} of ${n.toLocaleString()}   |difference|, cents: ${dist(ds)}`);
+}
 
 // 5. A run of raw lines from the busiest market, beside Kalshi.
 const busiest = [...pb.entries()].sort((x, y) => y[1].length - x[1].length)[0];
