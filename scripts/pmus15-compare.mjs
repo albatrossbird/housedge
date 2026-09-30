@@ -51,16 +51,16 @@ console.log(`\n${S.windows} windows on both venues, ${S.samples.toLocaleString()
 if (!S.samples) { console.log("::error::no paired samples — check both recorders cover the same hours"); process.exit(1); }
 
 console.log(`\n1. SAME MARKET? (touch against touch)`);
-console.log(`   both bid and ask equal: ${pct(S.agree.exact, S.samples)}   within 1c: ${pct(S.agree.within1c, S.samples)}`);
+console.log(`   of ${S.agree.twoSided.toLocaleString()} samples with both books two-sided: bid and ask equal ${pct(S.agree.exact, S.agree.twoSided)}, within 1c ${pct(S.agree.within1c, S.agree.twoSided)}`);
 console.log(`   away from 50c (${S.agree.decisive.toLocaleString()} samples, where the side is decidable): as Up=YES within 1c ${pct(S.agree.decisiveWithin1c, S.agree.decisive)}, as the MIRROR ${pct(S.agree.mirrorWithin1c, S.agree.decisive)} — the second must be far lower`);
 
 console.log(`\n2. HOW OFTEN DO THE BOOKS CROSS?`);
-console.log(`   before fees (one venue's bid above the other's ask): ${pct(S.grossCross, S.samples)} of samples`);
+console.log(`   before fees (one venue's bid above the other's ask): ${pct(S.grossCross, S.agree.twoSided)} of two-sided samples`);
 console.log(`   after both venues' taker fees, at the best size the books allow:`);
 console.log(`     A  YES on Kalshi + DOWN on .us: ${pct(S.byDir.A.positive, S.samples)}`);
 console.log(`     B  UP on .us + NO on Kalshi:    ${pct(S.byDir.B.positive, S.samples)}`);
 console.log(`   by time to close:`);
-for (const [k, v] of Object.entries(S.byBucket)) console.log(`     ${k.padEnd(6)} ${pct(v.positive, v.samples).padStart(6)} of ${v.samples.toLocaleString()} samples`);
+for (const [k, v] of Object.entries(S.byBucket)) console.log(`     ${k.padEnd(6)} ${pct(v.positive, v.samples).padStart(6)} of ${v.samples.toLocaleString()} samples  (one-sided ${S.oneSided[k].toLocaleString()}; unpaired, no .us book within 15s: ${S.skipped[k].noPmus.toLocaleString()})`);
 
 const E = episodeStats(S.episodes);
 const hours = (Math.min(C.pmusLast, C.kalshiLast) - Math.max(C.pmusFirst, C.kalshiFirst)) / 3600000;

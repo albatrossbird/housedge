@@ -70,7 +70,7 @@ console.log("end to end");
   const S = summarize(C);
   ok(S.windows === 1, "one window on both venues");
   ok(S.samples === 300, "every in-window Kalshi book paired; none after the close", `samples=${S.samples}`);
-  ok(S.agree.within1c > 0.9 * S.samples, "touches agree", JSON.stringify(S.agree));
+  ok(S.agree.twoSided === S.samples && S.agree.within1c > 0.9 * S.samples, "touches agree", JSON.stringify(S.agree));
   ok(S.agree.decisive > 50 && S.agree.decisiveWithin1c > 0.9 * S.agree.decisive && S.agree.mirrorWithin1c < 0.2 * S.agree.decisive, "away from 50c, Up=YES agrees and the mirror does not", JSON.stringify(S.agree));
   const E = episodeStats(S.episodes);
   const a = S.episodes.filter(e => e.dir === "A");
@@ -93,6 +93,35 @@ console.log("a stale .us book is not paired");
   feedKalshi(C, { k: "b", t: start + 30000, m: ticker, b: 0.49, a: 0.5, L: [[[0.49, 10]], [[0.5, 10]]] });
   const S = summarize(C);
   ok(S.samples === 1, "a .us book 29s old is not treated as current", `samples=${S.samples}`);
+}
+
+console.log("a one-sided book near the close is still sampled");
+{
+  const start = Date.parse("2026-09-29T15:00:00Z");
+  const slug = pmusSlug("btc", start), ticker = kalshiM15Ticker("btc", start + WINDOW_MS);
+  const C = newCompare();
+  feedPmus(C, { k: "mkt", t: start, m: slug, kalshi: ticker });
+  // 30s before the close, Kalshi has decided: YES bid at 0.97, nothing
+  // offered. .us still offers Up at 0.90. Direction B (UP on .us + NO on
+  // Kalshi at 1 - 0.97 = 0.03) costs 0.93 before fees.
+  const t = start + WINDOW_MS - 30000;
+  feedPmus(C, { k: "pb", t: t - 500, x: t - 500, m: slug, b: [[0.89, 500]], a: [[0.90, 500]] });
+  feedKalshi(C, { k: "b", t, x: t, m: ticker, b: 0.97, a: null, L: [[[0.97, 500]], []] });
+  const S = summarize(C);
+  ok(S.samples === 1 && S.agree.twoSided === 0 && S.oneSided["<1m"] === 1, "sampled, counted as one-sided, kept out of the agreement stats", JSON.stringify({ n: S.samples, a: S.agree, o: S.oneSided }));
+  ok(S.byDir.B.positive === 1 && S.byBucket["<1m"].positive === 1, "and the direction whose legs exist is still priced", JSON.stringify(S.byDir));
+  ok(S.byDir.A.positive === 0, "the direction with a missing leg is not", JSON.stringify(S.byDir));
+}
+{
+  const start = Date.parse("2026-09-29T16:00:00Z");
+  const slug = pmusSlug("btc", start), ticker = kalshiM15Ticker("btc", start + WINDOW_MS);
+  const C = newCompare();
+  feedPmus(C, { k: "mkt", t: start, m: slug, kalshi: ticker });
+  const t = start + WINDOW_MS - 20000;
+  feedPmus(C, { k: "pb", t: t - 60000, x: t - 60000, m: slug, b: [[0.5, 5]], a: [[0.51, 5]] });   // a minute old
+  feedKalshi(C, { k: "b", t, x: t, m: ticker, b: 0.5, a: 0.51, L: [[[0.5, 5]], [[0.51, 5]]] });
+  const S = summarize(C);
+  ok(S.samples === 0 && S.skipped["<1m"].noPmus === 1, "a Kalshi book with no CURRENT .us book is counted as skipped, by time to close", JSON.stringify(S.skipped));
 }
 
 console.log("exchange clocks: a recorder minutes behind still pairs the right moments");
