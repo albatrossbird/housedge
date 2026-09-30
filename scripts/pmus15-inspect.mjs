@@ -19,6 +19,7 @@
 //   node scripts/pmus15-inspect.mjs --hours=3
 import { archiveReader } from "../lib/archiveRead.js";
 import { KALSHI_SERIES } from "../lib/venueCompare.js";
+import { parsePmusSlug } from "../lib/pmus15.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -109,6 +110,31 @@ for (const [ticker, ks] of kal) {
 }
 console.log(`\n4. .us TRADES vs KALSHI's touch at the same instant (same claim, Up = YES)`);
 console.log(`   within 2c: ${pct(kIn, kN)} of ${kN.toLocaleString()}   distance, cents: ${dist(kDist)}`);
+
+// 4b. The same, per window, and against how stale Kalshi's book was: the
+// 1-second record carries x, the exchange's own timestamp for the touch,
+// so t - x is how long that touch had stood when it was written.
+console.log(`\n4b. PER WINDOW: .us trades within 2c of Kalshi's touch, in-window only`);
+console.log(`   ${"slug".padEnd(36)} ${"kalshi ticker".padEnd(26)} kLines  trades  within2c  medDist  kAge p50/p90 s  kalshiMid p50`);
+const stale = [];
+for (const [ticker, ks] of [...kal.entries()].sort()) {
+  const slug = slugOf.get(ticker), ts = slug && tr.get(slug);
+  const w = slug ? parsePmusSlug(slug) : null, start = w?.start ?? NaN, close = w?.close ?? NaN;
+  const ages = ks.filter(k => Number.isFinite(k.x)).map(k => (k.t - k.x) / 1000);
+  stale.push(...ages);
+  if (!ts) { console.log(`   ${String(slug || "(no .us slug)").padEnd(36)} ${ticker.padEnd(26)} ${String(ks.length).padStart(6)}  (no .us trades)`); continue; }
+  let n = 0, inn = 0; const ds = [];
+  for (const x of ts) {
+    if (!(x.t >= start && x.t < close)) continue;
+    const i = at(ks, x.t); if (i < 0 || x.t - ks[i].t > 15000 || ks[i].b == null) continue;
+    const k = ks[i], d = x.p < k.b ? k.b - x.p : x.p > k.a ? x.p - k.a : 0;
+    n++; if (d <= 0.0205) inn++; ds.push(Math.round(d * 100));
+  }
+  const mids = ks.filter(k => k.t >= start && k.t < close && k.b != null).map(k => (k.b + k.a) / 2);
+  const f = v => v == null ? "—" : String(Math.round(v * 10) / 10);
+  console.log(`   ${slug.padEnd(36)} ${ticker.padEnd(26)} ${String(ks.length).padStart(6)} ${String(n).padStart(7)}  ${pct(inn, n).padStart(8)}  ${String(q(ds, 0.5) ?? "—").padStart(6)}c  ${f(q(ages, 0.5))}/${f(q(ages, 0.9))}  ${q(mids, 0.5)?.toFixed(3) ?? "—"}`);
+}
+console.log(`   Kalshi touch age at write, all lines, seconds: ${dist(stale.map(a => Math.round(a)))}`);
 
 // 5. A run of raw lines from the busiest market, beside Kalshi.
 const busiest = [...pb.entries()].sort((x, y) => y[1].length - x[1].length)[0];
