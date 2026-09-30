@@ -34,6 +34,7 @@ export function installFakeKalshi({
   dropSocketAfterMs = null,     // server closes the first socket after this long
   tickMs = 40, idxMs = 200,
   ignoreYesPrice = false,       // CONTROL: serve legacy encoding whatever was asked
+  tsLagMs = 0,                  // stamp ts_ms this far in the past: a recorder that is behind
   fallback = async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => [], text: async () => "[]" }),
 } = {}) {
   // The account's keys. /api_keys/generate adds one and DELETE removes
@@ -235,13 +236,13 @@ export function installFakeKalshi({
           if (sub.channel !== "orderbook_delta" || !sub.tickers.has(t)) continue;
           this.push(sid, "orderbook_delta", {
             market_ticker: t, market_id: `id-${t}`, side: yesSide ? "yes" : "no",
-            price_dollars: d4(yesSide || !sub.yesLeg ? p : 1000 - p), delta_fp: s2(delta), ts_ms: Date.now(),
+            price_dollars: d4(yesSide || !sub.yesLeg ? p : 1000 - p), delta_fp: s2(delta), ts_ms: Date.now() - tsLagMs,
           });
         }
         if (Math.random() < 0.05) for (const [sid, sub] of this.subs) {
           if (sub.channel === "trade" && sub.tickers.has(t)) this.push(sid, "trade", {
             trade_id: `tr-${Math.random()}`, market_ticker: t, yes_price_dollars: "0.4500", no_price_dollars: "0.5500",
-            count_fp: "10.00", taker_side: "yes", ts: Math.floor(Date.now() / 1000), ts_ms: Date.now(),
+            count_fp: "10.00", taker_side: "yes", ts: Math.floor(Date.now() / 1000), ts_ms: Date.now() - tsLagMs,
           });
         }
       }

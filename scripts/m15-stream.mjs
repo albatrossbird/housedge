@@ -38,6 +38,7 @@ import { M15_SUFFIX, M15_CATEGORIES } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { recorderSource } from "../lib/recorderSource.js";
 import { createArchive } from "../lib/streamArchive.js";
+import { performance } from "node:perf_hooks";
 
 const env = process.env;
 const SUPABASE_URL = env.SUPABASE_URL;
@@ -193,8 +194,31 @@ function unsubscribeMarkets(tickers) {
 
 const px = n => n == null ? null : Math.round(n * 10000) / 10000;
 
+// HEALTH. The recorder stamps every line with the box's receive time, so a
+// recorder that cannot keep up with the socket writes a book minutes after
+// Kalshi published it and labels it as current. Measured 2026-09-30: the
+// receive lag climbed ~30s a minute to 13 MINUTES before each reset, and a
+// cross-venue comparison read the stale books as $1.18M of arbitrage.
+// So the lag is measured against Kalshi's own ts_ms on every frame that
+// carries one, written once a minute, and warned on.
+const LAG_WARN_MS = Number(env.STREAM_LAG_WARN_MS || 5000);
+const health = { lags: [], frames: 0, elu: performance.eventLoopUtilization(), ext: null, warned: false };
+function writeHealth(now) {
+  const L = health.lags.sort((a, b) => a - b), q = p => L.length ? L[Math.min(L.length - 1, Math.floor(p * L.length))] : null;
+  const e = performance.eventLoopUtilization(health.elu); health.elu = performance.eventLoopUtilization();
+  const h = { k: "health", t: now, frames: health.frames, lagP50: q(0.5), lagP99: q(0.99), lagMax: L.length ? L[L.length - 1] : null, elu: Math.round(e.utilization * 1000) / 1000, ext: health.ext };
+  write(h);
+  if (h.lagP50 != null && h.lagP50 > LAG_WARN_MS) {
+    log(`::warning::recorder is BEHIND the socket: receive lag p50 ${(h.lagP50 / 1000).toFixed(1)}s, max ${(h.lagMax / 1000).toFixed(1)}s, event loop ${(h.elu * 100).toFixed(0)}% busy, ${h.frames} frames in the last minute, extensions "${h.ext ?? ""}"`);
+  }
+  health.lags = []; health.frames = 0;
+  return h;
+}
+
 function onFrame(f, now) {
-  stats.frames++; lastFrameAt = now;
+  stats.frames++; lastFrameAt = now; health.frames++;
+  const ts = f.msg?.ts_ms;
+  if (Number.isFinite(ts) && (f.type === "orderbook_delta" || f.type === "trade")) health.lags.push(now - ts);
   switch (f.type) {
     case "orderbook_snapshot":
     case "orderbook_delta": {
@@ -303,7 +327,8 @@ function connect() {
     s.addEventListener("open", () => {
       backoff = 1000; opened = true; lastFrameAt = Date.now(); lastI5At = Date.now();
       write({ k: "conn", t: Date.now(), ev: "open" });
-      log("socket open");
+      health.ext = s.extensions || "";
+      log(`socket open${health.ext ? ` (extensions: ${health.ext})` : ""}`);
       send("subscribe", { channels: ["cfbenchmarks_value_5hz"], index_ids: ["all"] }, "cfbenchmarks_value_5hz");
       send("subscribe", { channels: ["cfbenchmarks_value"], index_ids: ["all"] }, "cfbenchmarks_value");
       if (subscribed.size) subscribeMarkets([]);
@@ -368,6 +393,7 @@ setInterval(archive.flush, 5000);
 setInterval(() => { retireClosed(Date.now()); discover().catch(e => log(`::warning::discovery: ${e.message}`)); }, DISCOVER_MS);
 setInterval(() => archive.uploadAll().catch(e => log(`::warning::upload: ${e.message}`)), UPLOAD_MS);
 setInterval(printStats, Number(env.STREAM_STATS_MS || 300000));
+setInterval(() => writeHealth(Date.now()), Number(env.STREAM_HEALTH_MS || 60000));
 archive.uploadAll().catch(() => {});
 
 // A handshake that keeps failing is a credential or clock problem, which

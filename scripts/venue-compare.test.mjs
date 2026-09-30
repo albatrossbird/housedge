@@ -95,5 +95,25 @@ console.log("a stale .us book is not paired");
   ok(S.samples === 1, "a .us book 29s old is not treated as current", `samples=${S.samples}`);
 }
 
+console.log("exchange clocks: a recorder minutes behind still pairs the right moments");
+{
+  const start = Date.parse("2026-09-29T14:00:00Z");
+  const slug = pmusSlug("btc", start), ticker = kalshiM15Ticker("btc", start + WINDOW_MS);
+  const C = newCompare();
+  feedPmus(C, { k: "mkt", t: start, m: slug, kalshi: ticker });
+  // Both venues at 40/41 until +60s, then both at 70/71. The .us recorder
+  // is live; the Kalshi one received everything 300s late.
+  for (let i = 0; i < 120; i++) {
+    const x = start + 1000 + i * 1000, hi = i >= 60;
+    const b = hi ? 0.70 : 0.40, a = hi ? 0.71 : 0.41;
+    feedPmus(C, { k: "pb", t: x + 100, x, m: slug, b: [[b, 100]], a: [[a, 100]] });
+    feedKalshi(C, { k: "b", t: x + 300000, x, m: ticker, b, a, L: [[[b, 100]], [[a, 100]]] });
+  }
+  const S = summarize(C);
+  ok(S.samples === 120 && S.agree.exact === 120, "every sample pairs the same instant on both venues", JSON.stringify(S.agree));
+  ok(S.episodes.length === 0, "and a stale Kalshi book is not read as an edge", JSON.stringify(S.episodes.map(e => [e.dir, e.bestTouchEdge])));
+  ok(Math.round(C.kalshiLagMs[0] / 1000) === 300, "the lag is reported", C.kalshiLagMs[0]);
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
