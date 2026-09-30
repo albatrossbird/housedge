@@ -19,7 +19,7 @@
 //   node scripts/pmus15-inspect.mjs --hours=3
 import { archiveReader } from "../lib/archiveRead.js";
 import { KALSHI_SERIES } from "../lib/venueCompare.js";
-import { parsePmusSlug } from "../lib/pmus15.js";
+import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -176,6 +176,74 @@ console.log(`   Kalshi touch age at write, all lines, seconds: ${dist(stale.map(
   }
   console.log(`\n7. .us TRADE vs nearest KALSHI TRADE within 1s (Up = YES)`);
   console.log(`   within 2c: ${pct(inn, n)} of ${n.toLocaleString()}   |difference|, cents: ${dist(ds)}`);
+}
+
+// 8. Is the pairing right? The same trade-vs-trade test with each .us
+// window paired against Kalshi windows shifted by -2..+2, and against the
+// mirror (Up = NO). The true mapping is the one that agrees; if none does,
+// the two venues are not quoting one claim.
+{
+  const kByClose = new Map();
+  for (const [ticker, kts] of ktr) {
+    const m = /-(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})-/.exec(ticker + "-");
+    if (!m) continue;
+    kts.sort((a, b) => a.t - b.t);
+    kByClose.set(ticker, kts);
+  }
+  const rows = [];
+  for (let shift = -2; shift <= 2; shift++) for (const mirror of [false, true]) {
+    let n = 0, inn = 0; const ds = [];
+    for (const [slug, ts] of tr) {
+      const w = parsePmusSlug(slug); if (!w) continue;
+      const ticker = kalshiM15Ticker(w.asset, w.close + shift * 900000);
+      const kts = kByClose.get(ticker); if (!kts) continue;
+      for (const x of ts) {
+        if (!Number.isFinite(x.p)) continue;
+        const i = at(kts, x.t);
+        const cands = [kts[i], kts[i + 1]].filter(k => k && Math.abs(k.t - x.t) <= 1000 && Number.isFinite(k.yp));
+        if (!cands.length) continue;
+        const k = cands.sort((a, b) => Math.abs(a.t - x.t) - Math.abs(b.t - x.t))[0];
+        const d = Math.abs((mirror ? 1 - k.yp : k.yp) - x.p); n++; if (d <= 0.0205) inn++; ds.push(Math.round(d * 100));
+      }
+    }
+    rows.push(`   shift ${shift >= 0 ? "+" : ""}${shift} window${mirror ? ", MIRROR" : "        "}: within 2c ${pct(inn, n).padStart(6)} of ${String(n).padStart(6)}   median |diff| ${q(ds, 0.5) ?? "—"}c`);
+  }
+  console.log(`\n8. PAIRING: .us trade vs Kalshi trade within 1s, Kalshi window shifted`);
+  for (const r of rows) console.log(r);
+}
+
+// 9. Where in the window do they disagree? Trade vs trade by time to close.
+{
+  const B = [[600, 1e9, ">10m"], [300, 600, "5-10m"], [120, 300, "2-5m"], [60, 120, "1-2m"], [0, 60, "<1m"], [-1e9, 0, "after close"]];
+  const acc = Object.fromEntries(B.map(([, , k]) => [k, { n: 0, inn: 0, ds: [] }]));
+  for (const [ticker, kts] of ktr) {
+    const slug = slugOf.get(ticker), ts = slug && tr.get(slug); if (!ts) continue;
+    const close = parsePmusSlug(slug).close;
+    for (const x of ts) {
+      const i = at(kts, x.t);
+      const cands = [kts[i], kts[i + 1]].filter(k => k && Math.abs(k.t - x.t) <= 1000 && Number.isFinite(k.yp));
+      if (!cands.length || !Number.isFinite(x.p)) continue;
+      const k = cands.sort((a, b) => Math.abs(a.t - x.t) - Math.abs(b.t - x.t))[0];
+      const ttc = (close - x.t) / 1000, b = B.find(([lo, hi]) => ttc >= lo && ttc < hi)[2];
+      const d = Math.abs(k.yp - x.p); acc[b].n++; if (d <= 0.0205) acc[b].inn++; acc[b].ds.push(Math.round(d * 100));
+    }
+  }
+  console.log(`\n9. TRADE vs TRADE by time to close (as paired)`);
+  for (const [k, v] of Object.entries(acc)) console.log(`   ${k.padEnd(12)} within 2c ${pct(v.inn, v.n).padStart(6)} of ${String(v.n).padStart(6)}   median |diff| ${q(v.ds, 0.5) ?? "—"}c`);
+}
+
+// 10. Twenty trade pairs side by side, from the middle of the busiest window.
+{
+  const [ticker, kts] = [...ktr.entries()].filter(([t]) => tr.get(slugOf.get(t))).sort((a, b) => b[1].length - a[1].length)[0] || [];
+  if (ticker) {
+    const slug = slugOf.get(ticker), ts = tr.get(slug);
+    console.log(`\n10. RAW TRADES ${slug} / ${ticker}`);
+    const mid = Math.floor(ts.length / 2);
+    for (const x of ts.slice(mid, mid + 20)) {
+      const i = at(kts, x.t), k = kts[i];
+      console.log(`   ${new Date(x.t).toISOString().slice(11, 23)}  .us ${x.p} x${x.q} ${x.side || ""}/${x.intent || ""}   kalshi ${k ? `${new Date(k.t).toISOString().slice(11, 23)} yes ${k.yp} x${k.n} ${k.side || ""}` : "—"}`);
+    }
+  }
 }
 
 // 5. A run of raw lines from the busiest market, beside Kalshi.
