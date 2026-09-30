@@ -1,0 +1,31 @@
+name: Venue compare 15m
+
+# Kalshi KXBTC15M against Polymarket US's 15-minute BTC market, read back
+# from the two WebSocket archives (scripts/pmus15-compare.mjs): how often
+# the books cross after both venues' fees, for how long, at what size,
+# and which venue moves first. Manual only — a question to ask, not a job
+# to run. Downloads the Kalshi archive for the window (~25 MB an hour).
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Window to compare over, in hours"
+        required: false
+        default: "24"
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Venue compare
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          # The archive bucket is private (migration 0029).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/pmus15-compare.mjs --hours=${{ github.event.inputs.hours || '24' }}

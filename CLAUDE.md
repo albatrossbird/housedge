@@ -1014,6 +1014,17 @@ so the two cannot drift into mismatched hours.
   Signing was checked byte-for-byte against the SDK's own Ed25519
   library.
 
+**The comparison is `scripts/pmus15-compare.mjs`** (workflow 'Venue
+compare 15m'; reductions in `lib/venueCompare.js`). It samples at each
+FRESH Kalshi book (the 1-second record) paired with the .us book current
+at that instant — sampling on .us changes would pair a fresh .us book
+with a Kalshi book up to a second old and manufacture crosses. Both
+directions are walked for the most profitable size with each venue's
+own fee rounding (Kalshi up to the cent per order, .us half-even), and
+consecutive profitable samples are one EPISODE whose dollars are its
+best moment, never a sum. Every figure is an upper bound: both legs at
+the same instant, as a taker, with no latency.
+
 ### Going private: what breaks, measured before the switch
 
 **Done 2026-09-29.** The box pulls with its deploy key (`DONE`, and
