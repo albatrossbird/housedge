@@ -246,6 +246,39 @@ console.log(`   Kalshi touch age at write, all lines, seconds: ${dist(stale.map(
   }
 }
 
+// 11. Is one feed late? .us carries its own exchange time (x: tradeTime on
+// trades, transactTime on books); t is the box's receive time. Then the
+// trade-vs-trade agreement with .us shifted by a lag, to find the offset
+// at which the two tapes line up.
+{
+  const lagT = [], lagB = [];
+  for (const ts of tr.values()) for (const x of ts) if (Number.isFinite(x.x)) lagT.push(Math.round((x.t - x.x) / 100) / 10);
+  for (const ls of pb.values()) for (const o of ls) if (Number.isFinite(o.x)) lagB.push(Math.round((o.t - o.x) / 100) / 10);
+  const lagK = [];
+  for (const ts of ktr.values()) for (const x of ts) if (Number.isFinite(x.x)) lagK.push(Math.round((x.t - x.x) / 100) / 10);
+  console.log(`\n11. FEED DELAY, receive time minus the venue's own timestamp, seconds`);
+  console.log(`   .us trades ${dist(lagT)}`);
+  console.log(`   .us books  ${dist(lagB)}`);
+  console.log(`   Kalshi trades ${dist(lagK)}`);
+  const lags = [-600, -300, -180, -120, -90, -60, -45, -30, -20, -10, -5, -2, 0, 2, 5, 10, 20, 30, 45, 60, 90, 120, 180, 300, 600];
+  console.log(`   trade vs trade with Kalshi's tape moved by L seconds (compare .us at t with Kalshi at t+L):`);
+  for (const L of lags) {
+    let n = 0, inn = 0; const ds = [];
+    for (const [ticker, kts] of ktr) {
+      const ts = tr.get(slugOf.get(ticker)); if (!ts) continue;
+      for (const x of ts) {
+        if (!Number.isFinite(x.p)) continue;
+        const tt = x.t + L * 1000, i = at(kts, tt);
+        const cands = [kts[i], kts[i + 1]].filter(k => k && Math.abs(k.t - tt) <= 1000 && Number.isFinite(k.yp));
+        if (!cands.length) continue;
+        const k = cands.sort((a, b) => Math.abs(a.t - tt) - Math.abs(b.t - tt))[0];
+        const d = Math.abs(k.yp - x.p); n++; if (d <= 0.0205) inn++; ds.push(Math.round(d * 100));
+      }
+    }
+    console.log(`     L=${String(L).padStart(4)}s  within 2c ${pct(inn, n).padStart(6)} of ${String(n).padStart(6)}   median ${q(ds, 0.5) ?? "—"}c`);
+  }
+}
+
 // 5. A run of raw lines from the busiest market, beside Kalshi.
 const busiest = [...pb.entries()].sort((x, y) => y[1].length - x[1].length)[0];
 if (busiest) {
