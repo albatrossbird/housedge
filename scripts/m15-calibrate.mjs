@@ -133,12 +133,27 @@ for (const s of series) {
   // use it, while this table is the big one and grows ~50k rows a day.
   // Chunked at 200 ids, per the .in() URL-length lesson — a few
   // thousand ids build a URL long enough to kill the request.
-  const tickers = [...resultOf.keys()];
+  // EACH MARKET'S OWN ENTRY WINDOW, on observed_at. A market is quoted
+  // for its whole listed life, not its last fifteen minutes, so asking
+  // for every row of 200 tickers and filtering on secs_to_close read far
+  // more than it kept — and died with 57014 once m15_quotes passed a few
+  // million rows (2026-09-30). Bounding observed_at per ticker makes each
+  // term a range on the (ticker, observed_at) index. secs_to_close is
+  // still filtered too, so the rows kept are exactly what they were.
+  const closeOf = new Map(mk.map(m => [m.ticker, Date.parse(m.close_time)]));
+  const tickers = [...resultOf.keys()].filter(t => Number.isFinite(closeOf.get(t)));
   const q = [];
-  for (let i = 0; i < tickers.length; i += 200) {
-    const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
+  const CHUNK = 20;
+  for (let i = 0; i < tickers.length; i += CHUNK) {
+    const terms = tickers.slice(i, i + CHUNK).map(t => {
+      const c = closeOf.get(t);
+      const from = new Date(c - (TARGET + TOL + 5) * 1000).toISOString();
+      const to = new Date(c - Math.max(0, TARGET - TOL - 5) * 1000).toISOString();
+      // Quoted: a timestamp carries "." and ":", which PostgREST reserves inside or=().
+      return `and(ticker.eq."${t}",observed_at.gte."${from}",observed_at.lte."${to}")`;
+    }).join(",");
     q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask,book_bid,book_ask",
-      `ticker=in.(${encodeURIComponent(ids)})` +
+      `or=(${encodeURIComponent(terms)})` +
       `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`, "ticker", "id"));
   }
   console.log(`quotes in the window         ${q.length}`);
