@@ -16,6 +16,7 @@ import { statfsSync } from "node:fs";
 import { KALSHI_REST, KALSHI_WS, WS_PATH, keyPath, loadKalshiKey, kalshiAuthHeaders, kalshiAuthed } from "../lib/kalshiAuth.js";
 import { BookSet } from "../lib/kalshiBook.js";
 import { bookDepth } from "../lib/m15.js";
+import { kalshiWebSocket } from "../lib/plainWebSocket.js";
 
 const SECONDS = Number(process.env.PROBE_SECONDS || 45);
 const SAMPLE_MS = Number(process.env.PROBE_SAMPLE_MS || 2000);
@@ -26,8 +27,11 @@ const median = xs => { if (!xs.length) return null; const s = [...xs].sort((a, b
 
 // ── The machine ────────────────────────────────────────────────────────
 const major = Number(process.versions.node.split(".")[0]);
-check("node", major >= 22 && typeof WebSocket === "function",
-  `v${process.versions.node}, global WebSocket ${typeof WebSocket}` + (major < 22 ? " — Node 22+ is required (built-in WebSocket with handshake headers)" : ""));
+// The recorder's own client (lib/plainWebSocket.js), so the probe proves
+// the path the recorder takes — not Node's built-in one, which negotiates
+// compression and could not keep up.
+const KalshiWS = kalshiWebSocket(process.env);
+check("node", major >= 22 && typeof KalshiWS === "function", `v${process.versions.node}` + (major < 22 ? " — Node 22+ is required" : ""));
 
 try {
   const fs = statfsSync(process.cwd());
@@ -102,7 +106,7 @@ const send = (ws, cmd, params, label) => { const id = nextId++; pending.set(id, 
 const t0 = Date.now();
 let ws;
 try {
-  ws = new WebSocket(KALSHI_WS, { headers: kalshiAuthHeaders(keyId, key, "GET", WS_PATH) });
+  ws = new KalshiWS(KALSHI_WS, { headers: kalshiAuthHeaders(keyId, key, "GET", WS_PATH) });
 } catch (e) { check("ws connect", false, e.message); finish(); }
 
 const opened = await new Promise(res => {
@@ -226,11 +230,14 @@ check("BRTI 1Hz", seen.idx1 > secs * 0.5, `${seen.idx1} ticks; 60s avg ${seen.la
 check("delta latency", null, `exchange->us median ${median(seen.deltaLagMs) ?? "—"} ms (includes clock skew)`);
 if (seen.indexlist) check("indexlist", null, JSON.stringify(seen.indexlist).slice(0, 200));
 if (seen.listSubs) check("list_subscriptions", null, JSON.stringify(seen.listSubs).slice(0, 200));
-// Kalshi pings every 10s and drops a client that does not pong. Node's
-// WebSocket answers pings itself and does not surface them, so surviving
+// Kalshi pings every 10s and drops a client that does not pong. The
+// client answers pings itself and does not surface them, so surviving
 // several intervals is the evidence.
 check("keep-alive", seen.closed == null, seen.closed ? `closed at ${seen.closed.atS}s: ${seen.closed.code} ${seen.closed.reason}` : `still open after ${secs.toFixed(0)}s (${Math.floor(secs / 10)} ping intervals)`);
 check("frame types", null, JSON.stringify(seen.types));
+// Compression is what kept the recorder minutes behind; the socket must
+// come up without it.
+check("no compression", !ws.extensions, ws.extensions ? `negotiated "${ws.extensions}" — the recorder would fall behind` : "none negotiated");
 ws.close();
 
 // The index over REST needs a separate entitlement. Not required — the

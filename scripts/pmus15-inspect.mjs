@@ -42,9 +42,23 @@ for (const f of pFiles) await reader.eachLine(f.path, o => {
   if (o.k === "tr") push(tr, o.m, o);
 });
 const needle = `"m":"${KALSHI_SERIES}-`;
-const ktr = new Map();
-for (const f of kFiles) await reader.eachLine(f.path, o => o.k === "b" ? push(kal, o.m, o) : push(ktr, o.m, o),
-  line => (line.startsWith('{"k":"b"') || line.startsWith('{"k":"tr"')) && line.includes(needle));
+const ktr = new Map(), khealth = [], kconn = [];
+for (const f of kFiles) await reader.eachLine(f.path, o => o.k === "health" ? khealth.push(o) : o.k === "conn" ? kconn.push(o) : o.k === "b" ? push(kal, o.m, o) : push(ktr, o.m, o),
+  line => line.startsWith('{"k":"health"') || line.startsWith('{"k":"conn"') || ((line.startsWith('{"k":"b"') || line.startsWith('{"k":"tr"')) && line.includes(needle)));
+
+// 0. The Kalshi recorder's own health lines (from 2026-09-30): is it
+// keeping up with its socket, and was compression negotiated?
+console.log(`\n0. KALSHI RECORDER HEALTH (${khealth.length} minutes reported)`);
+if (!khealth.length) console.log("   none yet — the box is still on code from before the health line");
+else {
+  const f = v => v == null ? "—" : (v / 1000).toFixed(1);
+  const exts = [...new Set(khealth.map(h => h.ext ?? ""))];
+  console.log(`   negotiated extensions: ${exts.map(e => JSON.stringify(e)).join(", ")}`);
+  for (const h of khealth.slice(-30)) console.log(`   ${new Date(h.t).toISOString().slice(11, 16)}  lag p50 ${f(h.lagP50)}s p99 ${f(h.lagP99)}s max ${f(h.lagMax)}s  event loop ${Math.round(h.elu * 100)}%  ${h.frames} frames/min`);
+}
+const conns = kconn.reduce((m, c) => (m[c.ev] = (m[c.ev] || 0) + 1, m), {});
+console.log(`   Kalshi connection events: ${JSON.stringify(conns)}`);
+for (const c of kconn.filter(c => c.ev !== "subscribed").slice(-16)) console.log(`   ${new Date(c.t).toISOString().slice(11, 19)}  ${c.ev}${c.code != null ? ` code ${c.code}` : ""}${c.reason ? ` "${c.reason}"` : ""}${c.why ? ` (${c.why})` : ""}${c.msg ? ` ${c.msg}` : ""}`);
 console.log(`line kinds: ${JSON.stringify(lineKinds)}`);
 
 const q = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };

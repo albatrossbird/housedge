@@ -38,6 +38,7 @@ import { M15_SUFFIX, M15_CATEGORIES } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { recorderSource } from "../lib/recorderSource.js";
 import { createArchive } from "../lib/streamArchive.js";
+import { kalshiWebSocket } from "../lib/plainWebSocket.js";
 import { performance } from "node:perf_hooks";
 
 const env = process.env;
@@ -69,7 +70,11 @@ const kalshiKeyId = env.KALSHI_KEY_ID;
 let kalshiKey;
 try { kalshiKey = loadKalshiKey(keyPath(env)); } catch (e) { console.error(`::error::${e.message}`); process.exit(1); }
 if (!kalshiKeyId) { console.error("::error::KALSHI_KEY_ID is not set in /etc/marketslap/env — run scripts/kalshi-key-setup.mjs"); process.exit(1); }
-if (typeof WebSocket !== "function") { console.error(`::error::Node ${process.versions.node} has no built-in WebSocket; Node 22+ is required`); process.exit(1); }
+// Not Node's built-in WebSocket: it always negotiates compression, and
+// inflating every message kept this recorder minutes behind its socket.
+// lib/plainWebSocket.js explains and measures.
+const KalshiWS = kalshiWebSocket(env);
+if (typeof KalshiWS !== "function") { console.error("::error::no WebSocket client available"); process.exit(1); }
 await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
 mkdirSync(DIR, { recursive: true });
 log(`source: ${SOURCE}, archive ${DIR} -> ${BUCKET}, run ${RUN_MINUTES}m`);
@@ -147,8 +152,22 @@ async function discover() {
   if (add.length) subscribeMarkets(add);
 }
 
+// THE EXCHANGE'S CLOCK, NOT THE BOX'S. Whether a window is in its final
+// two minutes, or over, is decided by the latest Kalshi timestamp this
+// recorder has actually PROCESSED. On the box's clock, a recorder running
+// minutes behind its socket (measured 2026-09-30: up to 13 minutes) retired
+// each market 60s after close while the deltas for its final minutes were
+// still queued, and the final-window record captured the wrong stretch. On
+// the exchange's clock, falling behind delays the record; it never cuts
+// it. The box's clock takes over only when nothing is flowing (a dropped
+// socket), because then there is nothing queued to wait for.
+let exWatermark = null, exSeenAt = 0;
+const EX_FRESH_MS = 30000;
+const exNow = now => (exWatermark != null && now - exSeenAt < EX_FRESH_MS) ? exWatermark : now;
+
 function retireClosed(now) {
-  const gone = [...markets].filter(([, m]) => now > m.close + REMOVE_AFTER_CLOSE_MS).map(([t]) => t);
+  const ex = exNow(now);
+  const gone = [...markets].filter(([, m]) => ex > m.close + REMOVE_AFTER_CLOSE_MS).map(([t]) => t);
   if (!gone.length) return;
   for (const t of gone) { markets.delete(t); book.drop(t); }
   unsubscribeMarkets(gone);
@@ -218,7 +237,11 @@ function writeHealth(now) {
 function onFrame(f, now) {
   stats.frames++; lastFrameAt = now; health.frames++;
   const ts = f.msg?.ts_ms;
-  if (Number.isFinite(ts) && (f.type === "orderbook_delta" || f.type === "trade")) health.lags.push(now - ts);
+  if (Number.isFinite(ts) && (f.type === "orderbook_delta" || f.type === "trade")) {
+    health.lags.push(now - ts);
+    if (exWatermark == null || ts > exWatermark) exWatermark = ts;
+    exSeenAt = now;
+  }
   switch (f.type) {
     case "orderbook_snapshot":
     case "orderbook_delta": {
@@ -295,9 +318,10 @@ function writeFull(t, now, why) {
 // Once a second: each known book, if it changed; and the final-window edge.
 function snapshotTick(now) {
   for (const [t, m] of markets) {
-    if (!m.final && now >= m.close - FINAL_MS && now < m.close + REMOVE_AFTER_CLOSE_MS) {
+    const ex = exNow(now);
+    if (!m.final && ex >= m.close - FINAL_MS && ex < m.close + REMOVE_AFTER_CLOSE_MS) {
       m.final = true;
-      write({ k: "final", t: now, m: t, close: new Date(m.close).toISOString(), fresh: book.isFresh(t) });
+      write({ k: "final", t: now, x: ex, m: t, close: new Date(m.close).toISOString(), fresh: book.isFresh(t) });
       writeFull(t, now, "final-window");
     }
     const tp = book.touch(t);
@@ -322,7 +346,7 @@ function connect() {
     for (const k of Object.keys(sids)) delete sids[k];
     subscribing = false;
     for (const m of markets.values()) m.lastSnap = null;
-    const s = new WebSocket(KALSHI_WS, { headers: kalshiAuthHeaders(kalshiKeyId, kalshiKey, "GET", WS_PATH) });
+    const s = new KalshiWS(KALSHI_WS, { headers: kalshiAuthHeaders(kalshiKeyId, kalshiKey, "GET", WS_PATH) });
     ws = s;
     s.addEventListener("open", () => {
       backoff = 1000; opened = true; lastFrameAt = Date.now(); lastI5At = Date.now();

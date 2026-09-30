@@ -63,7 +63,7 @@ function run({ fake = {}, storage = "ok", seconds = 4, envx = {}, leftover = fal
     Object.assign(process.env, {
       KALSHI_KEY_FILE: ${JSON.stringify(kf)}, KALSHI_KEY_ID: "test-key-id",
       SUPABASE_URL: "https://fake.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_fake",
-      STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t",
+      STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t", KALSHI_WS_CLIENT: "global",
       STREAM_RUN_MINUTES: String(${seconds} / 60), STREAM_ALIGN_EXIT: "0",
       STREAM_ROTATE_MS: "1500", STREAM_SNAPSHOT_MS: "200", STREAM_DISCOVER_MS: "400", STREAM_UPLOAD_MS: "700",
       STREAM_FINAL_SECONDS: "59", STREAM_REMOVE_AFTER_CLOSE_MS: "300", STREAM_STATS_MS: "100000", STREAM_SERIES_MS: "1000", STREAM_HEALTH_MS: "500",
@@ -148,6 +148,21 @@ console.log("\na recorder that is behind the socket");
   const hs = byTime(r.files).filter(l => l.k === "health" && l.lagP50 != null);
   ok(hs.length >= 1 && hs.every(h => h.lagP50 >= 59000), "the lag is measured against Kalshi's own timestamp", r);
   ok(/recorder is BEHIND the socket: receive lag p50 6\d\.\ds/.test(r.text), "and warned on, with the figure", r);
+}
+
+console.log("\nclosing on the exchange's clock");
+{
+  // KXETH15M-SOON closes 1.5s into the run. With Kalshi's timestamps 3s
+  // behind the box, a box-clock recorder retires it at ~1.8s with its last
+  // deltas still queued; on the exchange's clock it is still open when the
+  // run ends.
+  const r = run({ fake: { tsLagMs: 3000 } });
+  const dels = r.log.commands.filter(c => c.params?.action === "delete_markets").flatMap(c => c.params.market_tickers);
+  ok(r.code === 0 && !dels.includes("KXETH15M-SOON"), "a market is not retired before the exchange's clock reaches its close", r);
+  const L = byTime(r.files);
+  const last = Math.max(...L.filter(l => l.k === "b" && l.m === "KXETH15M-SOON").map(l => l.t));
+  const close = L.find(l => l.k === "mkt" && l.m === "KXETH15M-SOON")?.close;
+  ok(Number.isFinite(last) && close && last > Date.parse(close) + 1000, "its book keeps being recorded past the close on the box's clock", r);
 }
 
 console.log("\na lost frame");

@@ -1023,7 +1023,22 @@ would have met.
 - **Prove it from the box first**: `scripts/kalshi-ws-probe.mjs` fails on
   a key that can trade, a skewed clock, a bad handshake, a book that
   disagrees with REST, or a sequence gap. Steps in `deploy/README.md`.
-- Node 22+ (built-in WebSocket with handshake headers). Node 20 has none.
+- **Not Node's built-in WebSocket.** It always offers permessage-deflate
+  and Kalshi accepts it; inflating every message on the thread pool capped
+  the recorder at ~850 messages/s with the event loop only ~45% busy, so
+  the receive lag climbed ~40s a minute to **13 minutes** until Kalshi
+  dropped the socket (close 1006) every 4-15 minutes. Found 2026-09-30,
+  and only because a cross-venue comparison paired those late books with
+  live .us ones and reported $1.18M of fake arbitrage.
+  `lib/plainWebSocket.js` speaks RFC 6455 with no extensions (594k
+  messages/s in its test, against a real local socket, TLS included), and
+  refuses a server that negotiates one anyway. The recorder writes a
+  `health` line a minute — receive lag against Kalshi's `ts_ms`,
+  event-loop load, frames, negotiated extensions — and warns past 5s; the
+  probe fails if compression comes up. The final-window edge and market
+  retirement follow Kalshi's clock, so falling behind delays the record
+  instead of cutting its end off. **Pair archives on the venues' own
+  timestamps (`x`), never on receive time** — `lib/venueCompare.js` does.
 - `scripts/fake-kalshi.mjs` is the test double for all of the above: it
   verifies signatures and serves one book in both encodings.
 
