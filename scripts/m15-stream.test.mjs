@@ -63,7 +63,7 @@ function run({ fake = {}, storage = "ok", seconds = 4, envx = {}, leftover = fal
     Object.assign(process.env, {
       KALSHI_KEY_FILE: ${JSON.stringify(kf)}, KALSHI_KEY_ID: "test-key-id",
       SUPABASE_URL: "https://fake.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_fake",
-      STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t", KALSHI_WS_CLIENT: "global",
+      STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t", KALSHI_WS_CLIENT: "global", M15_SERIES: "all",
       STREAM_RUN_MINUTES: String(${seconds} / 60), STREAM_ALIGN_EXIT: "0",
       STREAM_ROTATE_MS: "1500", STREAM_SNAPSHOT_MS: "200", STREAM_DISCOVER_MS: "400", STREAM_UPLOAD_MS: "700",
       STREAM_FINAL_SECONDS: "59", STREAM_REMOVE_AFTER_CLOSE_MS: "300", STREAM_STATS_MS: "100000", STREAM_SERIES_MS: "1000", STREAM_HEALTH_MS: "500",

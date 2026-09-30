@@ -4,7 +4,7 @@
 // Worth pinning because the recorder is the one job whose input cannot
 // be re-fetched: a window mis-shaped today is a window lost, not a
 // window to re-read.
-import { toM15Row, toM15Quote, quoteChanged, M15_SUFFIX } from "../lib/m15.js";
+import { m15InScope, toM15Row, toM15Quote, quoteChanged, M15_SUFFIX } from "../lib/m15.js";
 
 let bad = 0;
 const eq = (got, want, what) => {
@@ -100,6 +100,16 @@ const SETTLED = { ...LIVE, ticker: "KXBTC15M-26SEP060015-15", result: "no", last
   for (const t of ["KXBTC", "KXBTCD", "KXBTCMAX150", "KXNFLGAME", "KXBTC15MX"]) {
     eq(M15_SUFFIX.test(t), false, `${t} is NOT a 15-minute series`);
   }
+}
+
+// Scope: Bitcoin and gold by default; the override widens or narrows.
+{
+  const def = m15InScope({});
+  eq(def("KXBTC15M") && def("KXGOLD15M"), true, "BTC and gold are recorded by default");
+  eq(def("KXETH15M") || def("KXSILVER15M") || def("KXINX15M"), false, "everything else is not");
+  eq(m15InScope({ M15_SERIES: "all" })("KXETH15M"), true, "M15_SERIES=all records every series");
+  const one = m15InScope({ M15_SERIES: "kxeth15m, KXSOL15M" });
+  eq(one("KXETH15M") && one("KXSOL15M") && !one("KXBTC15M"), true, "a list replaces the default, case-insensitively");
 }
 
 // The source stamp, and the thing that makes it safe to add.

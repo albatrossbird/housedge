@@ -701,6 +701,17 @@ crypto; `KXGOLD15M`, `KXSILVER15M`, `KXWTI15M`, `KXNATGAS15M`,
 Crypto runs 24/7; commodities, FX and equities are closed out of hours,
 so a weekend snapshot shows ~10 of 26 live and that is not a fault.
 
+**Recorded scope is Bitcoin and gold only (decided 2026-09-30).**
+`M15_RESEARCH_SERIES` in `lib/m15.js` filters what the poller, the
+WebSocket recorder and the backfill record; discovery still enumerates by
+suffix and logs the rest as "out of scope", so a new or renamed series is
+seen rather than silently absent. `M15_SERIES` (comma list, or `all`)
+overrides it — the tests use `all`; widen the constant in git rather than
+on the box. Clearing what was already stored is
+`supabase/queries/m15_scope_size.sql` (measure) then
+`m15_scope_prune.sql` (delete, direct connection, quiet hour). The
+stream archive's past hours still hold every series; new hours do not.
+
 **They are liquid.** `KXBTC15M` carried **1.26M contracts of volume** on
 a single fifteen-minute window.
 
