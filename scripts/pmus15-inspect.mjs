@@ -58,6 +58,7 @@ else {
 }
 const conns = kconn.reduce((m, c) => (m[c.ev] = (m[c.ev] || 0) + 1, m), {});
 console.log(`   Kalshi connection events: ${JSON.stringify(conns)}`);
+for (const c of kconn.filter(c => c.ev !== "subscribed").slice(-16)) console.log(`   ${new Date(c.t).toISOString().slice(11, 19)}  ${c.ev}${c.code != null ? ` code ${c.code}` : ""}${c.reason ? ` "${c.reason}"` : ""}${c.why ? ` (${c.why})` : ""}${c.msg ? ` ${c.msg}` : ""}`);
 console.log(`line kinds: ${JSON.stringify(lineKinds)}`);
 
 const q = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
