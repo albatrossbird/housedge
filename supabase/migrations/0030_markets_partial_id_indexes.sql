@@ -1,0 +1,96 @@
+-- Two partial indexes on markets(id), for two keyset reads that filter
+-- on a column no index covers.
+--
+-- ── 1. The embedded-titles read ──────────────────────────────────
+--
+-- SYMPTOM, 2026-09-26 (discover-markets, crypto):
+--
+--   embedded-titles read: page after 4641295 (size 62):
+--     canceling statement due to statement timeout
+--
+-- followed on the same run by `alreadyEmbedded=443` — the pre-spend
+-- check catching 443 rows the truncated read had called unembedded —
+-- and a series gate reading `tried 0`, because the set it is built
+-- from had been cut short.
+--
+-- The read is
+--
+--   GET markets?select=id,title&embedding_v=not.is.null
+--       &order=id.asc&limit=1000&id=gt.<cursor>
+--
+-- and it is deliberately NOT scoped by sport_tag (lib/discover.js says
+-- why: an embedding belongs to an (id, title), not to a category). So
+-- 0018's markets_category_keyset, which leads with sport_tag, cannot
+-- serve it. Postgres walks the primary key and tests every row for a
+-- vector, and after `4641295` the key space is a long run of numeric
+-- Polymarket ids — sports and soccer rows, none embedded — so finding
+-- the next thousand embedded rows means reading past tens of thousands
+-- that are not. This is the shape 0018 already recorded: the pager's
+-- halving retry shrank the page to 62 rows and STILL timed out,
+-- because a page size cannot fix a predicate with no index.
+--
+-- Partial on `embedding_v is not null`, keyed on id alone: a page is
+-- then a range scan returning exactly the wanted ids already sorted.
+-- The pre-spend confirmation reads by id and is served by the primary
+-- key already.
+--
+-- ── 2. Prune's resolution read ───────────────────────────────────
+--
+--   GET markets?select=id&resolution=not.is.null&order=id.asc&...
+--
+-- Until now discovery wrote `resolution` onto every fetched market and
+-- prune nulled it again on the ~61,000 unpaired ones, every day, so
+-- the filter matched a third of the table and a primary-key walk found
+-- a page quickly. Discovery now writes the text only where get_pairs
+-- can show it (lib/discoverWrites.js), so the filter matches a few
+-- thousand rows of ~200,000 — and a sparse predicate is exactly the
+-- case where a PK walk reads most of the table per page and times out.
+-- The partial index makes it a seek, and stays small for the same
+-- reason the read became slow.
+--
+-- Without it, prune's resolution pass may time out: that is reported
+-- as a WARNING and costs only the cleanup, never the delete.
+--
+-- ============================================================
+-- RUN EACH STATEMENT ON ITS OWN in the Supabase SQL editor.
+-- ============================================================
+--
+-- Plain CREATE INDEX rather than CONCURRENTLY, following 0013/0018/
+-- 0022: the editor may wrap a statement in a transaction, where
+-- CONCURRENTLY is refused. It takes a SHARE lock for the build —
+-- writes to `markets` wait, reads do not. Nothing that writes
+-- `markets` is a recorder, so nothing unrecoverable waits.
+--
+-- The build scans the whole table (~200,000 rows) once. If the editor
+-- gives up at its ~60s limit — `Failed to fetch (api.supabase.com)`,
+-- 0 rows — the statement was cancelled and nothing exists; use the
+-- session pooler instead:
+--
+--   psql "<session-pooler-url>" -c "set statement_timeout = 0;" \
+--     -c "create index if not exists markets_embedded_id on public.markets (id) where embedding_v is not null;"
+--
+-- Idempotent: IF NOT EXISTS, so a re-run is a no-op.
+
+create index if not exists markets_embedded_id
+  on public.markets (id)
+  where embedding_v is not null;
+
+create index if not exists markets_resolution_id
+  on public.markets (id)
+  where resolution is not null;
+
+-- ============================================================
+-- VERIFY. Both should answer in milliseconds, and the plan should
+-- name the index — an "Index Scan using markets_pkey" with a Filter
+-- line is the old walk.
+-- ============================================================
+--
+--   explain analyze
+--   select id, title from public.markets
+--   where embedding_v is not null and id > '4641295'
+--   order by id limit 1000;
+--
+--   explain analyze
+--   select id from public.markets
+--   where resolution is not null
+--   order by id limit 1000;
