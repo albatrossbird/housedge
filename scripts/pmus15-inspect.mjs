@@ -1,0 +1,126 @@
+// What do the recorded Polymarket US books actually look like? The 24h
+// venue compare came back with the two venues agreeing within 1c on 9% of
+// samples and mid changes uncorrelated, against a live probe that agreed
+// 12 of 15 times — so before any figure from it means anything, this
+// checks whether each recorded `pb` line is a WHOLE book, as the recorder
+// assumes, or a fragment (an incremental update written as if it were
+// whole). The docs do not say which.
+//
+// Three tests, none of which needs the Kalshi side to be right:
+//   1. level counts per line — a whole book is deep and steady; updates
+//      are shallow and vary
+//   2. self-crossed lines (best bid >= best offer) — a real book never is
+//   3. .us TRADES against the recorded .us touch — trades are the venue's
+//      own truth; if they print far outside the recorded touch, the
+//      recorded touch is not the book
+// and then prints a run of raw lines beside Kalshi's touch at the same
+// instant, so the shape can be read by eye.
+//
+//   node scripts/pmus15-inspect.mjs --hours=3
+import { archiveReader } from "../lib/archiveRead.js";
+import { KALSHI_SERIES } from "../lib/venueCompare.js";
+
+const URL = process.env.SUPABASE_URL;
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const BUCKET = process.env.STREAM_BUCKET || "stream-archive";
+const HOURS = Number((process.argv.find(a => a.startsWith("--hours=")) || "--hours=3").split("=")[1]);
+if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"); process.exit(1); }
+
+const reader = archiveReader({ url: URL, key: KEY, bucket: BUCKET });
+const now = Date.now(), from = now - HOURS * 3600000;
+const pFiles = await reader.listRange("pmus15", from, now);
+const kFiles = await reader.listRange("m15", from, now);
+console.log(`INSPECT .us books, last ${HOURS}h: ${pFiles.length} .us files, ${kFiles.length} Kalshi files`);
+
+const pb = new Map(), tr = new Map(), kal = new Map(), slugOf = new Map(), lineKinds = {};
+const push = (M, k, v) => { if (!M.has(k)) M.set(k, []); M.get(k).push(v); };
+for (const f of pFiles) await reader.eachLine(f.path, o => {
+  lineKinds[o.k] = (lineKinds[o.k] || 0) + 1;
+  if (o.k === "mkt" && o.kalshi) slugOf.set(o.kalshi, o.m);
+  if (o.k === "pb") push(pb, o.m, o);
+  if (o.k === "tr") push(tr, o.m, o);
+});
+const needle = `"m":"${KALSHI_SERIES}-`;
+for (const f of kFiles) await reader.eachLine(f.path, o => push(kal, o.m, o), line => line.startsWith('{"k":"b"') && line.includes(needle));
+console.log(`line kinds: ${JSON.stringify(lineKinds)}`);
+
+const q = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+const dist = xs => `n=${xs.length} min=${q(xs, 0)} p10=${q(xs, 0.1)} p50=${q(xs, 0.5)} p90=${q(xs, 0.9)} max=${q(xs, 1)}`;
+
+// 1 + 2. Level counts and self-crossing.
+const nb = [], na = [], states = {};
+let crossed = 0, oneSided = 0, empty = 0, total = 0;
+const jumps = [];
+for (const lines of pb.values()) {
+  lines.sort((x, y) => x.t - y.t);
+  let prev = null;
+  for (const o of lines) {
+    total++;
+    states[o.st] = (states[o.st] || 0) + 1;
+    nb.push(o.b.length); na.push(o.a.length);
+    if (!o.b.length && !o.a.length) empty++;
+    else if (!o.b.length || !o.a.length) oneSided++;
+    else if (o.b[0][0] >= o.a[0][0]) crossed++;
+    if (o.b.length && o.a.length) {
+      const mid = (o.b[0][0] + o.a[0][0]) / 2;
+      if (prev != null) jumps.push(Math.round(Math.abs(mid - prev) * 1000) / 10);
+      prev = mid;
+    }
+  }
+}
+const pct = (a, n) => n ? `${(100 * a / n).toFixed(1)}%` : "—";
+console.log(`\n1. LEVELS PER LINE (${total.toLocaleString()} pb lines over ${pb.size} markets)`);
+console.log(`   bids   ${dist(nb)}`);
+console.log(`   offers ${dist(na)}`);
+console.log(`   states ${JSON.stringify(states)}`);
+console.log(`\n2. SHAPE`);
+console.log(`   self-crossed (best bid >= best offer): ${pct(crossed, total)}   one-sided: ${pct(oneSided, total)}   empty: ${pct(empty, total)}`);
+console.log(`   |mid change| between consecutive lines, cents: ${dist(jumps)}`);
+
+// 3. Trades against the recorded touch at the trade's receive time.
+const at = (arr, t) => { let lo = 0, hi = arr.length - 1, i = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m].t <= t) { i = m; lo = m + 1; } else hi = m - 1; } return i; };
+let tIn = 0, tOut = 0, tNoBook = 0; const tDist = [];
+for (const [slug, ts] of tr) {
+  const books = pb.get(slug); if (!books) { tNoBook += ts.length; continue; }
+  for (const x of ts) {
+    const i = at(books, x.t); if (i < 0) { tNoBook++; continue; }
+    const o = books[i]; if (!o.b.length || !o.a.length || !Number.isFinite(x.p)) { tNoBook++; continue; }
+    const lo = Math.min(o.b[0][0], o.a[0][0]), hi = Math.max(o.b[0][0], o.a[0][0]);
+    const d = x.p < lo ? lo - x.p : x.p > hi ? x.p - hi : 0;
+    tDist.push(Math.round(d * 1000) / 10);
+    if (d <= 0.0105) tIn++; else tOut++;
+  }
+}
+console.log(`\n3. .us TRADES vs the recorded .us touch just before them`);
+console.log(`   within 1c of the touch: ${pct(tIn, tIn + tOut)} of ${(tIn + tOut).toLocaleString()}   (no book to compare: ${tNoBook})`);
+console.log(`   distance outside the touch, cents: ${dist(tDist)}`);
+
+// 4. Trades against KALSHI's touch at the same instant — independent of
+// how the .us book was recorded.
+let kIn = 0, kN = 0; const kDist = [];
+for (const [ticker, ks] of kal) {
+  ks.sort((x, y) => x.t - y.t);
+  const ts = tr.get(slugOf.get(ticker)); if (!ts) continue;
+  for (const x of ts) {
+    const i = at(ks, x.t); if (i < 0 || x.t - ks[i].t > 15000 || ks[i].b == null || ks[i].a == null) continue;
+    const k = ks[i], d = x.p < k.b ? k.b - x.p : x.p > k.a ? x.p - k.a : 0;
+    kN++; if (d <= 0.0205) kIn++; kDist.push(Math.round(d * 1000) / 10);
+  }
+}
+console.log(`\n4. .us TRADES vs KALSHI's touch at the same instant (same claim, Up = YES)`);
+console.log(`   within 2c: ${pct(kIn, kN)} of ${kN.toLocaleString()}   distance, cents: ${dist(kDist)}`);
+
+// 5. A run of raw lines from the busiest market, beside Kalshi.
+const busiest = [...pb.entries()].sort((x, y) => y[1].length - x[1].length)[0];
+if (busiest) {
+  const [slug, lines] = busiest;
+  const ticker = [...slugOf.entries()].find(([, s]) => s === slug)?.[0];
+  const ks = (ticker && kal.get(ticker)) || [];
+  const mid = Math.floor(lines.length / 2);
+  console.log(`\n5. RAW: ${slug} (Kalshi ${ticker || "?"}), 25 consecutive lines from mid-window`);
+  const fmt = L => L.slice(0, 3).map(([p, q]) => `${p}x${Math.round(q)}`).join(" ");
+  for (const o of lines.slice(mid, mid + 25)) {
+    const i = at(ks, o.t), k = i >= 0 ? ks[i] : null;
+    console.log(`   ${new Date(o.t).toISOString().slice(11, 23)}  nb=${String(o.b.length).padStart(3)} na=${String(o.a.length).padStart(3)}  bids ${fmt(o.b).padEnd(36)} offers ${fmt(o.a).padEnd(36)} | kalshi ${k ? `${k.b}/${k.a}` : "—"}`);
+  }
+}

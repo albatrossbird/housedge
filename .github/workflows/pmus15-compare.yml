@@ -13,6 +13,11 @@ on:
         description: "Window to compare over, in hours"
         required: false
         default: "24"
+      inspect:
+        description: "Inspect the recorded .us books instead (scripts/pmus15-inspect.mjs)"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   compare:
@@ -28,4 +33,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           # The archive bucket is private (migration 0029).
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/pmus15-compare.mjs --hours=${{ github.event.inputs.hours || '24' }}
+        run: |
+          if [ "${{ github.event.inputs.inspect }}" = "true" ]; then
+            node scripts/pmus15-inspect.mjs --hours=${{ github.event.inputs.hours || '3' }}
+          else
+            node scripts/pmus15-compare.mjs --hours=${{ github.event.inputs.hours || '24' }}
+          fi
