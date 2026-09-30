@@ -8,10 +8,8 @@
 // the secret, or on the box via systemd-run with the env file.
 //
 //   node scripts/m15-stream-report.mjs --hours=24
-import { createGunzip } from "node:zlib";
-import { Readable } from "node:stream";
-import { createInterface } from "node:readline";
 import { authHeaders } from "../lib/supabaseHeaders.js";
+import { archiveReader } from "../lib/archiveRead.js";
 import { pageAll } from "../lib/restPage.js";
 import { newReport, feedLine, comparePoller, closeCalibration, summary, OFFSETS_S } from "../lib/streamReport.js";
 
@@ -24,37 +22,8 @@ if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_RO
 const now = Date.now();
 const from = now - HOURS * 3600000;
 
-async function listHour(prefix) {
-  const out = [];
-  for (let offset = 0; ; offset += 100) {
-    const r = await fetch(`${URL}/storage/v1/object/list/${BUCKET}`, {
-      method: "POST",
-      headers: authHeaders(KEY, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ prefix, limit: 100, offset, sortBy: { column: "name", order: "asc" } }),
-    });
-    if (!r.ok) throw new Error(`list ${prefix}: ${r.status} ${(await r.text()).slice(0, 200)}`);
-    const page = await r.json();
-    out.push(...page.filter(e => e.id && e.name.endsWith(".ndjson.gz")).map(e => ({ path: prefix + e.name, size: e.metadata?.size ?? null })));
-    if (page.length < 100) return out;
-  }
-}
-
-async function feedFile(R, path) {
-  const r = await fetch(`${URL}/storage/v1/object/authenticated/${BUCKET}/${path}`, { headers: authHeaders(KEY) });
-  if (!r.ok) throw new Error(`download ${path}: ${r.status}`);
-  const lines = createInterface({ input: Readable.fromWeb(r.body).pipe(createGunzip()), crlfDelay: Infinity });
-  let bad = 0;
-  try {
-    for await (const line of lines) {
-      if (!line) continue;
-      try { feedLine(R, JSON.parse(line)); } catch { bad++; }
-    }
-  } catch (e) {
-    // A truncated file (a crashed run) is readable up to its last flush.
-    console.log(`::warning::${path}: stopped early (${e.code || e.message}) — kept what was readable`);
-  }
-  return bad;
-}
+const reader = archiveReader({ url: URL, key: KEY, bucket: BUCKET });
+const feedFile = (R, path) => reader.eachLine(path, o => feedLine(R, o));
 
 const rest = async (path) => {
   const r = await fetch(`${URL}/rest/v1/${path}`, { headers: authHeaders(KEY) });
@@ -63,12 +32,7 @@ const rest = async (path) => {
 };
 
 // ── The archive ──────────────────────────────────────────────────────
-const files = [];
-for (let h = Math.floor(from / 3600000); h <= Math.floor(now / 3600000); h++) {
-  const d = new Date(h * 3600000).toISOString();
-  files.push(...await listHour(`m15/${d.slice(0, 10)}/${d.slice(11, 13)}/`));
-}
-files.sort((a, b) => a.path.split("/").pop().localeCompare(b.path.split("/").pop()));
+const files = await reader.listRange("m15", from, now);
 const mb = files.reduce((s, f) => s + (f.size || 0), 0) / 1e6;
 console.log(`STREAM ARCHIVE — last ${HOURS}h: ${files.length} files, ${mb.toFixed(1)} MB compressed (${files.length ? (mb / files.length).toFixed(1) : 0} MB/file)`);
 if (!files.length) { console.log("::error::no archive files in the window"); process.exit(1); }
