@@ -5,6 +5,7 @@ import { cleanTitle, polymarketUsUrl, polymarketComUrl } from "../../lib/titles.
 import { fetchTokenIdsById, fetchClobBooks, sizesForOutcome } from "../../lib/polymarketClob.js";
 import { kalshiOffers, sortOffers, profitCurve, usPolyOffers } from "../../lib/depthLadder.js";
 import { fetchUsBook } from "../../lib/polymarketUs.js";
+import { kalshiCloseHasPassed } from "../../lib/kalshiClosed.js";
 
 // Beyond this gap the two venues are not pricing the same thing, and
 // the difference is a matching or data fault rather than an edge.
@@ -850,7 +851,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ pairs: [], needsEmbed: true });
     }
 
-    const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0, implausibleSpread: 0 };
+    const dropped = { missingPrice: 0, kalshiOutOfBand: 0, polyOutOfBand: 0, expired: 0, closed: 0, implausibleSpread: 0 };
     // How often the shown price came from the book rather than the
     // stored last-trade figure. A large poly number is the bug this
     // replaced still being present in the data.
@@ -1040,6 +1041,12 @@ export default async function handler(req, res) {
           polyResolution: row.p_resolution || null,
           category: row.k_sport_tag,
           _gameDate: extractTickerDate(row.kalshi_id),
+          // Kalshi has stopped trading this market. The sports rule
+          // above only covers fixtures, by game date; this covers every
+          // category, by the venue's own close time — which the refresh
+          // job writes back when Kalshi closes a market EARLY, as it
+          // did FEDHIKE-26DEC31 on 2026-09-16. See lib/kalshiClosed.js.
+          _kalshiClosed: kalshiCloseHasPassed(row.k_close_time),
           // How old the WORSE leg is. A pair is only as current as its
           // stalest side, and the reader is comparing the two, so one
           // fresh leg does not make the comparison fresh. Null when the
@@ -1193,6 +1200,14 @@ export default async function handler(req, res) {
         if (m.kalshi.yes <= 0.05 || m.kalshi.yes >= 0.95)   return note("kalshiOutOfBand");
         if (m.poly.yes   <= 0.05 || m.poly.yes   >= 0.95)   return note("polyOutOfBand");
         if (m._gameDate && m._gameDate.getTime() < todayMs) return note("expired");
+        // A CLOSED MARKET IS NOT A QUOTE. Its stored book is the last
+        // one before trading stopped, so it renders exactly like a live
+        // price — FEDHIKE-26DEC31 sat on the economics tab for 13 days
+        // after settling, at 94/95, with `profitable: true` against a
+        // Polymarket US book. Hidden, and counted apart from `expired`
+        // because that one is a date parsed from a sports ticker and
+        // this is the venue's own word.
+        if (m._kalshiClosed) return note("closed");
         // TWO VENUES DO NOT DISAGREE BY 15 POINTS ON THE SAME CLAIM.
         //
         // Suppressing the arb badge was not enough. The card still
@@ -1221,7 +1236,7 @@ export default async function handler(req, res) {
     // those checks may just have corrected downward.
     const ladderPass = await attachDepthLadders(shaped);
     for (const m of shaped) {
-      delete m._gameDate; delete m._implausible; delete m._spreadPts;
+      delete m._gameDate; delete m._kalshiClosed; delete m._implausible; delete m._spreadPts;
       delete m._polyId; delete m._polyIdx; delete m._polyBook;
       delete m._polySlug; delete m._polyOffers;
       delete m._kFeeMultiplier; delete m._pFeeSchedule;
@@ -1429,6 +1444,8 @@ export default async function handler(req, res) {
         // together would hide a defect inside an expected number.
         implausibleSpread: dropped.implausibleSpread,
         expired: dropped.expired,
+        // Kalshi closed the market; see lib/kalshiClosed.js.
+        closed: dropped.closed,
         missingPrice: dropped.missingPrice,
         total: data.length - shaped.length,
       },

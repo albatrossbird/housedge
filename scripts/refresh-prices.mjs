@@ -70,6 +70,20 @@ for (const id of (r.kalshiUnderivableIds || []).slice(0, 10)) {
   fail(`paired ticker yields no series, so it can never refresh: ${id}`);
 }
 
+// A paired market Kalshi says is TRADING that the open poll did not
+// return: its price is freezing while the market is live. Only `active`
+// fails the run — `initialized` and `inactive` quote nothing either way.
+for (const s of (r.kalshiPairedMissedOpen || [])) {
+  if (/ active$/.test(s)) fail(`paired market is trading but the open poll missed it: ${s}`);
+  else console.log(`::warning::paired market not trading and not closed: ${s}`);
+}
+// Closed markets are the expected case and are printed, not failed: the
+// job has just written their real close_time, which is what takes them
+// off the site. Named so each one can be checked against the venue.
+for (const s of (r.kalshiPairedClosedIds || []).slice(0, 10)) console.log(`closed on kalshi, hidden from the site: ${s}`);
+for (const id of (r.kalshiPairedUnknown || []).slice(0, 10)) console.log(`::warning::paired ticker unknown to kalshi's lookup: ${id}`);
+for (const e of (r.kalshiLookupErrors || [])) console.log(`::warning::kalshi tickers lookup: ${e}`);
+
 for (const w of (r.warnings || [])) console.log(`::warning::${w}`);
 for (const s of (r.polyShortfall || [])) console.log(`::warning::polymarket shortfall: ${s}`);
 for (const e of (r.polyFetchErrors || []).slice(0, 3)) console.log(`::warning::polymarket: ${e}`);

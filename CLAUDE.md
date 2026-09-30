@@ -276,6 +276,41 @@ null series as "never gate" — a path that exists for Polymarket, the
 scarce side. So a dashless Kalshi market was escaping the series gate
 entirely and being re-embedded whether or not it had ever paired.
 
+### A closed Kalshi market kept rendering (2026-09-30)
+
+**Every leg was ~3 minutes old except three econ legs at ~13 days**:
+`FEDHIKE-26DEC31` and `KXFEDDISSENT-26SEP-MICH`/`-NEEL`, all
+`status: finalized`, all closed 2026-09-16 at the September FOMC.
+FEDHIKE is `can_close_early`: the Fed hiked, it closed that afternoon
+and settled YES, while its stored `close_time` still said Dec 31 — so
+the card showed 94/95, "93 days to resolve" and `profitable: true`
+against a Polymarket US book, on a market that no longer existed.
+
+Nothing was broken the way the alarms look: the `status=open` poll
+correctly stopped returning it, it was counted in `kalshiPairedMissed`
+("settled, expected"), and `/api/markets` only hid **sports** pairs,
+by game date. And it never leaves on its own: the matcher re-pairs every
+stored Kalshi row whatever its status, and prune never deletes a paired
+row.
+
+`lib/kalshiClosed.js` now closes the loop. The refresh looks up every
+paired-but-missed ticker via `/markets?tickers=` (any status, 50 per
+request) and splits them: **closed** ones get their real `close_time`
+written back — nothing else, not `updated_at`, so the age stays honest —
+and are named in `kalshiPairedClosedIds`; **`kalshiPairedMissedOpen`**
+(Kalshi says `active`, the poll missed it) fails the run; unknown ids
+and failed lookups are named as warnings. `/api/markets` hides any pair
+whose Kalshi `close_time` has passed, counted as `hidden.closed`.
+`scripts/kalshi-closed.test.mjs` pins it with fixtures copied from the
+live responses.
+
+Both pairs were also **wrong matches**, worth a matcher look: FEDHIKE
+("any hike by Dec 31") against .us "Another Fed Rate Hike in 2026?"
+(`hike2`), and September's per-member dissent markets against
+Polymarket's December dissent *counts*. The matcher still re-pairs
+closed markets daily; skipping Kalshi rows past `close_time` there
+would stop that at the source.
+
 ### Price freshness
 
 Three layers, because the scheduled job alone cannot deliver what a

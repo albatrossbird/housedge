@@ -108,6 +108,7 @@ function hiddenReason(hidden) {
   const parts = [];
   if (hidden.longShots) parts.push(`${hidden.longShots} trading under 5¢ or over 95¢`);
   if (hidden.expired) parts.push(`${hidden.expired} already settled`);
+  if (hidden.closed) parts.push(`${hidden.closed} closed on Kalshi`);
   if (hidden.missingPrice) parts.push(`${hidden.missingPrice} with no price on one side`);
   if (!parts.length) return null;
   return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
