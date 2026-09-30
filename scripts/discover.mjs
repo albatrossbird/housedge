@@ -74,9 +74,19 @@ for (const cat of CATEGORIES) {
     const sp = f.embedSpend;
     if (sp?.asked != null) console.log(`  embed spend: asked=${sp.asked} embedded=${sp.embedded} alreadyEmbedded=${sp.alreadyEmbedded}`);
     if (n(sp?.alreadyEmbedded) > 0) {
-      fail(`${cat}: ${sp.alreadyEmbedded} rows were about to be re-embedded — needsEmbedding is reading a stale or truncated set`);
+      fail(`${cat}: ${sp.alreadyEmbedded} rows were about to be re-embedded — needsEmbedding is reading a stale or truncated set${sp.alreadyEmbeddedIds?.length ? ` (${sp.alreadyEmbeddedIds.join(" ")})` : ""}`);
     }
     for (const e of (sp?.confirmErrors || [])) warn(`embed pre-spend check: ${e}`);
+
+    // Rules text is written only where get_pairs can show it. A
+    // fallback means the pairs read failed and every row kept its text:
+    // safe, but it is the daily write-then-clear churn prune used to
+    // spend its statement timeouts undoing.
+    const rs = f.resolutionScope;
+    if (rs) {
+      console.log(`  resolution: kept ${rs.kept ?? "all"} (paired/sports), nulled ${n(rs.nulled)} unreadable`);
+      if (rs.fallback) warn(`${cat}: pairs read failed, resolution written for every row: ${(rs.pairsReadErrors || []).join("; ")}`);
+    }
 
     // A read that hit its row cap returned a WRONG answer, not a short
     // one. This is what hid the re-embedding.

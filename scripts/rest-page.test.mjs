@@ -146,5 +146,17 @@ console.log("\nthe dedupe column must be selected too");
      "an unselected dedupe column is refused before any request");
 }
 
+console.log("\nan empty filter is a whole-table read, not a bare '&&'");
+{
+  // prune's markets scan has no filter at all. Every other caller
+  // passes one, so this shape was never exercised before prune moved
+  // onto this pager.
+  const calls = [];
+  const got = await pageAll(backend(calls), "markets", "id,v", "");
+  ok(got.length === 2500, `every row read (got ${got.length})`);
+  ok(calls.every(q => !q.includes("&&")), "no empty query parameter");
+  ok(calls[0].startsWith("markets?select=id%2Cv&order=id.asc"), `clean first page (${calls[0]})`);
+}
+
 console.log(bad ? `\n${bad} FAILED` : "\nall passed");
 process.exit(bad ? 1 : 0);

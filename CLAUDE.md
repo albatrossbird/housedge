@@ -276,6 +276,41 @@ null series as "never gate" — a path that exists for Polymarket, the
 scarce side. So a dashless Kalshi market was escaping the series gate
 entirely and being re-embedded whether or not it had ever paired.
 
+### A closed Kalshi market kept rendering (2026-09-30)
+
+**Every leg was ~3 minutes old except three econ legs at ~13 days**:
+`FEDHIKE-26DEC31` and `KXFEDDISSENT-26SEP-MICH`/`-NEEL`, all
+`status: finalized`, all closed 2026-09-16 at the September FOMC.
+FEDHIKE is `can_close_early`: the Fed hiked, it closed that afternoon
+and settled YES, while its stored `close_time` still said Dec 31 — so
+the card showed 94/95, "93 days to resolve" and `profitable: true`
+against a Polymarket US book, on a market that no longer existed.
+
+Nothing was broken the way the alarms look: the `status=open` poll
+correctly stopped returning it, it was counted in `kalshiPairedMissed`
+("settled, expected"), and `/api/markets` only hid **sports** pairs,
+by game date. And it never leaves on its own: the matcher re-pairs every
+stored Kalshi row whatever its status, and prune never deletes a paired
+row.
+
+`lib/kalshiClosed.js` now closes the loop. The refresh looks up every
+paired-but-missed ticker via `/markets?tickers=` (any status, 50 per
+request) and splits them: **closed** ones get their real `close_time`
+written back — nothing else, not `updated_at`, so the age stays honest —
+and are named in `kalshiPairedClosedIds`; **`kalshiPairedMissedOpen`**
+(Kalshi says `active`, the poll missed it) fails the run; unknown ids
+and failed lookups are named as warnings. `/api/markets` hides any pair
+whose Kalshi `close_time` has passed, counted as `hidden.closed`.
+`scripts/kalshi-closed.test.mjs` pins it with fixtures copied from the
+live responses.
+
+Both pairs were also **wrong matches**, worth a matcher look: FEDHIKE
+("any hike by Dec 31") against .us "Another Fed Rate Hike in 2026?"
+(`hike2`), and September's per-member dissent markets against
+Polymarket's December dissent *counts*. The matcher still re-pairs
+closed markets daily; skipping Kalshi rows past `close_time` there
+would stop that at the source.
+
 ### Price freshness
 
 Three layers, because the scheduled job alone cannot deliver what a
@@ -577,6 +612,31 @@ as a counter that can only be non-zero — it teaches you to ignore it.
 
 `force=1` skips the confirmation, because re-embedding everything is
 what it is for.
+
+**And then it fired every day on a bug of its own, 2026-09-24..28.**
+Politics failed five runs straight on `asked=11 embedded=9
+alreadyEmbedded=2` — no truncated read, no duplicate ids. The
+confirmation ran AFTER the markets upsert, which writes `title`, so a
+row whose venue title had changed was compared against the title just
+written and read as "already embedded". Worse than a noisy alarm: the
+row was never re-embedded, its stored title now matched, and the vector
+of its OLD title stayed on it for good. `storeThenEmbed()` in
+`lib/discoverWrites.js` now owns the order — confirm, write, embed — and
+`alreadyEmbeddedIds` names the rows. `scripts/discover-writes.test.mjs`
+reproduces the live alarm with the old order as a control. **Rows
+already damaged are not detectable** (their title and the stored title
+agree; only the vector is old) — at ~2 a day since the confirmation
+landed, a few dozen at most; `?force=1` on a category is the repair if
+one matters. The general gap remains: a title-changed row NOT embedded
+in the same run (past `embedLimit`, or gated) has its title overwritten
+beside a stale vector, and nothing records which title a vector was
+built from. An `embedding_title` column is the real fix.
+
+The same week's crypto run hit `embedded-titles read: page after
+4641295 (size 62): statement timeout` — this read is unscoped by design,
+so 0018's `(sport_tag, platform, id)` index cannot serve it, and past
+`4641295` the key space is a long run of unembedded numeric Polymarket
+ids. Migration `0030` adds `markets (id) where embedding_v is not null`.
 
 ### Soccer: the two venues barely list the same games
 
@@ -1102,6 +1162,26 @@ it where roughly 2,000 can display it. Prune nulls it for unpaired rows,
 **after** the delete so it never touches a row that just went, and
 discovery rewrites it for anything that becomes paired, so it is
 self-healing rather than lossy.
+
+**Discovery and prune were undoing each other, measured 2026-09-28.**
+Discovery wrote `resolution` onto every fetched market and prune nulled
+it again: `cleared 61339 unreadable of 64799 carrying`, daily — ~65k
+rows of multi-KB text rewritten and then updated back, three of prune's
+200-row updates hitting 57014, and the heaviest payload on a politics
+upsert that took 282s. Discovery now writes the text only on paired and
+sports rows (`scopeResolution`, `lib/discoverWrites.js`) and nulls it on
+the rest in the same write; a failed pairs read writes it everywhere
+rather than strip live cards. Prune's clearing chunks now split on a
+statement timeout instead of losing the chunk.
+
+**`pruned 9059 of 200000 markets` was a cap, not a table size.** Prune
+had its own pager with a silent `maxRows = 200000`, so every row past
+the 200,000th id could never be pruned however long it had been
+delisted — the invisible tail was the part that grew. It reads through
+`lib/restPage.js` now, with no cap, over plain REST (no supabase-js),
+and `scripts/prune.test.mjs` drives it against a 201,000-row fake.
+Its `resolution IS NOT NULL` read becomes sparse once discovery stops
+writing the text; migration `0030`'s second index keeps it a seek.
 
 **Nulling a TOASTed value does not shrink the database.** It marks the
 space reusable by the table; the reported size falls only on a rewrite
