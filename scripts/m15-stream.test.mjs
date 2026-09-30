@@ -66,7 +66,7 @@ function run({ fake = {}, storage = "ok", seconds = 4, envx = {}, leftover = fal
       STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t",
       STREAM_RUN_MINUTES: String(${seconds} / 60), STREAM_ALIGN_EXIT: "0",
       STREAM_ROTATE_MS: "1500", STREAM_SNAPSHOT_MS: "200", STREAM_DISCOVER_MS: "400", STREAM_UPLOAD_MS: "700",
-      STREAM_FINAL_SECONDS: "59", STREAM_REMOVE_AFTER_CLOSE_MS: "300", STREAM_STATS_MS: "100000", STREAM_SERIES_MS: "1000",
+      STREAM_FINAL_SECONDS: "59", STREAM_REMOVE_AFTER_CLOSE_MS: "300", STREAM_STATS_MS: "100000", STREAM_SERIES_MS: "1000", STREAM_HEALTH_MS: "500",
       ...${JSON.stringify(envx)},
     });
     delete process.env.CREDENTIALS_DIRECTORY; delete process.env.GITHUB_ACTIONS; delete process.env.M15_SOURCE;
@@ -119,6 +119,9 @@ console.log("a normal run");
   ok(dels.includes("KXETH15M-SOON"), "a closed market is removed from the subscription", r);
   const sub = r.log.commands.find(c => c.cmd === "subscribe" && c.params.channels.includes("orderbook_delta"));
   ok(sub?.params.use_yes_price === true, "use_yes_price is sent explicitly", r);
+  const hs = kinds("health");
+  ok(hs.length >= 3 && hs.every(h => h.lagP50 == null || h.lagP50 < 1000) && hs.some(h => h.frames > 0 && Number.isFinite(h.elu)), "a health line every interval: frames, event-loop load, receive lag", r);
+  ok(!/BEHIND/.test(r.text), "a recorder keeping up does not warn", r);
 
   // Rule 2: replay.
   let book = null, checked = 0, bad = 0;
@@ -135,6 +138,16 @@ console.log("a normal run");
     }
   }
   ok(checked >= 3 && bad === 0, `the final-window record replays to every snapshot (${checked} checked, ${bad} mismatched)`, r);
+}
+
+console.log("\na recorder that is behind the socket");
+{
+  // Kalshi's ts_ms a minute before the box receives it: what a recorder
+  // that cannot keep up looks like from inside.
+  const r = run({ fake: { tsLagMs: 60000 } });
+  const hs = byTime(r.files).filter(l => l.k === "health" && l.lagP50 != null);
+  ok(hs.length >= 1 && hs.every(h => h.lagP50 >= 59000), "the lag is measured against Kalshi's own timestamp", r);
+  ok(/recorder is BEHIND the socket: receive lag p50 6\d\.\ds/.test(r.text), "and warned on, with the figure", r);
 }
 
 console.log("\na lost frame");

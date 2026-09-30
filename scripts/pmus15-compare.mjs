@@ -39,6 +39,10 @@ const needle = `"m":"${KALSHI_SERIES}-`;
 for (const f of kFiles) bad += await reader.eachLine(f.path, o => feedKalshi(C, o), line => line.startsWith('{"k":"b"') && line.includes(needle));
 const iso = t => Number.isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") : "—";
 console.log(`.us books ${iso(C.pmusFirst)} -> ${iso(C.pmusLast)} UTC, Kalshi books ${iso(C.kalshiFirst)} -> ${iso(C.kalshiLast)} UTC${bad ? `, ${bad} unparseable lines` : ""}`);
+{
+  const L = [...C.kalshiLagMs].sort((a, b) => a - b), q = p => L.length ? (L[Math.min(L.length - 1, Math.floor(p * L.length))] / 1000).toFixed(1) : "—";
+  console.log(`Kalshi recorder receive lag (box time minus Kalshi's): p50 ${q(0.5)}s, p90 ${q(0.9)}s, max ${q(1)}s — samples are paired on each venue's OWN clock, so this costs coverage, not correctness`);
+}
 console.log(`.us recorder: connection events ${JSON.stringify(C.pmusConn)}, socket errors ${C.pmusErrors}, trades seen ${C.pmusTrades.toLocaleString()}`);
 
 const S = summarize(C);
