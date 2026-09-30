@@ -25,6 +25,7 @@
 import { feeOf, pickOnePerTicker, bucketize, simulate } from "../lib/calibrate.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
+import { readQuoteWindows } from "../lib/m15Reads.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -47,6 +48,15 @@ const LO = arg("lo", 0.65), HI = arg("hi", 0.95);
 // killed by Postgres with 57014: thousands of rows fetched to be
 // joined against a quote table that has nothing to say about them.
 const DAYS = arg("days", 21);
+// WHICH PRICE. `book` (the default) is book_bid/book_ask — the live
+// touch, read from /orderbook, recorded from 2026-09-26 (migration 0027).
+// `cached` is yes_bid/yes_ask from the /markets list, which CloudFront
+// serves up to 15s stale: measured agreeing with the live book on 1 read
+// in 48. In the final ninety seconds a stale quote on a trending market
+// is a better price than was on offer, so it can MANUFACTURE an edge;
+// `cached` is kept only to show how much of an old result that was.
+const PRICE = (process.argv.find(a => a.startsWith("--price=")) || "--price=book").split("=")[1];
+if (!["book", "cached"].includes(PRICE)) { console.error("::error::--price must be book or cached"); process.exit(2); }
 const SINCE = new Date(Date.now() - DAYS * 86400000).toISOString();
 
 const series = process.argv.slice(2).filter(a => !a.startsWith("-"));
@@ -117,24 +127,25 @@ for (const s of series) {
   console.log(`settled markets, last ${DAYS}d    ${mk.length}`);
   if (!mk.length) { console.log("  nothing settled in that window to calibrate against"); continue; }
 
-  // Quotes for those markets, inside the entry band.
-  //
-  // Asked BY TICKER rather than by a LIKE prefix: m15_quotes is indexed
-  // on (ticker, observed_at) and a prefix match cannot be trusted to
-  // use it, while this table is the big one and grows ~50k rows a day.
-  // Chunked at 200 ids, per the .in() URL-length lesson — a few
-  // thousand ids build a URL long enough to kill the request.
-  const tickers = [...resultOf.keys()];
-  const q = [];
-  for (let i = 0; i < tickers.length; i += 200) {
-    const ids = tickers.slice(i, i + 200).map(t => `"${t}"`).join(",");
-    q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask",
-      `ticker=in.(${encodeURIComponent(ids)})` +
-      `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`, "ticker", "id"));
-  }
+  // Quotes for those markets, each read over its own entry window
+  // (lib/m15Reads.js explains why the read has that shape).
+  const q = await readQuoteWindows(readAll,
+    mk.map(m => ({ ticker: m.ticker, close: Date.parse(m.close_time) })),
+    { fromSecs: TARGET + TOL, toSecs: Math.max(0, TARGET - TOL),
+      select: "id,ticker,secs_to_close,yes_bid,yes_ask,book_bid,book_ask",
+      extra: `secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}` });
   console.log(`quotes in the window         ${q.length}`);
 
-  const obs = pickOnePerTicker(q, TARGET, { known: new Set(resultOf.keys()) });
+  // With --price=book, a row without the live touch is not a quote we
+  // can price: it is dropped BEFORE picking, so the one-per-market
+  // choice is made among usable rows rather than landing on one that
+  // then gets thrown away.
+  const usable = PRICE === "book"
+    ? q.filter(r => r.book_bid != null && r.book_ask != null).map(r => ({ ...r, yes_bid: r.book_bid, yes_ask: r.book_ask }))
+    : q;
+  if (PRICE === "book") console.log(`  with the live touch (book)  ${usable.length}   (rows before 2026-09-26 have none)`);
+
+  const obs = pickOnePerTicker(usable, TARGET, { known: new Set(resultOf.keys()) });
   console.log(`markets with a usable quote  ${obs.length}   <-- one per market, see lib/calibrate.js`);
   if (!obs.length) {
     console.log("\n  No price path in this window yet. The recorder has been running");
@@ -145,7 +156,7 @@ for (const s of series) {
     continue;
   }
 
-  console.log(`\ncalibration — pay yes_ask, win if it settles YES`);
+  console.log(`\ncalibration — pay the ask (${PRICE === "book" ? "live book" : "CACHED /markets list, up to 15s stale"}), win if it settles YES`);
   console.log(`  ask band       n    avg ask   settled YES   gap      fee     net edge`);
   for (const b of bucketize(obs, resultOf)) {
     const f = feeOf(b.avgAsk, mult);
@@ -182,6 +193,10 @@ for (const s of series) {
   console.log(`\n  NOT MODELLED: fill. Rows recorded before 2026-09-26 carry no size —`);
   console.log(`  the recorder read the wrong field — so every entry above assumes the`);
   console.log(`  whole order filled at the touch. Treat it as an UPPER BOUND.`);
-  console.log(`  AND THOSE PRICES ARE UP TO 15s STALE: they came through a CDN-cached`);
-  console.log(`  feed. From that date book_bid/book_ask are the live touch (0027).`);
+  if (PRICE === "cached") {
+    console.log(`  AND THESE PRICES ARE UP TO 15s STALE: they came through a CDN-cached`);
+    console.log(`  feed. Re-run with --price=book for the live touch (from 2026-09-26).`);
+  } else {
+    console.log(`  Prices are the live touch, so this covers 2026-09-26 onward only.`);
+  }
 }

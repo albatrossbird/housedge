@@ -30,6 +30,16 @@ on:
         description: "How far back to look for settled markets"
         default: "21"
         required: false
+      price:
+        description: "book (live touch, from 2026-09-26) or cached (the /markets list, up to 15s stale)"
+        default: "book"
+        required: false
+
+# Shares a queue with the backtest: two analysis runs at once over
+# m15_quotes are what slowed the database on 2026-09-30.
+concurrency:
+  group: m15-analysis
+  cancel-in-progress: false
 
 jobs:
   calibrate:
@@ -57,4 +67,5 @@ jobs:
           SECS: ${{ github.event.inputs.secs || '90' }}
           TOL: ${{ github.event.inputs.tol || '45' }}
           DAYS: ${{ github.event.inputs.days || '21' }}
-        run: node scripts/m15-calibrate.mjs "--secs=$SECS" "--tol=$TOL" "--days=$DAYS" $SERIES
+          PRICE: ${{ github.event.inputs.price || 'book' }}
+        run: node scripts/m15-calibrate.mjs "--secs=$SECS" "--tol=$TOL" "--days=$DAYS" "--price=$PRICE" $SERIES

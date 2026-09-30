@@ -34,7 +34,7 @@
 import { mkdirSync } from "node:fs";
 import { KALSHI_REST, KALSHI_WS, WS_PATH, keyPath, loadKalshiKey, kalshiAuthHeaders } from "../lib/kalshiAuth.js";
 import { BookSet } from "../lib/kalshiBook.js";
-import { M15_SUFFIX, M15_CATEGORIES } from "../lib/m15.js";
+import { M15_SUFFIX, M15_CATEGORIES, m15InScope } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { recorderSource } from "../lib/recorderSource.js";
 import { createArchive } from "../lib/streamArchive.js";
@@ -113,12 +113,21 @@ async function restGet(path) {
   return null;
 }
 
+// Only the series in scope (lib/m15.js, M15_RESEARCH_SERIES): every
+// other book is bandwidth, CPU and archive for data nobody is using.
+const inScope = m15InScope(env);
+let outOfScopeLogged = "";
 async function listSeries() {
-  const found = new Set();
+  const found = new Set(), skipped = new Set();
   for (const cat of M15_CATEGORIES) {
     const r = await restGet(`/series?category=${encodeURIComponent(cat)}`);
-    for (const s of r?.series || []) if (s.ticker && M15_SUFFIX.test(s.ticker)) found.add(s.ticker);
+    for (const s of r?.series || []) {
+      if (!s.ticker || !M15_SUFFIX.test(s.ticker)) continue;
+      if (inScope(s.ticker)) found.add(s.ticker); else skipped.add(s.ticker);
+    }
   }
+  const sk = [...skipped].sort().join(" ");
+  if (sk !== outOfScopeLogged) { outOfScopeLogged = sk; if (sk) log(`out of scope, not recorded: ${sk}`); }
   return [...found].sort();
 }
 

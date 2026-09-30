@@ -49,8 +49,9 @@ async function upsert(table, rows, onConflict) {
   return { written, failed: false };
 }
 
-const { series, errors } = await listM15Series();
+const { series, outOfScope, errors } = await listM15Series();
 errors.forEach(e => console.log(`::warning::series list: ${e}`));
+if (outOfScope.length) console.log(`out of scope (lib/m15.js M15_RESEARCH_SERIES), not recorded: ${outOfScope.join(" ")}`);
 if (!series.length) { console.error("::error::no 15-minute series found"); process.exit(1); }
 console.log(`15-minute series: ${series.length}`);
 
