@@ -150,6 +150,21 @@ console.log("\na recorder that is behind the socket");
   ok(/recorder is BEHIND the socket: receive lag p50 6\d\.\ds/.test(r.text), "and warned on, with the figure", r);
 }
 
+console.log("\nclosing on the exchange's clock");
+{
+  // KXETH15M-SOON closes 1.5s into the run. With Kalshi's timestamps 3s
+  // behind the box, a box-clock recorder retires it at ~1.8s with its last
+  // deltas still queued; on the exchange's clock it is still open when the
+  // run ends.
+  const r = run({ fake: { tsLagMs: 3000 } });
+  const dels = r.log.commands.filter(c => c.params?.action === "delete_markets").flatMap(c => c.params.market_tickers);
+  ok(r.code === 0 && !dels.includes("KXETH15M-SOON"), "a market is not retired before the exchange's clock reaches its close", r);
+  const L = byTime(r.files);
+  const last = Math.max(...L.filter(l => l.k === "b" && l.m === "KXETH15M-SOON").map(l => l.t));
+  const close = L.find(l => l.k === "mkt" && l.m === "KXETH15M-SOON")?.close;
+  ok(Number.isFinite(last) && close && last > Date.parse(close) + 1000, "its book keeps being recorded past the close on the box's clock", r);
+}
+
 console.log("\na lost frame");
 {
   const r = run({ fake: { seqSkipAt: 20 } });

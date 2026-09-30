@@ -147,8 +147,22 @@ async function discover() {
   if (add.length) subscribeMarkets(add);
 }
 
+// THE EXCHANGE'S CLOCK, NOT THE BOX'S. Whether a window is in its final
+// two minutes, or over, is decided by the latest Kalshi timestamp this
+// recorder has actually PROCESSED. On the box's clock, a recorder running
+// minutes behind its socket (measured 2026-09-30: up to 13 minutes) retired
+// each market 60s after close while the deltas for its final minutes were
+// still queued, and the final-window record captured the wrong stretch. On
+// the exchange's clock, falling behind delays the record; it never cuts
+// it. The box's clock takes over only when nothing is flowing (a dropped
+// socket), because then there is nothing queued to wait for.
+let exWatermark = null, exSeenAt = 0;
+const EX_FRESH_MS = 30000;
+const exNow = now => (exWatermark != null && now - exSeenAt < EX_FRESH_MS) ? exWatermark : now;
+
 function retireClosed(now) {
-  const gone = [...markets].filter(([, m]) => now > m.close + REMOVE_AFTER_CLOSE_MS).map(([t]) => t);
+  const ex = exNow(now);
+  const gone = [...markets].filter(([, m]) => ex > m.close + REMOVE_AFTER_CLOSE_MS).map(([t]) => t);
   if (!gone.length) return;
   for (const t of gone) { markets.delete(t); book.drop(t); }
   unsubscribeMarkets(gone);
@@ -218,7 +232,11 @@ function writeHealth(now) {
 function onFrame(f, now) {
   stats.frames++; lastFrameAt = now; health.frames++;
   const ts = f.msg?.ts_ms;
-  if (Number.isFinite(ts) && (f.type === "orderbook_delta" || f.type === "trade")) health.lags.push(now - ts);
+  if (Number.isFinite(ts) && (f.type === "orderbook_delta" || f.type === "trade")) {
+    health.lags.push(now - ts);
+    if (exWatermark == null || ts > exWatermark) exWatermark = ts;
+    exSeenAt = now;
+  }
   switch (f.type) {
     case "orderbook_snapshot":
     case "orderbook_delta": {
@@ -295,9 +313,10 @@ function writeFull(t, now, why) {
 // Once a second: each known book, if it changed; and the final-window edge.
 function snapshotTick(now) {
   for (const [t, m] of markets) {
-    if (!m.final && now >= m.close - FINAL_MS && now < m.close + REMOVE_AFTER_CLOSE_MS) {
+    const ex = exNow(now);
+    if (!m.final && ex >= m.close - FINAL_MS && ex < m.close + REMOVE_AFTER_CLOSE_MS) {
       m.final = true;
-      write({ k: "final", t: now, m: t, close: new Date(m.close).toISOString(), fresh: book.isFresh(t) });
+      write({ k: "final", t: now, x: ex, m: t, close: new Date(m.close).toISOString(), fresh: book.isFresh(t) });
       writeFull(t, now, "final-window");
     }
     const tp = book.touch(t);
