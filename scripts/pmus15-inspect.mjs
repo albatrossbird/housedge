@@ -279,6 +279,36 @@ console.log(`   Kalshi touch age at write, all lines, seconds: ${dist(stale.map(
   }
 }
 
+// 12. Re-time Kalshi's trades by Kalshi's OWN timestamp and repeat trade
+// vs trade (.us on its own timestamp too). If the two now agree, the
+// Kalshi recorder's receive time is what was wrong — it fell behind.
+{
+  let n = 0, inn = 0; const ds = [];
+  for (const [ticker, kts0] of ktr) {
+    const ts = tr.get(slugOf.get(ticker)); if (!ts) continue;
+    const kts = kts0.filter(k => Number.isFinite(k.x)).map(k => ({ t: k.x, yp: k.yp })).sort((a, b) => a.t - b.t);
+    for (const x0 of ts) {
+      if (!Number.isFinite(x0.p) || !Number.isFinite(x0.x)) continue;
+      const tt = x0.x, i = at(kts, tt);
+      const cands = [kts[i], kts[i + 1]].filter(k => k && Math.abs(k.t - tt) <= 1000 && Number.isFinite(k.yp));
+      if (!cands.length) continue;
+      const k = cands.sort((a, b) => Math.abs(a.t - tt) - Math.abs(b.t - tt))[0];
+      const d = Math.abs(k.yp - x0.p); n++; if (d <= 0.0205) inn++; ds.push(Math.round(d * 100));
+    }
+  }
+  console.log(`\n12. TRADE vs TRADE on each venue's OWN timestamp`);
+  console.log(`   within 2c: ${pct(inn, n)} of ${n.toLocaleString()}   |difference|, cents: ${dist(ds)}`);
+
+  // The Kalshi lag by wall-clock minute, across all series in the file set.
+  const byMin = new Map();
+  for (const kts of ktr.values()) for (const k of kts) if (Number.isFinite(k.x)) {
+    const m = Math.floor(k.t / 60000); if (!byMin.has(m)) byMin.set(m, []); byMin.get(m).push((k.t - k.x) / 1000);
+  }
+  console.log(`   Kalshi receive lag by wall-clock minute (median s), first 45 minutes of the file set:`);
+  const mins = [...byMin.keys()].sort((a, b) => a - b).slice(0, 45);
+  console.log("   " + mins.map(m => `${new Date(m * 60000).toISOString().slice(11, 16)}=${Math.round(q(byMin.get(m), 0.5))}`).join(" "));
+}
+
 // 5. A run of raw lines from the busiest market, beside Kalshi.
 const busiest = [...pb.entries()].sort((x, y) => y[1].length - x[1].length)[0];
 if (busiest) {
