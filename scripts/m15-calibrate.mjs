@@ -25,6 +25,7 @@
 import { feeOf, pickOnePerTicker, bucketize, simulate } from "../lib/calibrate.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
+import { readQuoteWindows } from "../lib/m15Reads.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -126,36 +127,13 @@ for (const s of series) {
   console.log(`settled markets, last ${DAYS}d    ${mk.length}`);
   if (!mk.length) { console.log("  nothing settled in that window to calibrate against"); continue; }
 
-  // Quotes for those markets, inside the entry band.
-  //
-  // Asked BY TICKER rather than by a LIKE prefix: m15_quotes is indexed
-  // on (ticker, observed_at) and a prefix match cannot be trusted to
-  // use it, while this table is the big one and grows ~50k rows a day.
-  // Chunked at 200 ids, per the .in() URL-length lesson — a few
-  // thousand ids build a URL long enough to kill the request.
-  // EACH MARKET'S OWN ENTRY WINDOW, on observed_at. A market is quoted
-  // for its whole listed life, not its last fifteen minutes, so asking
-  // for every row of 200 tickers and filtering on secs_to_close read far
-  // more than it kept — and died with 57014 once m15_quotes passed a few
-  // million rows (2026-09-30). Bounding observed_at per ticker makes each
-  // term a range on the (ticker, observed_at) index. secs_to_close is
-  // still filtered too, so the rows kept are exactly what they were.
-  const closeOf = new Map(mk.map(m => [m.ticker, Date.parse(m.close_time)]));
-  const tickers = [...resultOf.keys()].filter(t => Number.isFinite(closeOf.get(t)));
-  const q = [];
-  const CHUNK = 20;
-  for (let i = 0; i < tickers.length; i += CHUNK) {
-    const terms = tickers.slice(i, i + CHUNK).map(t => {
-      const c = closeOf.get(t);
-      const from = new Date(c - (TARGET + TOL + 5) * 1000).toISOString();
-      const to = new Date(c - Math.max(0, TARGET - TOL - 5) * 1000).toISOString();
-      // Quoted: a timestamp carries "." and ":", which PostgREST reserves inside or=().
-      return `and(ticker.eq."${t}",observed_at.gte."${from}",observed_at.lte."${to}")`;
-    }).join(",");
-    q.push(...await readAll("m15_quotes", "id,ticker,secs_to_close,yes_bid,yes_ask,book_bid,book_ask",
-      `or=(${encodeURIComponent(terms)})` +
-      `&secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}&`, "ticker", "id"));
-  }
+  // Quotes for those markets, each read over its own entry window
+  // (lib/m15Reads.js explains why the read has that shape).
+  const q = await readQuoteWindows(readAll,
+    mk.map(m => ({ ticker: m.ticker, close: Date.parse(m.close_time) })),
+    { fromSecs: TARGET + TOL, toSecs: Math.max(0, TARGET - TOL),
+      select: "id,ticker,secs_to_close,yes_bid,yes_ask,book_bid,book_ask",
+      extra: `secs_to_close=gte.${TARGET - TOL}&secs_to_close=lte.${TARGET + TOL}` });
   console.log(`quotes in the window         ${q.length}`);
 
   // With --price=book, a row without the live touch is not a quote we

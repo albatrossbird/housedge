@@ -712,6 +712,20 @@ on the box. Clearing what was already stored is
 `m15_scope_prune.sql` (delete, direct connection, quiet hour). The
 stream archive's past hours still hold every series; new hours do not.
 
+**Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
+(workflow 'Backtest 15-minute strategies'). Strategies are rules — which
+side (yes/no/favourite/underdog/momentum/fade), a time-to-close window, a
+price band, a spread cap, and optionally a target, stop and exit time —
+with presets in `PRESETS` and custom ones passed as JSON. It reads only
+the live-book path (from 2026-09-26), buys at the ask and sells at the
+bid, caps size at the depth within 1c, charges Kalshi's per-order fee,
+never trades a row at or after the close, and reports by DAY because the
+windows are not independent. Every result also shows the same trades 1c
+worse, since fills are priced at the touch. `scripts/m15-backtest.test.mjs`
+pins the rules; the close rule and NO pricing were mutation-checked.
+Calibration and the backtest share `lib/m15Reads.js` and one Actions
+concurrency group, so two analysis runs never hit `m15_quotes` at once.
+
 **They are liquid.** `KXBTC15M` carried **1.26M contracts of volume** on
 a single fifteen-minute window.
 

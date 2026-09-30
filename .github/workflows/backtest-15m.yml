@@ -1,0 +1,61 @@
+name: Backtest 15-minute strategies
+
+# scripts/m15-backtest.mjs over the recorded live-book path (from
+# 2026-09-26). Manual only, and run one at a time — not 15:45-16:45 UTC,
+# while discovery and matching load the database.
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Space-separated series"
+        default: "KXBTC15M KXGOLD15M"
+        required: false
+      strategies:
+        description: "Comma-separated presets (fav-late, fav-final, dog-late, fav-mid-managed, momentum, fade) or all"
+        default: "all"
+        required: false
+      strategy:
+        description: "Optional custom strategy as JSON (see PRESETS in lib/m15Backtest.js); runs instead of the presets"
+        default: ""
+        required: false
+      size:
+        description: "Contracts per entry"
+        default: "10"
+        required: false
+      days:
+        description: "How far back (the live book starts 2026-09-26)"
+        default: "21"
+        required: false
+
+concurrency:
+  group: m15-analysis
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Backtest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          # The recorded archives are private (migration 0028).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Inputs go through env, never into the shell line: ${{ }} is
+          # substituted as raw text before bash parses it.
+          SERIES: ${{ github.event.inputs.series || 'KXBTC15M KXGOLD15M' }}
+          STRATEGIES: ${{ github.event.inputs.strategies || 'all' }}
+          STRATEGY: ${{ github.event.inputs.strategy }}
+          SIZE: ${{ github.event.inputs.size || '10' }}
+          DAYS: ${{ github.event.inputs.days || '21' }}
+        run: |
+          if [ -n "$STRATEGY" ]; then
+            node scripts/m15-backtest.mjs "--days=$DAYS" "--size=$SIZE" "--strategy=$STRATEGY" $SERIES
+          else
+            node scripts/m15-backtest.mjs "--days=$DAYS" "--size=$SIZE" "--strategies=$STRATEGIES" $SERIES
+          fi

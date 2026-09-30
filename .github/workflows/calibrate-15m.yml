@@ -35,6 +35,12 @@ on:
         default: "book"
         required: false
 
+# Shares a queue with the backtest: two analysis runs at once over
+# m15_quotes are what slowed the database on 2026-09-30.
+concurrency:
+  group: m15-analysis
+  cancel-in-progress: false
+
 jobs:
   calibrate:
     runs-on: ubuntu-latest
