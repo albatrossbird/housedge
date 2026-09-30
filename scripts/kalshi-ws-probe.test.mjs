@@ -36,6 +36,7 @@ function run({ keyType = "ed25519", fake = {}, wrongKey = false }) {
     process.env.KALSHI_WS_URL = FAKE_WS;
     process.env.KALSHI_KEY_FILE = ${JSON.stringify(k.priv)};
     process.env.KALSHI_KEY_ID = "test-key-id";
+    process.env.KALSHI_WS_CLIENT = "global";
     process.env.PROBE_SECONDS = "3";
     process.env.PROBE_SAMPLE_MS = "120";
     delete process.env.CREDENTIALS_DIRECTORY;

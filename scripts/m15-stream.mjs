@@ -38,6 +38,7 @@ import { M15_SUFFIX, M15_CATEGORIES } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { recorderSource } from "../lib/recorderSource.js";
 import { createArchive } from "../lib/streamArchive.js";
+import { kalshiWebSocket } from "../lib/plainWebSocket.js";
 import { performance } from "node:perf_hooks";
 
 const env = process.env;
@@ -69,7 +70,11 @@ const kalshiKeyId = env.KALSHI_KEY_ID;
 let kalshiKey;
 try { kalshiKey = loadKalshiKey(keyPath(env)); } catch (e) { console.error(`::error::${e.message}`); process.exit(1); }
 if (!kalshiKeyId) { console.error("::error::KALSHI_KEY_ID is not set in /etc/marketslap/env — run scripts/kalshi-key-setup.mjs"); process.exit(1); }
-if (typeof WebSocket !== "function") { console.error(`::error::Node ${process.versions.node} has no built-in WebSocket; Node 22+ is required`); process.exit(1); }
+// Not Node's built-in WebSocket: it always negotiates compression, and
+// inflating every message kept this recorder minutes behind its socket.
+// lib/plainWebSocket.js explains and measures.
+const KalshiWS = kalshiWebSocket(env);
+if (typeof KalshiWS !== "function") { console.error("::error::no WebSocket client available"); process.exit(1); }
 await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
 mkdirSync(DIR, { recursive: true });
 log(`source: ${SOURCE}, archive ${DIR} -> ${BUCKET}, run ${RUN_MINUTES}m`);
@@ -341,7 +346,7 @@ function connect() {
     for (const k of Object.keys(sids)) delete sids[k];
     subscribing = false;
     for (const m of markets.values()) m.lastSnap = null;
-    const s = new WebSocket(KALSHI_WS, { headers: kalshiAuthHeaders(kalshiKeyId, kalshiKey, "GET", WS_PATH) });
+    const s = new KalshiWS(KALSHI_WS, { headers: kalshiAuthHeaders(kalshiKeyId, kalshiKey, "GET", WS_PATH) });
     ws = s;
     s.addEventListener("open", () => {
       backoff = 1000; opened = true; lastFrameAt = Date.now(); lastI5At = Date.now();
