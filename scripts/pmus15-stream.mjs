@@ -96,7 +96,8 @@ if (!ASSETS.length) fatal("PMUS_ASSETS is empty");
   else if (Math.abs(drift) > MAX_DRIFT_MS) fatal(`this box's clock is ${(drift / 1000).toFixed(1)}s off the gateway's; signatures need ~30s or better — fix NTP (timedatectl) first`);
 }
 
-await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
+// Records to local files first, so a database that cannot answer is not fatal here.
+await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes", unavailableIsFatal: false, log });
 
 const stats = { frames: 0, books: 0, booksWritten: 0, trades: 0, heartbeats: 0, errors: 0, reconnects: 0 };
 const archive = createArchive({

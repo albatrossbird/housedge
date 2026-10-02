@@ -75,7 +75,8 @@ if (!kalshiKeyId) { console.error("::error::KALSHI_KEY_ID is not set in /etc/mar
 // lib/plainWebSocket.js explains and measures.
 const KalshiWS = kalshiWebSocket(env);
 if (typeof KalshiWS !== "function") { console.error("::error::no WebSocket client available"); process.exit(1); }
-await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
+// Records to local files first, so a database that cannot answer is not fatal here.
+await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes", unavailableIsFatal: false, log });
 mkdirSync(DIR, { recursive: true });
 log(`source: ${SOURCE}, archive ${DIR} -> ${BUCKET}, run ${RUN_MINUTES}m`);
 

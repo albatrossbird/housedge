@@ -11,7 +11,8 @@
 //   3. A lost frame is recorded as a gap, repaired with get_snapshot, and
 //      recording resumes.
 //   4. A dropped socket is reconnected and recording resumes.
-//   5. A missing bucket is fatal at startup, naming the migration.
+//   5. A missing bucket is fatal at startup, naming the migration. A
+//      database or Storage that cannot answer is not: it warns and records.
 //   6. Markets are subscribed AHEAD (initialized), added as they appear,
 //      and removed after they close.
 import { execFileSync } from "node:child_process";
@@ -23,7 +24,7 @@ import { join } from "node:path";
 
 const HERE = new URL(".", import.meta.url).pathname;
 
-function run({ fake = {}, storage = "ok", seconds = 4, envx = {}, leftover = false, later = "" } = {}) {
+function run({ fake = {}, storage = "ok", rest = "ok", seconds = 4, envx = {}, leftover = false, later = "" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "m15stream-"));
   const arch = join(dir, "arch"); mkdirSync(arch);
   if (leftover) writeFileSync(join(arch, "2026-09-26_14_20260926T140000Z_box.ndjson.gz.part"), Buffer.from([0x1f, 0x8b]));
@@ -34,7 +35,7 @@ function run({ fake = {}, storage = "ok", seconds = 4, envx = {}, leftover = fal
     import { writeFileSync } from "node:fs";
     import { installFakeKalshi, FAKE_REST, FAKE_WS } from ${JSON.stringify(join(HERE, "fake-kalshi.mjs"))};
     const uploads = [];
-    const O = ${JSON.stringify({ storage })};
+    const O = ${JSON.stringify({ storage, rest })};
     let uploadCalls = 0;
     const now = Date.now();
     const iso = ms => new Date(now + ms).toISOString();
@@ -46,9 +47,10 @@ function run({ fake = {}, storage = "ok", seconds = 4, envx = {}, leftover = fal
       closeTimes: { "KXBTC15M-A": iso(60000), "KXBTC15M-NEXT": iso(960000), "KXETH15M-SOON": iso(1500) },
       ...${JSON.stringify(fake)},
       fallback: async (url, init) => {
-        if (url.includes("/rest/v1/")) return reply(200, []);
+        if (url.includes("/rest/v1/")) return O.rest === "down" ? reply(500, { code: "57014", message: "canceling statement due to statement timeout" }) : reply(200, []);
         if (url.includes("/storage/v1/object/")) {
           uploadCalls++;
+          if (O.storage === "down-at-start" && uploadCalls === 1) return reply(544, { statusCode: "544", error: "DatabaseTimeout" });
           if (O.storage === "nobucket") return reply(400, { statusCode: "404", error: "Bucket not found", message: "Bucket not found" });
           if (O.storage === "fail-after-probe" && uploadCalls > 1) return reply(500, { message: "boom" });
           uploads.push({ path: url.split("/storage/v1/object/")[1], body: Buffer.from(init.body).toString("base64") });
@@ -196,6 +198,14 @@ console.log("\nno bucket (migration 0029 not run)");
   const r = run({ storage: "nobucket" });
   ok(r.code === 1 && /0029_stream_archive_bucket\.sql/.test(r.text), "fatal at startup, naming the migration", r);
   ok(r.log.sockets === 0, "before any socket is opened", r);
+}
+
+console.log("\nan overloaded database at startup (2026-10-01)");
+{
+  const r = run({ rest: "down", storage: "down-at-start" });
+  ok(r.code === 0 && r.log.sockets >= 1, "records anyway instead of exiting or waiting", r);
+  ok(/cannot reach Supabase: HTTP 500/.test(r.text) && /Storage is not answering \(544/.test(r.text), "and says why the checks did not pass", r);
+  ok(r.uploads.some(u => u.path.endsWith(".ndjson.gz")), "the archive still reaches the bucket once Storage answers", r);
 }
 
 console.log("\nuploads failing mid-run");

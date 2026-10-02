@@ -104,5 +104,37 @@ console.log("\nan unreachable host is not a bad key");
   ok(code === 2, "still fatal — recording nothing is not a working state");
 }
 
+console.log("\nan overloaded database is not a bad key (2026-10-01)");
+{
+  const call = async (status, opts = {}) => {
+    let code = null; const lines = [];
+    const res = await assertCredential(URL_, GOOD, {
+      fetchImpl: async () => ({ ok: false, status, text: async () => '{"code":"57014"}' }),
+      exit: c => { code = c; }, log: m => lines.push(String(m)), ...opts,
+    });
+    return { code, out: lines.join("\n"), res };
+  };
+  const d = await call(500);
+  ok(/cannot reach Supabase: HTTP 500/.test(d.out) && !/ROTATED|rejected/.test(d.out), "a 500 is called unavailable, never a rotated key", d.out);
+  ok(d.code === 2, "and stays fatal by default, for recorders that write to Postgres");
+  const s = await call(544, { unavailableIsFatal: false });
+  ok(s.code === null && s.res?.unavailable === true && /recording anyway/.test(s.out), "a file-writing recorder warns and keeps recording", s.out);
+  const k = await call(401, { unavailableIsFatal: false });
+  ok(k.code === 2 && /rejected/.test(k.out), "but a REJECTED key is still fatal for it");
+
+  let code = null; const lines = [];
+  const t0 = Date.now();
+  // AbortSignal.timeout's timer does not hold the event loop open; a real
+  // request in flight does, so stand in for one.
+  const inFlight = setTimeout(() => {}, 5000);
+  await assertCredential(URL_, GOOD, {
+    timeoutMs: 50, unavailableIsFatal: false,
+    fetchImpl: (u, init) => new Promise((_, rej) => init.signal.addEventListener("abort", () => rej(init.signal.reason))),
+    exit: c => { code = c; }, log: m => lines.push(String(m)),
+  });
+  clearTimeout(inFlight);
+  ok(code === null && /no answer in 0.05s/.test(lines.join("\n")) && Date.now() - t0 < 2000, "a database that never answers costs the timeout, not the hour", lines.join("\n"));
+}
+
 console.log(bad ? `\n${bad} FAILED` : "\nall passed");
 process.exit(bad ? 1 : 0);
