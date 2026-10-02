@@ -34,12 +34,20 @@ const kFiles = await reader.listRange("m15", from, now);
 console.log(`INSPECT .us books, last ${HOURS}h: ${pFiles.length} .us files, ${kFiles.length} Kalshi files`);
 
 const pb = new Map(), tr = new Map(), kal = new Map(), slugOf = new Map(), lineKinds = {};
+const pconn = [], perr = [], pHour = new Map(), pTimes = [];
 const push = (M, k, v) => { if (!M.has(k)) M.set(k, []); M.get(k).push(v); };
 for (const f of pFiles) await reader.eachLine(f.path, o => {
   lineKinds[o.k] = (lineKinds[o.k] || 0) + 1;
   if (o.k === "mkt" && o.kalshi) slugOf.set(o.kalshi, o.m);
   if (o.k === "pb") push(pb, o.m, o);
   if (o.k === "tr") push(tr, o.m, o);
+  if (o.k === "conn") pconn.push(o);
+  if (o.k === "err") perr.push(o);
+  if ((o.k === "pb" || o.k === "tr") && Number.isFinite(o.t)) {
+    const h = new Date(o.t).toISOString().slice(0, 13);
+    const c = pHour.get(h) || { pb: 0, tr: 0 }; c[o.k]++; pHour.set(h, c);
+    pTimes.push(o.t);
+  }
 });
 const needle = `"m":"${KALSHI_SERIES}-`;
 const ktr = new Map(), khealth = [], kconn = [];
@@ -60,6 +68,28 @@ const conns = kconn.reduce((m, c) => (m[c.ev] = (m[c.ev] || 0) + 1, m), {});
 console.log(`   Kalshi connection events: ${JSON.stringify(conns)}`);
 for (const c of kconn.filter(c => c.ev !== "subscribed").slice(-16)) console.log(`   ${new Date(c.t).toISOString().slice(11, 19)}  ${c.ev}${c.code != null ? ` code ${c.code}` : ""}${c.reason ? ` "${c.reason}"` : ""}${c.why ? ` (${c.why})` : ""}${c.msg ? ` ${c.msg}` : ""}`);
 console.log(`line kinds: ${JSON.stringify(lineKinds)}`);
+
+// 0b. The .us recorder: every connection event with its close code, the
+// lines it wrote per hour, and every silence. A window with no .us
+// trades is either a market nobody traded or a recorder that was not
+// there — only the book lines around it can tell the two apart.
+const pc = pconn.reduce((m, c) => (m[c.ev] = (m[c.ev] || 0) + 1, m), {});
+console.log(`\n0b. .us RECORDER: connection events ${JSON.stringify(pc)}, error lines ${perr.length}`);
+const codes = pconn.filter(c => c.ev === "close").reduce((m, c) => (m[c.code ?? "none"] = (m[c.code ?? "none"] || 0) + 1, m), {});
+console.log(`   close codes: ${JSON.stringify(codes)}`);
+for (const c of pconn.filter(c => c.ev !== "subscribed" && c.ev !== "open")) {
+  const prevOpen = [...pconn].reverse().find(o => o.ev === "open" && o.t <= c.t);
+  const held = prevOpen ? `  held ${Math.round((c.t - prevOpen.t) / 1000)}s` : "";
+  console.log(`   ${new Date(c.t).toISOString().slice(5, 19)}  ${c.ev}${c.code != null ? ` code ${c.code}` : ""}${c.reason ? ` "${c.reason}"` : ""}${c.why ? ` (${c.why})` : ""}${c.msg ? ` ${c.msg}` : ""}${c.ev === "close" ? held : ""}`);
+}
+for (const e of perr.slice(-10)) console.log(`   err ${new Date(e.t).toISOString().slice(5, 19)}  ${JSON.stringify(e).slice(0, 160)}`);
+console.log("   lines per hour (books / trades):");
+console.log("   " + [...pHour.entries()].sort().map(([h, c]) => `${h.slice(11)}h ${c.pb}/${c.tr}`).join("  "));
+pTimes.sort((a, b) => a - b);
+const gaps = [];
+for (let i = 1; i < pTimes.length; i++) if (pTimes[i] - pTimes[i - 1] > 60000) gaps.push([pTimes[i - 1], pTimes[i]]);
+console.log(`   silences over 60s with no .us book or trade line: ${gaps.length}`);
+for (const [a, b] of gaps.slice(0, 20)) console.log(`     ${new Date(a).toISOString().slice(5, 19)} -> ${new Date(b).toISOString().slice(11, 19)}  (${Math.round((b - a) / 60000)} min)`);
 
 const q = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const dist = xs => `n=${xs.length} min=${q(xs, 0)} p10=${q(xs, 0.1)} p50=${q(xs, 0.5)} p90=${q(xs, 0.9)} max=${q(xs, 1)}`;
