@@ -1,0 +1,36 @@
+# PAPER trading on Kalshi's 15-minute markets (scripts/paper-m15.mjs):
+# decides live on the real order book, records what would have filled,
+# settles it into paper_trades. It holds no key and sends no order.
+#
+# Not started by bootstrap or by a git pull (sync-units restarts only
+# units already running). To start it, after migration 0031 has been run:
+#   sudo systemctl enable --now marketslap-paper-m15.service
+#
+# Nice=10 so it yields to the recorders, whose data cannot be backfilled.
+# It reads ~1 book a second per series only in each window's final two
+# minutes, so its load on Kalshi and on the box is small.
+[Unit]
+Description=MarketSlap 15-minute paper trader (no orders)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=marketslap
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+Environment=PAPER_RUN_MINUTES=60
+ExecStart=/usr/bin/node scripts/paper-m15.mjs
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

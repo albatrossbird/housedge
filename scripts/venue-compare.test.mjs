@@ -13,7 +13,7 @@
 //      are its best moment, not a sum of samples.
 //   5. The mirror check and the lead/lag both point the right way on a
 //      book known to follow Kalshi by one sample.
-import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, bestFill, pmusTakerFee } from "../lib/venueCompare.js";
+import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, delayStats, bestFill, pmusTakerFee } from "../lib/venueCompare.js";
 import { pmusSlug, kalshiM15Ticker, WINDOW_MS } from "../lib/pmus15.js";
 
 let failed = 0;
@@ -80,6 +80,30 @@ console.log("end to end");
   const peak = Object.entries(S.leadLag).filter(([, c]) => c != null).sort((x, y) => y[1] - x[1])[0];
   ok(peak && peak[0] === "1", "a .us book one sample behind reads as .us following Kalshi (+1)", JSON.stringify(S.leadLag));
   ok(S.byBucket[">10m"].samples + S.byBucket["5-10m"].samples + S.byBucket["2-5m"].samples + S.byBucket["1-2m"].samples + S.byBucket["<1m"].samples === S.samples, "every sample lands in one time-to-close bucket");
+}
+
+console.log("after a delay: an edge that lasts one sample leaves a leg behind");
+{
+  const start = Date.parse("2026-09-29T14:00:00Z");
+  const slug = pmusSlug("btc", start), ticker = kalshiM15Ticker("btc", start + WINDOW_MS);
+  const C = newCompare();
+  feedPmus(C, { k: "mkt", t: start, m: slug, kalshi: ticker });
+  for (let i = 0; i < 10; i++) {
+    const t = start + 1000 + i * 1000;
+    // Kalshi steady at 0.49/0.50, 500 deep.
+    feedKalshi(C, { k: "b", t, m: ticker, b: 0.49, a: 0.5, L: [[[0.49, 500]], [[0.5, 500]]] });
+    // .us: at sample 4 only, its Up bid jumps to 0.60 -> Down offered at 0.40. Gone by the next book.
+    const jump = i === 4;
+    feedPmus(C, { k: "pb", t: t - 100, m: slug, b: [[jump ? 0.6 : 0.49, 200]], a: [[jump ? 0.61 : 0.5, 200]] });
+    // A second .us book half a second later, already back.
+    feedPmus(C, { k: "pb", t: t + 400, m: slug, b: [[0.49, 200]], a: [[0.5, 200]] });
+  }
+  const S = summarize(C);
+  const e = S.episodes.find(x => x.dir === "A");
+  ok(e && e.bestSize === 200 && e.bestLimK === 0.5 && e.bestLimP === 0.4, "the edge is sized and its limit prices kept", JSON.stringify(e && { n: e.bestSize, k: e.bestLimK, p: e.bestLimP }));
+  const D = delayStats(S.episodes);
+  ok(e && e.after[500].both === 0 && e.after[500].legged === 200, "500ms later the .us leg is gone and the Kalshi leg would fill alone", JSON.stringify(e && e.after));
+  ok(D[500].full === 0 && D[500].legged === 1 && D[500].dollars === 0, "so the episode counts as legged, keeping nothing", JSON.stringify(D[500]));
 }
 
 console.log("a stale .us book is not paired");

@@ -738,6 +738,37 @@ starts there. Storage rate-limits bursts (429): `lib/archiveRead.js`
 retries with backoff for every archive reader, and the backtest
 downloads two files at a time.
 
+**Paper trading** (`scripts/paper-m15.mjs`, unit
+`marketslap-paper-m15.service`, table `paper_trades` from migration
+`0031`). Decides LIVE on Kalshi's uncached `/orderbook`, read about once
+a second in each window's final two minutes, with the SAME `findEntry`
+the backtests use — the rule backtested is the rule traded. A decision
+fills only against a SECOND read of the book, as a limit at the price it
+saw, so a book that moved away is a recorded MISS rather than a win the
+bot could not have had. It holds no key and calls no order route
+(`scripts/paper-m15.test.mjs` asserts every Kalshi request is a GET).
+The tracked rules are `PAPER_RULES` in `lib/paperM15.js`, read by the
+bot and by the daily report's backtest (`--strategy=paper`), so the two
+cannot drift; change the list in git. The unit is not started by
+bootstrap or a pull — `systemctl enable --now` it after `0031` is run.
+
+**The daily report** (`daily-15m-report.yml`, 04:23 UTC, in the
+`m15-analysis` queue) writes three things to its run summary: the 24h
+Kalshi vs Polymarket US spread, what the paper bot did, and the same
+rules backtested on the archive. ~5 Actions minutes and ~2GB of Storage
+egress a run (Pro includes 250GB a month). Read the paper section beside
+the backtest: a rule that wins on the archive but keeps MISSING live is
+an edge that is gone before an order can land.
+
+**The spread comparison prices delay** (`afterDelay` /
+`delayStats` in `lib/venueCompare.js`, section 3b of the compare). Both
+legs go out at an episode's best moment as limits at the prices that
+size walked to, and fill against the books DELAY ms later; one leg
+without the other is counted as LEGGED. Episodes last ~1s, so the
+undelayed dollar figure is the ceiling and this is the first step down
+from it. The Kalshi record is one book a second, so under 1000ms this
+mostly measures how fast .us moves.
+
 **They are liquid.** `KXBTC15M` carried **1.26M contracts of volume** on
 a single fifteen-minute window.
 
