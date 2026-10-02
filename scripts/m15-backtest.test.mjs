@@ -1,6 +1,6 @@
 // lib/m15Backtest.js — each rule that decides whether a backtest result
 // means anything, pinned with hand-built paths.
-import { runMarket, summarize, splitHalves, parseStrategies, toPathRow, PRESETS } from "../lib/m15Backtest.js";
+import { runMarket, summarize, splitHalves, parseStrategies, toPathRow, archiveRow, PRESETS } from "../lib/m15Backtest.js";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -113,6 +113,22 @@ console.log("strategy maps");
   ok(m.a.entry.side === "yes" && m.b.entry.side === "no", "a map keeps its names");
   let threw = false; try { parseStrategies('{"a":{"exit":{}}}'); } catch { threw = true; }
   ok(threw, "a map entry with no entry rule is refused, not silently skipped");
+}
+
+console.log("archive rows (WebSocket book lines)");
+{
+  // Copied from a live k:"b" line, 2026-10-01.
+  const line = { k: "b", t: CLOSE - 89000, m: "KXBTC15M-TEST", b: 0.79, a: 0.8, bs: 120, as: 85, d: [300, 900, 1500, 210, 640, 1200], L: [[], []], x: CLOSE - 90000 };
+  const r = archiveRow(line, CLOSE);
+  ok(r && r.secs === 90 && r.bid === 0.79 && r.ask === 0.8, "times the book by the EXCHANGE'S clock, not the box's receipt", JSON.stringify(r));
+  ok(r.bidD1 === 300 && r.askD1 === 210, "depth within 1c comes from d[0] and d[3]");
+  // A recorder minutes behind its socket: the same book, received late.
+  const late = archiveRow({ ...line, t: CLOSE + 120000 }, CLOSE);
+  ok(late.secs === 90, "a book received after the close but describing 90s before it is still 90s before it");
+  ok(archiveRow({ ...line, x: undefined }, CLOSE) === null, "no exchange timestamp, no row — never the receive time instead");
+  ok(archiveRow({ ...line, k: "d" }, CLOSE) === null, "only once-a-second book lines are rows");
+  const t = runMarket({ entry: { side: "yes", secsMin: 60, secsMax: 120 } }, mk("yes"), [r], { size: 10 });
+  ok(t && t.entry === 0.8 && t.qty === 10, "and the same engine trades it");
 }
 
 console.log("rows and presets");
