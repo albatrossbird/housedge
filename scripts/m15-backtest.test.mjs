@@ -1,6 +1,6 @@
 // lib/m15Backtest.js — each rule that decides whether a backtest result
 // means anything, pinned with hand-built paths.
-import { runMarket, summarize, toPathRow, PRESETS } from "../lib/m15Backtest.js";
+import { runMarket, summarize, splitHalves, parseStrategies, toPathRow, PRESETS } from "../lib/m15Backtest.js";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -90,6 +90,29 @@ console.log("the report");
   ok(S.n === 4 && S.days === 3, "four trades are three days — the days are the sample", JSON.stringify(S));
   ok(near(S.pnlSlip1c, S.pnl - 4 * 10 * 0.01), "the 1c-worse line charges every contract a cent", `${S.pnl} ${S.pnlSlip1c}`);
   ok(S.maxDrawdown < 0, "drawdown is reported");
+}
+
+console.log("earlier and later days");
+{
+  const s = { entry: { side: "yes", secsMin: 60, secsMax: 120 } };
+  const day = (d, res) => ({ ticker: "T" + d + res, close: Date.parse(`2026-09-${d}T12:00:00Z`), result: res });
+  const rowsFor = m => [{ t: m.close - 90000, secs: 90, bid: 0.79, ask: 0.80, bidD1: 100, askD1: 100 }];
+  const trades = [day(27, "yes"), day(27, "yes"), day(28, "no"), day(29, "yes"), day(30, "no")].map(m => runMarket(s, m, rowsFor(m), { size: 10 }));
+  const H = splitHalves(trades);
+  ok(H.early.days === 2 && H.late.days === 2, "four days split two and two", JSON.stringify({ e: H.early.days, l: H.late.days }));
+  ok(H.early.n === 3 && H.late.n === 2, "every trade lands in the half its DAY is in, not split by count", JSON.stringify({ e: H.early.n, l: H.late.n }));
+  ok(near(H.early.pnl + H.late.pnl, summarize(trades).pnl), "the halves add up to the whole");
+  const odd = splitHalves(trades.slice(0, 4));
+  ok(odd.early.days === 1 && odd.late.days === 2, "an odd middle day goes to the later half");
+}
+
+console.log("strategy maps");
+{
+  ok(Object.keys(parseStrategies('{"entry":{"side":"yes"}}'))[0] === "custom", "one strategy is named custom");
+  const m = parseStrategies('{"a":{"entry":{"side":"yes"}},"b":{"entry":{"side":"no"}}}');
+  ok(m.a.entry.side === "yes" && m.b.entry.side === "no", "a map keeps its names");
+  let threw = false; try { parseStrategies('{"a":{"exit":{}}}'); } catch { threw = true; }
+  ok(threw, "a map entry with no entry rule is refused, not silently skipped");
 }
 
 console.log("rows and presets");
