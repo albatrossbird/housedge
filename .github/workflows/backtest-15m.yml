@@ -1,12 +1,20 @@
 name: Backtest 15-minute strategies
 
-# scripts/m15-backtest.mjs over the recorded live-book path (from
-# 2026-09-26). Manual only, and run one at a time — not 15:45-16:45 UTC,
-# while discovery and matching load the database.
+# source=poller: scripts/m15-backtest.mjs over the 15-second poller's
+# live-book path in Postgres (from 2026-09-26).
+# source=archive: scripts/m15-archive-backtest.mjs over the WebSocket
+# archive's once-a-second book in Storage; one small database read.
+# Manual only, and run one at a time — not 15:45-16:45 UTC, while
+# discovery and matching load the database.
 
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: "poller (15-second path, Postgres) or archive (1-second book, Storage)"
+        type: choice
+        options: [poller, archive]
+        default: poller
       series:
         description: "Space-separated series"
         default: "KXBTC15M KXGOLD15M"
@@ -24,7 +32,7 @@ on:
         default: "10"
         required: false
       days:
-        description: "How far back (the live book starts 2026-09-26)"
+        description: "How far back (poller: live book from 2026-09-26; archive: capped at 30)"
         default: "21"
         required: false
 
@@ -35,7 +43,7 @@ concurrency:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,9 +61,12 @@ jobs:
           STRATEGY: ${{ github.event.inputs.strategy }}
           SIZE: ${{ github.event.inputs.size || '10' }}
           DAYS: ${{ github.event.inputs.days || '21' }}
+          SOURCE: ${{ github.event.inputs.source || 'poller' }}
         run: |
+          SCRIPT=scripts/m15-backtest.mjs
+          if [ "$SOURCE" = "archive" ]; then SCRIPT=scripts/m15-archive-backtest.mjs; fi
           if [ -n "$STRATEGY" ]; then
-            node scripts/m15-backtest.mjs "--days=$DAYS" "--size=$SIZE" "--strategy=$STRATEGY" $SERIES
+            node "$SCRIPT" "--days=$DAYS" "--size=$SIZE" "--strategy=$STRATEGY" $SERIES
           else
-            node scripts/m15-backtest.mjs "--days=$DAYS" "--size=$SIZE" "--strategies=$STRATEGIES" $SERIES
+            node "$SCRIPT" "--days=$DAYS" "--size=$SIZE" "--strategies=$STRATEGIES" $SERIES
           fi
