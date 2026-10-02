@@ -1,0 +1,81 @@
+name: Daily 15-minute report
+
+# One page a morning for the two things being built toward trading:
+#   1. the Kalshi vs Polymarket US spread on the 15-minute Bitcoin market
+#      over the last 24h (scripts/pmus15-compare.mjs), and
+#   2. the candidate Bitcoin and gold rules over the last 7 days of the
+#      WebSocket archive (scripts/m15-archive-backtest.mjs).
+# Both outputs land in the run's summary page, readable from a phone.
+#
+# Costs, measured 2026-10-02: ~5 Actions minutes a run, and ~2GB of
+# Storage egress (the Kalshi archive is ~260MB/day; Pro includes 250GB a
+# month). Reads only — it writes nothing.
+#
+# Every figure in it is an upper bound: takers at the touch, both legs
+# at once for the spread, no latency. It is evidence to accumulate, not
+# a P&L.
+
+on:
+  schedule:
+    # 04:23 UTC: a quiet hour, clear of discovery and matching (~15:45-16:45).
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Backtest window in days"
+        default: "7"
+        required: false
+
+# Shares a queue with the other analysis runs so two never read at once.
+concurrency:
+  group: m15-analysis
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      # The archive bucket and recorded tables are private (0028, 0029).
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      DAYS: ${{ github.event.inputs.days || '7' }}
+      # The rules being tracked toward a bot, named so the report reads as
+      # a watch list. Changing this list changes what is tracked, so do it
+      # in git, where the history shows when a rule was added or dropped.
+      RULES: >-
+        {"fav-60-120s":{"entry":{"side":"favourite","secsMin":60,"secsMax":120,"priceMin":0.65,"priceMax":0.95,"maxSpread":0.03}},
+         "fav-15-45s":{"entry":{"side":"favourite","secsMin":15,"secsMax":45,"priceMin":0.80,"priceMax":0.97,"maxSpread":0.03}},
+         "fav-15-60s":{"entry":{"side":"favourite","secsMin":15,"secsMax":60,"priceMin":0.75,"priceMax":0.97,"maxSpread":0.03}},
+         "dog-60-120s":{"entry":{"side":"underdog","secsMin":60,"secsMax":120,"priceMin":0.05,"priceMax":0.35,"maxSpread":0.03}}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # shell: bash is what turns on pipefail, so a failed script fails
+      # its step instead of hiding behind tee's exit status.
+      - name: Spread, Kalshi vs Polymarket US, last 24h
+        shell: bash
+        run: node scripts/pmus15-compare.mjs --hours=24 2>&1 | tee spread.txt
+      - name: Candidate rules, archive, last ${{ env.DAYS }} days
+        if: always()
+        shell: bash
+        run: node scripts/m15-archive-backtest.mjs "--days=$DAYS" "--size=10" "--strategy=$RULES" KXBTC15M KXGOLD15M 2>&1 | tee rules.txt
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## 15-minute report, $(date -u +%F)"
+            echo
+            echo "Upper bounds throughout: takers at the touch, no latency. Evidence to accumulate, not P&L."
+            echo
+            echo "### Spread: Kalshi KXBTC15M vs Polymarket US, last 24h"
+            echo '```'
+            if [ -s spread.txt ]; then grep -v -e '^(node:' -e 'trace-warnings' -e 'MODULE_TYPELESS' -e 'Reparsing as ES' -e 'add "type"' spread.txt; else echo "(no output — see the step log)"; fi
+            echo '```'
+            echo "### Candidate rules, WebSocket archive, last ${DAYS} days"
+            echo '```'
+            if [ -s rules.txt ]; then sed '/^READING THIS/,$d' rules.txt | grep -v -e '^(node:' -e 'trace-warnings' -e 'MODULE_TYPELESS' -e 'Reparsing as ES' -e 'add "type"' -e 'storage answered'; else echo "(no output — see the step log)"; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
