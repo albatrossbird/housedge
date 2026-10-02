@@ -1064,6 +1064,15 @@ would have met.
   retirement follow Kalshi's clock, so falling behind delays the record
   instead of cutting its end off. **Pair archives on the venues' own
   timestamps (`x`), never on receive time** — `lib/venueCompare.js` does.
+- **Supabase being down never stops a WebSocket recorder.** Both stream
+  recorders write local files and upload later, so at startup a database
+  or Storage that cannot answer (5xx, 544 `DatabaseTimeout`, a 15s
+  timeout) is a warning and recording starts; a REJECTED key (4xx) or a
+  missing bucket is still fatal. On 2026-10-01 an overloaded database
+  made the startup checks block or exit, and each hourly restart cut 3-5
+  minutes out of BOTH archives four times. `assertCredential` now calls a
+  5xx "unavailable" rather than diagnosing a good key as rotated; the
+  Postgres-writing recorders keep it fatal (`unavailableIsFatal`).
 - `scripts/fake-kalshi.mjs` is the test double for all of the above: it
   verifies signatures and serves one book in both encodings.
 
@@ -1090,6 +1099,13 @@ outcome. Up is YES.
   series, .us 0.0695 x p(1-p): ~3.5c for the pair near 50c. Paired reads
   on launch day showed the two touches within 1c nearly every time. .us
   pays makers 0.0125 x p(1-p).
+
+**.us does not always list every window.** 2026-10-01 10:00-11:45 UTC
+had no .us market at all (`/v1/markets?slug=` returns `[]` for those
+slugs) while its socket sent `1001 "server shutting down"` repeatedly —
+the venue, not the recorder. Check the slug before calling a missing
+.us window a recording fault; `pmus15-inspect` section 0b prints the
+socket's close codes, lines per hour and every silence.
 
 `scripts/pmus15-stream.mjs` (`marketslap-pmus15-stream.service`)
 records every whole .us book, when it changed, on the box's clock — the

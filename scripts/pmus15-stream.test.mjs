@@ -87,8 +87,9 @@ function run({ fake = {}, listed = "() => true", storage = "ok", seconds = 3, en
     const fake = installFakePolyUs({
       publicKeyPem: ${JSON.stringify(publicKeyPem)}, listed: ${listed}, ...${JSON.stringify(fake)},
       fallback: async (url, init) => {
-        if (url.includes("/rest/v1/")) return reply(200, []);
+        if (url.includes("/rest/v1/")) return ${JSON.stringify(storage)} === "down-at-start" ? reply(500, { code: "57014" }) : reply(200, []);
         if (url.includes("/storage/v1/object/")) {
+          if (${JSON.stringify(storage)} === "down-at-start" && !globalThis.__probed) { globalThis.__probed = true; return reply(544, { statusCode: "544", error: "DatabaseTimeout" }); }
           if (${JSON.stringify(storage)} === "nobucket") return reply(400, { statusCode: "404", error: "Bucket not found", message: "Bucket not found" });
           uploads.push({ path: url.split("/storage/v1/object/")[1], body: Buffer.from(init.body).toString("base64") });
           return reply(200, { Key: "x" });
@@ -226,6 +227,14 @@ console.log("no bucket (migration 0029 not run)");
   const r = run({ storage: "nobucket" });
   ok(r.code === 1 && /0029_stream_archive_bucket/.test(r.text), "fatal at startup, naming the migration", r);
   ok(r.log.handshakes === 0, "before any socket is opened", r);
+}
+
+console.log("an overloaded database at startup (2026-10-01)");
+{
+  const r = run({ storage: "down-at-start" });
+  ok(r.code === 0 && r.log.handshakes >= 1, "records anyway instead of exiting or waiting", r);
+  ok(/cannot reach Supabase: HTTP 500/.test(r.text) && /Storage is not answering \(544/.test(r.text), "and says why the checks did not pass", r);
+  ok(r.uploads.some(u => u.path.endsWith(".ndjson.gz")), "the archive still reaches the bucket once Storage answers", r);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
