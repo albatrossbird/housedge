@@ -726,6 +726,18 @@ pins the rules; the close rule and NO pricing were mutation-checked.
 Calibration and the backtest share `lib/m15Reads.js` and one Actions
 concurrency group, so two analysis runs never hit `m15_quotes` at once.
 
+**The archive backtest** (`scripts/m15-archive-backtest.mjs`, workflow
+input `source: archive`) runs the same engine on the WebSocket archive's
+once-a-second book, timed by Kalshi's own clock (`x`). Prefer it for any
+rule acting in the final minutes: on the same days, "favourite at
+60-120s" lost on the 15-second poller path and was the best rule on the
+archive — a 15s sample is too coarse for it. Lines without `x` are
+DROPPED, never timed on receipt: before 2026-09-30 13:16 UTC the
+recorder ran up to 13 minutes behind its socket, so the usable archive
+starts there. Storage rate-limits bursts (429): `lib/archiveRead.js`
+retries with backoff for every archive reader, and the backtest
+downloads two files at a time.
+
 **They are liquid.** `KXBTC15M` carried **1.26M contracts of volume** on
 a single fifteen-minute window.
 
