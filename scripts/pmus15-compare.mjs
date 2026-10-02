@@ -9,7 +9,7 @@
 //
 //   node scripts/pmus15-compare.mjs --hours=24
 import { archiveReader } from "../lib/archiveRead.js";
-import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, KALSHI_SERIES } from "../lib/venueCompare.js";
+import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, delayStats, KALSHI_SERIES } from "../lib/venueCompare.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -74,6 +74,17 @@ if (E.n) {
   for (const e of top) {
     console.log(`     ${iso(e.start)}  ${e.dir}  ${String(Math.round((e.last - e.start) / 1000) + 1).padStart(3)}s  ${Math.round(e.ttcStart)}s to close  edge at touch ${(100 * e.bestTouchEdge).toFixed(2)}c  best $${e.bestProfit.toFixed(2)} on ${Math.round(e.bestSize).toLocaleString()} contracts  ${e.ticker}`);
   }
+}
+
+if (E.n) {
+  const D = delayStats(S.episodes);
+  console.log(`\n3b. AFTER A DELAY: both legs sent at the edge's best moment as limit orders at the prices it walked,`);
+  console.log(`    arriving later. "full" = both legs filled in full; "legged" = one leg filled without the other (leg risk)`);
+  for (const [d, r] of Object.entries(D)) {
+    if (!r.known) continue;
+    console.log(`    +${String(d).padStart(4)}ms  full ${pct(r.full, r.known).padStart(6)}  partial ${pct(r.partial, r.known).padStart(6)}  none ${pct(r.none, r.known).padStart(6)}  legged ${pct(r.legged, r.known).padStart(6)}  kept $${r.dollars.toFixed(2)} of $${E.dollars.toFixed(2)}`);
+  }
+  console.log(`    The Kalshi record is one book a second, so under 1000ms this mostly measures how fast .us moves.`);
 }
 
 console.log(`\n4. WHO MOVES FIRST? correlation of mid changes, .us shifted by N samples (~seconds)`);
