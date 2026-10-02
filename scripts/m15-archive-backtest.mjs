@@ -89,7 +89,8 @@ async function worker() {
     }, keep);
   }
 }
-await Promise.all([worker(), worker(), worker(), worker()]);
+// Two at a time: four drew HTTP 429 from Storage on the first real run.
+await Promise.all([worker(), worker()]);
 console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t0) / 1000)}s, ${kept.toLocaleString()} book lines within ${reach}s of a close${noExchangeTime ? `, ${noExchangeTime} dropped for having no exchange timestamp` : ""}`);
 
 // 3. The same report as the poller backtest, per series.
