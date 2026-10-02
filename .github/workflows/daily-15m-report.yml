@@ -3,8 +3,11 @@ name: Daily 15-minute report
 # One page a morning for the two things being built toward trading:
 #   1. the Kalshi vs Polymarket US spread on the 15-minute Bitcoin market
 #      over the last 24h (scripts/pmus15-compare.mjs), and
-#   2. the candidate Bitcoin and gold rules over the last 7 days of the
-#      WebSocket archive (scripts/m15-archive-backtest.mjs).
+#   2. the rules the paper bot trades (PAPER_RULES in lib/paperM15.js)
+#      over the last 7 days of the WebSocket archive
+#      (scripts/m15-archive-backtest.mjs --strategy=paper), beside
+#   3. what the paper bot actually did with those rules live
+#      (scripts/paper-report.mjs, from paper_trades).
 # Both outputs land in the run's summary page, readable from a phone.
 #
 # Costs, measured 2026-10-02: ~5 Actions minutes a run, and ~2GB of
@@ -40,14 +43,6 @@ jobs:
       # The archive bucket and recorded tables are private (0028, 0029).
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       DAYS: ${{ github.event.inputs.days || '7' }}
-      # The rules being tracked toward a bot, named so the report reads as
-      # a watch list. Changing this list changes what is tracked, so do it
-      # in git, where the history shows when a rule was added or dropped.
-      RULES: >-
-        {"fav-60-120s":{"entry":{"side":"favourite","secsMin":60,"secsMax":120,"priceMin":0.65,"priceMax":0.95,"maxSpread":0.03}},
-         "fav-15-45s":{"entry":{"side":"favourite","secsMin":15,"secsMax":45,"priceMin":0.80,"priceMax":0.97,"maxSpread":0.03}},
-         "fav-15-60s":{"entry":{"side":"favourite","secsMin":15,"secsMax":60,"priceMin":0.75,"priceMax":0.97,"maxSpread":0.03}},
-         "dog-60-120s":{"entry":{"side":"underdog","secsMin":60,"secsMax":120,"priceMin":0.05,"priceMax":0.35,"maxSpread":0.03}}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -61,7 +56,11 @@ jobs:
       - name: Candidate rules, archive, last ${{ env.DAYS }} days
         if: always()
         shell: bash
-        run: node scripts/m15-archive-backtest.mjs "--days=$DAYS" "--size=10" "--strategy=$RULES" KXBTC15M KXGOLD15M 2>&1 | tee rules.txt
+        run: node scripts/m15-archive-backtest.mjs "--days=$DAYS" "--size=10" "--strategy=paper" KXBTC15M KXGOLD15M 2>&1 | tee rules.txt
+      - name: Paper trades, last ${{ env.DAYS }} days
+        if: always()
+        shell: bash
+        run: node scripts/paper-report.mjs "--days=$DAYS" 2>&1 | tee paper.txt
       - name: Summary
         if: always()
         run: |
@@ -74,7 +73,11 @@ jobs:
             echo '```'
             if [ -s spread.txt ]; then grep -v -e '^(node:' -e 'trace-warnings' -e 'MODULE_TYPELESS' -e 'Reparsing as ES' -e 'add "type"' spread.txt; else echo "(no output — see the step log)"; fi
             echo '```'
-            echo "### Candidate rules, WebSocket archive, last ${DAYS} days"
+            echo "### Paper bot, last ${DAYS} days (decided live, nothing sent)"
+            echo '```'
+            if [ -s paper.txt ]; then grep -v -e '^(node:' -e 'trace-warnings' -e 'MODULE_TYPELESS' -e 'Reparsing as ES' -e 'add "type"' paper.txt; else echo "(no output — see the step log)"; fi
+            echo '```'
+            echo "### Same rules, WebSocket archive backtest, last ${DAYS} days"
             echo '```'
             if [ -s rules.txt ]; then sed '/^READING THIS/,$d' rules.txt | grep -v -e '^(node:' -e 'trace-warnings' -e 'MODULE_TYPELESS' -e 'Reparsing as ES' -e 'add "type"' -e 'storage answered'; else echo "(no output — see the step log)"; fi
             echo '```'
