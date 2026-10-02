@@ -31,6 +31,7 @@ const HERE = new URL(".", import.meta.url).pathname;
 const harness = (opts) => `
 import { writeFileSync } from "node:fs";
 const REJECT_QUOTE_SOURCE = ${opts.rejectQuoteSource};
+const DB_DOWN_AT_START = ${!!opts.dbDownAtStart};
 const posted = [];
 
 globalThis.fetch = async (url, init = {}) => {
@@ -78,6 +79,7 @@ globalThis.fetch = async (url, init = {}) => {
       return json({ code: "PGRST204", message: "Could not find the 'source' column of 'wx_quotes'" }, 400);
     return json({}, 201);
   }
+  if (DB_DOWN_AT_START && !globalThis.__probed) { globalThis.__probed = true; return json({ code: "57014" }, 500); }
   return json([]);   // the credential probe
 };
 
@@ -137,6 +139,13 @@ console.log("\nthe column is NOT there — the migration has not been run yet");
         "the wx_quotes degrade does NOT strip wx_forecasts.source");
   check(/0026_wx_quotes_source\.sql/.test(stdout),
         "the warning names the migration, not just the missing column");
+}
+
+console.log("\ndatabase overloaded at startup (2026-10-01)");
+{
+  const { posted } = run({ rejectQuoteSource: false, dbDownAtStart: true });
+  check(rowsFor(posted, "wx_quotes").length > 0,
+        "keeps running and writes once the database answers, instead of exiting into a restart loop");
 }
 
 if (failed) { console.error(`\n${failed} failure(s)`); process.exit(1); }

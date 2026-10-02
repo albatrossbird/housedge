@@ -16,7 +16,7 @@ on:
         default: "all"
         required: false
       strategy:
-        description: "Optional custom strategy as JSON (see PRESETS in lib/m15Backtest.js); runs instead of the presets"
+        description: "Optional custom strategy as JSON, or a map of named ones {\"a\":{...},\"b\":{...}} (see PRESETS in lib/m15Backtest.js); runs instead of the presets"
         default: ""
         required: false
       size:

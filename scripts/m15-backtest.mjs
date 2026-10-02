@@ -4,7 +4,8 @@
 //
 // Usage:
 //   node scripts/m15-backtest.mjs [--days=21] [--size=10] [--strategies=fav-late,momentum|all]
-//                                 [--strategy='{"entry":{...},"exit":{...}}'] [--assume-depth] [SERIES ...]
+//                                 [--strategy='{"entry":{...},"exit":{...}}' | '{"name":{...},...}']
+//                                 [--assume-depth] [SERIES ...]
 //
 // A custom --strategy is a JSON object shaped like the presets in
 // lib/m15Backtest.js. Reads with the service-role key (the recorded
@@ -16,7 +17,7 @@
 import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
 import { readQuoteWindows } from "../lib/m15Reads.js";
-import { PRESETS, runMarket, summarize, toPathRow } from "../lib/m15Backtest.js";
+import { PRESETS, runMarket, summarize, splitHalves, parseStrategies, toPathRow } from "../lib/m15Backtest.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -35,8 +36,8 @@ const SINCE = new Date(Math.max(Date.now() - DAYS * 86400000, BOOK_FROM)).toISOS
 const strategies = {};
 const custom = opt("strategy", "");
 if (custom) {
-  try { strategies.custom = JSON.parse(custom); }
-  catch (e) { console.error(`::error::--strategy is not valid JSON: ${e.message}`); process.exit(2); }
+  try { Object.assign(strategies, parseStrategies(custom)); }
+  catch (e) { console.error(`::error::--strategy: ${e.message}`); process.exit(2); }
 }
 const names = opt("strategies", custom ? "" : "all");
 for (const n of (names === "all" ? Object.keys(PRESETS) : names.split(",").map(s => s.trim()).filter(Boolean))) {
@@ -100,7 +101,9 @@ for (const s of series) {
     const trades = covered.map(m => runMarket(strat, m, paths.get(m.ticker), { size: SIZE, mult, requireDepth: !ASSUME_DEPTH })).filter(Boolean);
     const S = summarize(trades);
     if (!S.n) { console.log(`  ${name.padEnd(16)} ${"0".padStart(6)}   — never entered`); continue; }
+    const H = splitHalves(trades), half = h => h.n ? `${h.days}d ${$(h.perDay)}/day ${c(h.pnlPerContract)}` : "—";
     console.log(`  ${name.padEnd(16)} ${String(S.n).padStart(6)} ${String(S.days).padStart(4)} ${pct(S.winRate).padStart(6)} ${S.avgEntry.toFixed(2).padStart(6)}  ${$(S.pnl).padStart(9)} ${c(S.pnlPerContract).padStart(8)} ${$(S.perDay).padStart(8)} ${(S.tDays == null ? "—" : S.tDays.toFixed(1)).padStart(7)} ${$(S.maxDrawdown).padStart(8)}  ${$(S.pnlSlip1c).padStart(9)}${S.early ? `   (${S.early} exited early)` : ""}`);
+    if (S.days >= 2) console.log(`  ${"".padEnd(16)}   earlier days: ${half(H.early)}   |   later days: ${half(H.late)}`);
   }
 }
 
@@ -112,4 +115,6 @@ READING THIS
   positive, the edge is the size of the modelling error.
 - "t(days)" is mean daily P&L over its standard error across DAYS. Under ~2 is noise; with few days it is
   noise whatever it says. Consecutive windows ride the same underlying, so trades are not the sample.
+- "earlier / later days" splits the same trades by date. A rule chosen because it looked best over all the
+  days is partly fitted to them; one that only works in one half is describing the sample, not the market.
 - Taker only, filled at the recorded 15-second quote with no latency: an upper bound for a real account.`);
