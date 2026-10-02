@@ -1071,8 +1071,16 @@ would have met.
   missing bucket is still fatal. On 2026-10-01 an overloaded database
   made the startup checks block or exit, and each hourly restart cut 3-5
   minutes out of BOTH archives four times. `assertCredential` now calls a
-  5xx "unavailable" rather than diagnosing a good key as rotated; the
-  Postgres-writing recorders keep it fatal (`unavailableIsFatal`).
+  5xx "unavailable" rather than diagnosing a good key as rotated.
+- **The Postgres recorders must not exit on it either.** `m15-record`
+  and `wx-record` did, and under `Restart=always` that is a 5-second
+  restart loop: `StartLimitBurst` stopped both units after ten tries and
+  they recorded NOTHING for ~10 hours after the database had recovered
+  (2026-10-01 ~16:30 to 2026-10-02 ~02:45 UTC, found by the watchdog).
+  All four long-running recorders now pass `unavailableIsFatal: false`;
+  a rejected key is still fatal. A unit that hit the start limit stays
+  down until `systemctl reset-failed` — restarting the code does not
+  revive it.
 - `scripts/fake-kalshi.mjs` is the test double for all of the above: it
   verifies signatures and serves one book in both encodings.
 

@@ -39,7 +39,13 @@ console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role
 
 // Proven, not assumed — the line above reports which VARIABLE IS SET
 // and says nothing about whether the value works. See the module.
-await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes" });
+// A database that cannot answer is NOT fatal: exiting put this unit in a
+// 5-second restart loop during the 2026-10-01 overload, systemd stopped
+// it after ten tries, and it recorded nothing for ten hours after the
+// database had recovered. Running on, every write warns until the
+// database is back and then simply succeeds. A REJECTED key is still
+// fatal, and the watchdog still goes red on a silent table.
+await assertCredential(SUPABASE_URL, KEY, { table: "m15_quotes", unavailableIsFatal: false });
 
 // OPTIONAL COLUMNS, each added by a hand-run migration that a deploy can
 // land before — the same case migration 0004 handles in the price path.

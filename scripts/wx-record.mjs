@@ -42,7 +42,10 @@ console.log(`credential: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? "service_role
 // above reports which variable is set, not whether it works, and a
 // long-running recorder with a bad key warns forever while writing
 // nothing. See lib/supabaseCredential.js.
-await assertCredential(SUPABASE_URL, KEY, { table: "wx_quotes" });
+// Unavailable is not fatal, for the reason given in m15-record.mjs: a
+// restart loop during an outage ends with systemd stopping the unit for
+// good. A rejected key still is.
+await assertCredential(SUPABASE_URL, KEY, { table: "wx_quotes", unavailableIsFatal: false });
 
 // Set once, the first time the database rejects `source`. A deploy can
 // land before the migration does — the same case migration 0004 handles

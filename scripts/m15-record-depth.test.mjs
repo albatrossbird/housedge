@@ -68,6 +68,7 @@ globalThis.fetch = async (url, init = {}) => {
     }
     return json({}, 201);
   }
+  if (O.dbDownAtStart && !globalThis.__probed) { globalThis.__probed = true; return json({ code: "57014" }, 500); }
   return json([]);   // the credential probe
 };
 
@@ -147,6 +148,12 @@ console.log("\nneither migration run, and Postgres's own error shape");
   check(!("book_bid" in (q[0] || {})) && !("source" in (q[0] || {})), "with both groups stripped");
   check(/0023_m15_quotes_source\.sql/.test(r.out) && /0027_m15_quotes_depth\.sql/.test(r.out),
         "and both migrations named — the 42703 \\\"column\\\" form is recognised, not just PGRST204's");
+}
+
+console.log("database overloaded at startup (2026-10-01)");
+{
+  const o = { dbDownAtStart: true }; const r = run(o);
+  check(accepted(r, o).length > 0, "keeps running and writes once the database answers, instead of exiting into a restart loop");
 }
 
 if (failed) { console.error(`\n${failed} failure(s)`); process.exit(1); }
