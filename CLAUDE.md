@@ -757,6 +757,19 @@ trust fills if they disagree. `scripts/m15-maker.test.mjs` pins the
 model (mutation-checked: side filter, trade-through, latency, queue,
 cutoff); `scripts/m15-archive-backtest.test.mjs` runs it end to end.
 
+**Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
+every series table by both backtests and the daily report). Entry price
+is the market's probability; "needs" adds Kalshi's fee and is the win
+rate to break even; the rule has an edge only if it WON more often than
+that, shown overall and per price band. EV's range resamples whole DAYS
+(windows on one day share an underlying); Sharpe is daily P&L mean/sd,
+annualised by sqrt(365) for crypto and sqrt(252) otherwise. Kelly for a
+$1 binary at all-in cost c is (q - c)/(1 - c) of bankroll, printed at the
+estimate AND at the low end of q's range (the lower of Wilson and the
+day bootstrap) — size from the low end, and a fraction of it; Kelly on
+an overestimated q is a guaranteed loss. `scripts/m15-stats.test.mjs`
+checks against independently computed values (mutation-checked).
+
 **Paper trading** (`scripts/paper-m15.mjs`, unit
 `marketslap-paper-m15.service`, table `paper_trades` from migration
 `0031`). Decides LIVE on Kalshi's uncached `/orderbook`, read about once

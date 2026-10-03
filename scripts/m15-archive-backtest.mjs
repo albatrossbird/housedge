@@ -29,7 +29,7 @@ import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
-import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, pct } from "../lib/m15BacktestReport.js";
+import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
 import { newTape, feedTape, disrupted, simulateMaker, checkTradeSides } from "../lib/m15Maker.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -171,7 +171,7 @@ for (const s of series) {
   const yesRate = covered.filter(m => m.result === "yes").length / (covered.length || 1);
   console.log(`fee_multiplier ${mult} | settled markets ${markets.length}, with an archived book path ${covered.length} over ${days.size} days | settled YES ${pct(yesRate)}`);
   if (!covered.length) continue;
-  printSeriesTable({ strategies, covered, paths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH });
+  printSeriesTable({ strategies, covered, paths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH, daysPerYear: daysPerYearFor(fees.get(s)?.category) });
   if (MAKER) printMakerSection({ strategies, covered, paths, size: SIZE, mult, feeType: fees.get(s)?.feeType ?? null,
     requireDepth: !ASSUME_DEPTH, maker, variants: Object.keys(MAKER_VARIANTS), stats: makerStats, latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS });
 }
