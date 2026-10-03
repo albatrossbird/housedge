@@ -1,7 +1,9 @@
 // scripts/m15-archive-backtest.mjs end to end, against a fake Storage
 // archive, a fake PostgREST and a fake Kalshi /series. Pins that the
 // script reads the archive's book lines on the EXCHANGE's clock, trades
-// them through the shared engine, and reports what it covered.
+// them through the shared engine, and reports what it covered — and, with
+// --maker, that the same decision is replayed as a resting order against
+// the final-window tape, with the numbers worked out by hand below.
 import { execFileSync } from "node:child_process";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -12,7 +14,7 @@ const HERE = new URL(".", import.meta.url).pathname;
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w}\n${extra}`); } };
 
-function run() {
+function run(args = ["--strategies=fav-final"], tape = []) {
   const dir = mkdtempSync(join(tmpdir(), "m15arch-"));
   const close = Date.now() - 3600000;          // settled an hour ago
   const iso = ms => new Date(ms).toISOString();
@@ -28,6 +30,7 @@ function run() {
     JSON.stringify({ k: "b", t: close - 15000, m: T, b: 0.5, a: 0.51, d: [400, 0, 0, 400, 0, 0], L: [[], []] }),   // no x: dropped
     JSON.stringify({ k: "tr", t: close - 30000, m: T, yp: 0.91, n: 5 }),
     book(30, 0.10, 0.11, { m: "KXETH15M-OTHER-00" }),          // another series: ignored
+    ...tape.map(o => JSON.stringify(typeof o === "function" ? o(close, T) : o)),
   ];
   const gz = gzipSync(Buffer.from(lines.join("\n") + "\n")).toString("base64");
   const h = join(dir, "h.mjs");
@@ -38,7 +41,7 @@ function run() {
       body: raw ? new ReadableStream({ start(c) { c.enqueue(raw); c.close(); } }) : null });
     globalThis.fetch = async (url, init = {}) => {
       const u = String(url);
-      if (u.includes("/series/KXBTC15M")) return reply(200, { series: { fee_multiplier: 1 } });
+      if (u.includes("/series/KXBTC15M")) return reply(200, { series: { fee_multiplier: 1, fee_type: "quadratic" } });
       if (u.includes("/series/")) return reply(404, {});
       if (u.includes("/rest/v1/m15_markets")) {
         if (!u.includes("KXBTC15M")) return reply(200, []);
@@ -55,7 +58,7 @@ function run() {
     };
     process.env.SUPABASE_URL = "https://fake.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-    process.argv.push("--days=2", "--strategies=fav-final", "KXBTC15M");
+    process.argv.push("--days=2", ...${JSON.stringify(args)}, "KXBTC15M");
     await import(${JSON.stringify(join(HERE, "m15-archive-backtest.mjs"))});
   `);
   try { return { code: 0, text: execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }; }
@@ -72,6 +75,32 @@ console.log("archive backtest end to end");
   ok(/1 dropped for having no exchange timestamp/.test(r.text), "and drops, and counts, the one with no exchange timestamp", r.text);
   ok(/settled markets 1, with an archived book path 1 over 1 days/.test(r.text), "reports what it covered", r.text);
   ok(/fav-final\s+1\s+1\s+100\.0%\s+0\.91/.test(r.text), "the favourite at 0.91 with 30s left is bought, through the shared engine", r.text);
+}
+
+console.log("resting orders (--maker)");
+{
+  // The final two minutes: 100 resting on the 0.90 bid, 50 offered at
+  // 0.91. fav-final decides at 30s (YES at 0.91 as a taker); 105 contracts
+  // are then sold into the bid. join waits behind 100 and gets 5; front
+  // gets all 10; improve cannot (1c spread) and joins; join+take buys the
+  // other 5 at 0.91 before the cutoff. YES settles.
+  const tape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.90, 100]], [[0.91, 50]]] }),
+    (c, T) => ({ k: "tr", t: c - 25000, x: c - 25000, m: T, yp: 0.90, n: 105, side: "no" }),
+  ];
+  const r = run(["--strategies=fav-final", "--maker"], tape);
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/resting-order replay: 1 windows replayed of 1 with a decision/.test(r.text), "replays the decided window", r.text);
+  ok(/fee_type quadratic\); trade sides agree with the book on 100\.0% of 1 trades/.test(r.text), "reads the maker fee from the series and checks the trade sides", r.text);
+  ok(/fav-final\s+taker\s+1\s+1\s+100\.0%\s+\$0\.84/.test(r.text), "taker on the same decision: 10 at 0.91, fee 0.0573 -> 6c = +$0.84", r.text);
+  ok(/\s+join\s+1\s+1\s+50\.0%\s+\$0\.50/.test(r.text), "join: 5 filled at 0.90, no fee = +$0.50", r.text);
+  ok(/\s+front\s+1\s+1\s+100\.0%\s+\$1\.00/.test(r.text), "front: 10 at 0.90 = +$1.00", r.text);
+  ok(/\s+improve\s+1\s+1\s+50\.0%\s+\$0\.50/.test(r.text), "improve on a 1c spread joins: +$0.50", r.text);
+  ok(/\s+join\+take\s+1\s+1\s+100\.0%\s+\$0\.92/.test(r.text), "join+take: 5 at 0.90 + 5 at 0.91 with a 3c fee = +$0.92", r.text);
+  ok(/RESTING ORDERS, READING THEM/.test(r.text), "and says how to read it", r.text);
+  const plain = run();
+  ok(!/RESTING ORDERS/.test(plain.text), "without --maker nothing changes", plain.text);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }

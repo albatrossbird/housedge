@@ -5,7 +5,8 @@ name: Daily 15-minute report
 #      over the last 24h (scripts/pmus15-compare.mjs), and
 #   2. the rules the paper bot trades (PAPER_RULES in lib/paperM15.js)
 #      over the last 7 days of the WebSocket archive
-#      (scripts/m15-archive-backtest.mjs --strategy=paper), beside
+#      (scripts/m15-archive-backtest.mjs --strategy=paper), taken at the
+#      ask and as resting orders at the bid (--maker), beside
 #   3. what the paper bot actually did with those rules live
 #      (scripts/paper-report.mjs, from paper_trades).
 # Both outputs land in the run's summary page, readable from a phone.
@@ -56,7 +57,7 @@ jobs:
       - name: Candidate rules, archive, last ${{ env.DAYS }} days
         if: always()
         shell: bash
-        run: node scripts/m15-archive-backtest.mjs "--days=$DAYS" "--size=10" "--strategy=paper" KXBTC15M KXGOLD15M 2>&1 | tee rules.txt
+        run: node scripts/m15-archive-backtest.mjs "--days=$DAYS" "--size=10" "--strategy=paper" --maker KXBTC15M KXGOLD15M 2>&1 | tee rules.txt
       - name: Paper trades, last ${{ env.DAYS }} days
         if: always()
         shell: bash
