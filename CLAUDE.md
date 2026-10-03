@@ -769,6 +769,15 @@ undelayed dollar figure is the ceiling and this is the first step down
 from it. The Kalshi record is one book a second, so under 1000ms this
 mostly measures how fast .us moves.
 
+**Section 3c answers it at millisecond resolution** (`lib/venueFinal.js`),
+in each window's final two minutes, where the Kalshi archive holds every
+book change. It replays both books, acts at the FIRST moment an edge
+exists rather than its best one, and fills limits at +50/100/250/500/1000ms
+counted from the exchange time of the change that made the edge — so the
+delay covers publication, the socket, deciding and both orders. A window
+with a sequence gap or socket event in that stretch is left out, not
+replayed from a stale book. `scripts/venue-final.test.mjs` pins it.
+
 **They are liquid.** `KXBTC15M` carried **1.26M contracts of volume** on
 a single fifteen-minute window.
 
