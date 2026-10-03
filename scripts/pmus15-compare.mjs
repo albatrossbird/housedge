@@ -10,6 +10,7 @@
 //   node scripts/pmus15-compare.mjs --hours=24
 import { archiveReader } from "../lib/archiveRead.js";
 import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, delayStats, KALSHI_SERIES } from "../lib/venueCompare.js";
+import { newFinal, feedKalshiFinal, finalReplay, finalDelayStats, finalEpisodeStats } from "../lib/venueFinal.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -33,10 +34,17 @@ console.log(`archives: .us ${pFiles.length} files (${mb(pFiles)} MB), Kalshi ${k
 const C = newCompare();
 let bad = 0;
 for (const f of pFiles) bad += await reader.eachLine(f.path, o => feedPmus(C, o));
-// The Kalshi archive carries ~30 series; only this one's 1-second books
-// are needed, so everything else is skipped before parsing.
-const needle = `"m":"${KALSHI_SERIES}-`;
-for (const f of kFiles) bad += await reader.eachLine(f.path, o => feedKalshi(C, o), line => line.startsWith('{"k":"b"') && line.includes(needle));
+// The Kalshi archive carries other series too; only this one's lines are
+// parsed: its 1-second books, its final-window record (every change, for
+// the replay in 3c), and the recorder's gap and socket events, which say
+// where that record cannot be trusted.
+const needle = `"m":"${KALSHI_SERIES}-`, anyTicker = `"${KALSHI_SERIES}-`;
+const F = newFinal();
+const keepK = line =>
+  ((line.startsWith('{"k":"b"') || line.startsWith('{"k":"d"') || line.startsWith('{"k":"full"') || line.startsWith('{"k":"final"')) && line.includes(needle))
+  || (line.startsWith('{"k":"gap"') && line.includes(anyTicker))
+  || line.startsWith('{"k":"conn"');
+for (const f of kFiles) bad += await reader.eachLine(f.path, o => { feedKalshi(C, o); feedKalshiFinal(F, o); }, keepK);
 const iso = t => Number.isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") : "—";
 console.log(`.us books ${iso(C.pmusFirst)} -> ${iso(C.pmusLast)} UTC, Kalshi books ${iso(C.kalshiFirst)} -> ${iso(C.kalshiLast)} UTC${bad ? `, ${bad} unparseable lines` : ""}`);
 {
@@ -85,6 +93,28 @@ if (E.n) {
     console.log(`    +${String(d).padStart(4)}ms  full ${pct(r.full, r.known).padStart(6)}  partial ${pct(r.partial, r.known).padStart(6)}  none ${pct(r.none, r.known).padStart(6)}  legged ${pct(r.legged, r.known).padStart(6)}  kept $${r.dollars.toFixed(2)} of $${E.dollars.toFixed(2)}`);
   }
   console.log(`    The Kalshi record is one book a second, so under 1000ms this mostly measures how fast .us moves.`);
+}
+
+{
+  const R = finalReplay(C, F);
+  const X = R.excluded;
+  console.log(`\n3c. THE FINAL TWO MINUTES, TO THE MILLISECOND: every Kalshi book change replayed against every .us book,`);
+  console.log(`    acting at the FIRST moment an edge appears (no hindsight). Delay runs from the exchange time of the change`);
+  console.log(`    that made the edge, so it must cover publication, the socket, deciding, and both orders reaching both venues.`);
+  console.log(`    ${R.windows} windows replayed (${R.kalshiEvents.toLocaleString()} Kalshi book changes); left out: ${X.disrupted} interrupted (gap or socket event), ${X.noUs} with no .us book, ${X.noFinal} with no final-window record`);
+  if (R.selfCrossed) console.log(`    ::warning::${R.selfCrossed} moments where the replayed Kalshi book crossed itself — the replay is missing changes`);
+  const ES = finalEpisodeStats(R.episodes);
+  if (!ES.n) console.log(`    no edges after fees in the replayed windows`);
+  else {
+    const u = ms => pct(ES.under[ms], ES.n);
+    console.log(`    ${ES.n} edges; lasted: median ${ES.medianMs}ms, p90 ${ES.p90Ms}ms; under 50ms ${u(50)}, under 100ms ${u(100)}, under 250ms ${u(250)}, under 1s ${u(1000)}`);
+    console.log(`    worth $${ES.firstDollars.toFixed(2)} at first sight (vs $${ES.bestDollars.toFixed(2)} at each edge's best moment, which a bot cannot know)`);
+    for (const [d, r] of Object.entries(finalDelayStats(R.episodes))) {
+      if (!r.known) continue;
+      console.log(`    +${String(d).padStart(4)}ms  full ${pct(r.full, r.known).padStart(6)}  partial ${pct(r.partial, r.known).padStart(6)}  none ${pct(r.none, r.known).padStart(6)}  legged ${pct(r.legged, r.known).padStart(6)}  kept $${r.dollars.toFixed(2)} of $${ES.firstDollars.toFixed(2)}`);
+    }
+    console.log(`    Our own orders do not move these books and nobody reacts to them; the two venues' clocks may differ by a few ms.`);
+  }
 }
 
 console.log(`\n4. WHO MOVES FIRST? correlation of mid changes, .us shifted by N samples (~seconds)`);
