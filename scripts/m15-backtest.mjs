@@ -18,7 +18,7 @@ import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
 import { readQuoteWindows } from "../lib/m15Reads.js";
 import { toPathRow } from "../lib/m15Backtest.js";
-import { strategiesFromArgs, reachSecs, feeMultiplier, printSeriesTable, printFooter, pct } from "../lib/m15BacktestReport.js";
+import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -55,7 +55,8 @@ console.log(`strategies: ${Object.keys(strategies).join(", ")}`);
 
 for (const s of series) {
   console.log(`\n${"=".repeat(96)}\n${s}\n${"=".repeat(96)}`);
-  const mult = await feeMultiplier(s);
+  const fees = await seriesFees(s);
+  const mult = fees?.mult ?? null;
   if (mult == null) { console.log("::warning::could not read fee_multiplier from Kalshi — skipped rather than assuming 1"); continue; }
 
   const mk = await readAll("m15_markets", "ticker,close_time,result",
@@ -73,7 +74,7 @@ for (const s of series) {
   console.log(`fee_multiplier ${mult} | settled markets ${markets.length}, with a recorded live-book path ${covered.length} | settled YES ${pct(yesRate)}`);
   if (!covered.length) continue;
 
-  printSeriesTable({ strategies, covered, paths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH });
+  printSeriesTable({ strategies, covered, paths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH, daysPerYear: daysPerYearFor(fees?.category) });
 }
 
 printFooter({ size: SIZE, fills: "filled at the recorded 15-second quote" });
