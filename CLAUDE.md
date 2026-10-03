@@ -738,6 +738,25 @@ starts there. Storage rate-limits bursts (429): `lib/archiveRead.js`
 retries with backoff for every archive reader, and the backtest
 downloads two files at a time.
 
+**Resting orders** (`lib/m15Maker.js`, `--maker` on the archive
+backtest, the `maker` input on its workflow, on by default in the daily
+report). Every decision the taker backtest makes is also run as a bid at
+the touch, replayed against the final two minutes' every book change and
+trade. Three queue assumptions bracket the truth: `join` (behind the
+whole level, advanced only by trades at our price — pessimistic),
+`front` (first in line — optimistic), `improve` (a cent inside a 2c+
+spread, else it joins); `join+take` buys the unfilled rest at the ask
+before the cutoff. On KXBTC15M/KXGOLD15M `fee_type` is `quadratic`, so
+makers pay NOTHING (`kalshiMakerFee` in `lib/fees.js`; an unknown
+`fee_type` prices nothing rather than zero). The number to read is
+**won when filled / not filled**: resting bids fill when someone sells,
+and if that is disproportionately before the side loses, the saved
+spread and fee are paid back in outcomes. Every run also checks the
+recorded taker sides against the book (`checkTradeSides`) and refuses to
+trust fills if they disagree. `scripts/m15-maker.test.mjs` pins the
+model (mutation-checked: side filter, trade-through, latency, queue,
+cutoff); `scripts/m15-archive-backtest.test.mjs` runs it end to end.
+
 **Paper trading** (`scripts/paper-m15.mjs`, unit
 `marketslap-paper-m15.service`, table `paper_trades` from migration
 `0031`). Decides LIVE on Kalshi's uncached `/orderbook`, read about once
