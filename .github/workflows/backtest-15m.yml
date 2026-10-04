@@ -39,6 +39,10 @@ on:
         description: "archive only: also run each decision as a resting order, replayed change by change (lib/m15Maker.js)"
         type: boolean
         default: false
+      venues:
+        description: "archive only: also run the rules on Polymarket US's book (Bitcoin), alone and best of both (lib/m15Venues.js)"
+        type: boolean
+        default: false
 
 concurrency:
   group: m15-analysis
@@ -67,14 +71,16 @@ jobs:
           DAYS: ${{ github.event.inputs.days || '21' }}
           SOURCE: ${{ github.event.inputs.source || 'poller' }}
           MAKER: ${{ github.event.inputs.maker }}
+          VENUES: ${{ github.event.inputs.venues }}
         run: |
           SCRIPT=scripts/m15-backtest.mjs
           EXTRA=""
           if [ "$SOURCE" = "archive" ]; then
             SCRIPT=scripts/m15-archive-backtest.mjs
             if [ "$MAKER" = "true" ]; then EXTRA="--maker"; fi
-          elif [ "$MAKER" = "true" ]; then
-            echo "::warning::resting orders need the archive's change-by-change record; ignored for source=poller"
+            if [ "$VENUES" = "true" ]; then EXTRA="$EXTRA --venues"; fi
+          elif [ "$MAKER" = "true" ] || [ "$VENUES" = "true" ]; then
+            echo "::warning::resting orders and the venue comparison need the WebSocket archives; ignored for source=poller"
           fi
           if [ -n "$STRATEGY" ]; then
             node "$SCRIPT" "--days=$DAYS" "--size=$SIZE" "--strategy=$STRATEGY" $EXTRA $SERIES

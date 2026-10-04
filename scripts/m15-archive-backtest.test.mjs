@@ -9,16 +9,19 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pmusSlug, kalshiM15Ticker, WINDOW_MS } from "../lib/pmus15.js";
 
 const HERE = new URL(".", import.meta.url).pathname;
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w}\n${extra}`); } };
 
-function run(args = ["--strategies=fav-final"], tape = []) {
+function run(args = ["--strategies=fav-final"], tape = [], usLines = []) {
   const dir = mkdtempSync(join(tmpdir(), "m15arch-"));
-  const close = Date.now() - 3600000;          // settled an hour ago
+  // Settled about an hour ago, on a real 15-minute boundary, so the .us
+  // slug and the Kalshi ticker for the window can be built from it.
+  const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
   const iso = ms => new Date(ms).toISOString();
-  const T = "KXBTC15M-TEST-00";
+  const T = kalshiM15Ticker("btc", close), SLUG = pmusSlug("btc", close - WINDOW_MS);
   const book = (secs, b, a, extra = {}) => JSON.stringify({ k: "b", t: close - secs * 1000, m: T, b, a, bs: 50, as: 50, d: [400, 900, 1500, 400, 900, 1500], L: [[], []], x: close - secs * 1000, ...extra });
   const lines = [
     JSON.stringify({ k: "meta", t: close - 1e6 }),
@@ -33,6 +36,7 @@ function run(args = ["--strategies=fav-final"], tape = []) {
     ...tape.map(o => JSON.stringify(typeof o === "function" ? o(close, T) : o)),
   ];
   const gz = gzipSync(Buffer.from(lines.join("\n") + "\n")).toString("base64");
+  const usGz = gzipSync(Buffer.from(usLines.map(o => JSON.stringify(typeof o === "function" ? o(close, SLUG) : o)).join("\n") + "\n")).toString("base64");
   const h = join(dir, "h.mjs");
   writeFileSync(h, `
     const close = ${close};
@@ -50,9 +54,12 @@ function run(args = ["--strategies=fav-final"], tape = []) {
       }
       if (u.includes("/storage/v1/object/list/")) {
         const body = JSON.parse(init.body);
-        if (body.offset > 0 || !body.prefix.endsWith("/${iso(close).slice(11, 13)}/") || !body.prefix.startsWith("m15/${iso(close).slice(0, 10)}")) return reply(200, []);
-        return reply(200, [{ id: "1", name: "a_box.ndjson.gz", metadata: { size: 1234 } }]);
+        if (body.offset > 0 || !body.prefix.endsWith("/${iso(close - 1).slice(11, 13)}/")) return reply(200, []);
+        if (body.prefix.startsWith("m15/${iso(close - 1).slice(0, 10)}")) return reply(200, [{ id: "1", name: "a_box.ndjson.gz", metadata: { size: 1234 } }]);
+        if (body.prefix.startsWith("pmus15/${iso(close - 1).slice(0, 10)}") && ${usLines.length > 0}) return reply(200, [{ id: "2", name: "b_box.ndjson.gz", metadata: { size: 999 } }]);
+        return reply(200, []);
       }
+      if (u.includes("/storage/v1/object/authenticated/") && u.includes("/pmus15/")) return reply(200, null, Buffer.from(${JSON.stringify(usGz)}, "base64"));
       if (u.includes("/storage/v1/object/authenticated/")) return reply(200, null, Buffer.from(${JSON.stringify(gz)}, "base64"));
       return reply(404, {});
     };
@@ -101,6 +108,37 @@ console.log("resting orders (--maker)");
   ok(/RESTING ORDERS, READING THEM/.test(r.text), "and says how to read it", r.text);
   const plain = run();
   ok(!/RESTING ORDERS/.test(plain.text), "without --maker nothing changes", plain.text);
+}
+
+console.log("across venues (--venues)");
+{
+  // Polymarket US quotes the same window 89/90 where Kalshi is 90/91: the
+  // .us ask is a cent cheaper, and its 50 offered covers the 10 wanted.
+  //   kalshi        10 at 0.91, Kalshi fee 6c          -> +$0.84
+  //   polyus        10 at 0.90, .us fee 0.06255 -> 6c  -> +$0.94
+  //   best of both  all 10 on .us (0.906 all-in < 0.916) -> +$0.94, a cent a contract saved
+  // With --maker, the .us bid at 0.89 (300 ahead) is sold 310 into: join
+  // fills 10 at 0.89 and is PAID 0.0125 x 10 x 0.89 x 0.11 = 1.2c -> 1c.
+  const usLines = [
+    (c, s) => ({ k: "mkt", t: c - 900000, m: s, kalshi: "x" }),
+    (c, s) => ({ k: "pb", t: c - 100000, x: c - 100000, m: s, b: [[0.69, 100]], a: [[0.70, 100]] }),
+    (c, s) => ({ k: "pb", t: c - 30000, x: c - 30000, m: s, b: [[0.89, 300]], a: [[0.90, 50]] }),
+    (c, s) => ({ k: "tr", t: c - 25000, x: c - 25000, m: s, p: 0.89, q: 310, side: "ORDER_SIDE_SELL", intent: "ORDER_INTENT_SELL_LONG" }),
+  ];
+  const r = run(["--strategies=fav-final", "--venues"], [], usLines);
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/polymarket us: 1 hourly files .* 1 settled windows with a \.us book path/.test(r.text), "reads the .us archive into book paths", r.text);
+  ok(/ACROSS VENUES .* on the 1 windows of 1/.test(r.text), "compares on windows both venues covered", r.text);
+  ok(/fav-final\s+kalshi\s+1\s+100\.0%\s+0\.91\s+\$0\.84/.test(r.text), "Kalshi: 10 at 0.91 = +$0.84", r.text);
+  ok(/\s+polyus\s+1\s+100\.0%\s+0\.90\s+\$0\.94/.test(r.text), "Polymarket US: the same rule on its own book, 10 at 0.90 with its fee = +$0.94", r.text);
+  ok(/\s+best of both\s+1\s+100\.0%\s+0\.90\s+\$0\.94/.test(r.text), "best of both buys all 10 on .us", r.text);
+  ok(/\.us cheaper all-in at 1 of 1 decisions; 10 of 10 contracts bought there; \+1\.00c a contract/.test(r.text), "and says how often and by how much .us was cheaper", r.text);
+  const mk = run(["--strategies=fav-final", "--venues", "--maker"], [], usLines);
+  ok(mk.code === 0, "with --maker: runs cleanly", mk.text);
+  ok(/RESTING ORDERS ON POLYMARKET US/.test(mk.text) && /trade sides agree with the book on 100\.0% of 1 trades/.test(mk.text), "replays the .us tape and checks its trade sides", mk.text);
+  ok(/\s+join\s+1\s+1\s+\$1\.11\s+\+11\.10c/.test(mk.text), "join: 10 at 0.89, paid a 1c rebate = +$1.11", mk.text);
+  const none = run(["--strategies=fav-final", "--venues"], [], []);
+  ok(none.code === 0 && !/ACROSS VENUES/.test(none.text), "no .us archive: nothing to compare, nothing printed", none.text);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
