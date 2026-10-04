@@ -757,6 +757,26 @@ trust fills if they disagree. `scripts/m15-maker.test.mjs` pins the
 model (mutation-checked: side filter, trade-through, latency, queue,
 cutoff); `scripts/m15-archive-backtest.test.mjs` runs it end to end.
 
+**Across venues** (`lib/m15Venues.js`, `--venues` on the archive
+backtest, the `venues` input on its workflow, on in the daily report).
+For the series Polymarket US lists (the Bitcoin 15-minute market; gold
+is Kalshi-only) the same rules run on the .us book — its archive as
+once-a-second rows on the .us exchange's clock, its own fees (taker
+0.0695 x p(1-p) half-even; makers PAID 0.0125 x p(1-p), a negative fee)
+— and as **best of both**: decided on Kalshi's book, each contract
+bought where it is cheaper all-in at that second, spilling to the other
+venue at its depth, never on a .us book over 2s old. All three rows use
+only windows both venues listed and both recorders covered. With
+`--maker` the .us decisions are replayed as resting orders on the .us
+tape. **.us trade sides come from `intent`** (BUY_LONG/SELL_SHORT buy
+Up, SELL_LONG/BUY_SHORT sell Up); whether a SHORT trade's price is Up's
+or Down's is not documented, so both are carried and the run uses the
+reading that agrees with the book, printing which, and trusts nothing
+under 60%. `checkTradeSides` now also requires a trade within 2c of its
+side: nearness alone accepted a Down price as "near the bid".
+`scripts/m15-venues.test.mjs` (mutation-checked) and the archive
+backtest's end-to-end test pin it.
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win
