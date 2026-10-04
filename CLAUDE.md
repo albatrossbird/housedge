@@ -774,6 +774,22 @@ or Down's is not documented, so both are carried and the run uses the
 reading that agrees with the book, printing which, and trusts nothing
 under 60%. `checkTradeSides` now also requires a trade within 2c of its
 side: nearness alone accepted a Down price as "near the bid".
+Measured 2026-10-04: SHORT prices are Up's (97% agreement against 50%).
+
+**Best of both is priced on books read at the decision, so it is
+followed by a DELAY table**: the same decisions with each leg sent as a
+limit at the price seen, filled against each venue's book +0/50/100/250/
+500/1000ms later (Kalshi's from its final-two-minutes record, .us's from
+its whole-book record; `snapshotsAt` in `lib/m15Maker.js`,
+`delayedFill` in `lib/m15Venues.js`), beside Kalshi alone, and with the
+unfilled rest bought at Kalshi's touch. A .us leg whose fill rate falls
+away from the Kalshi leg's as the delay grows was a stale quote. Only
+decisions with both books known at every delay count; an unknown book
+is null, never a miss. **Best of both reads the .us book AT the decision
+instant (`usFull`)** — the once-a-second path keeps each second's LAST
+book, stamped after a decision early in that second, which silently
+dropped .us out of the comparison until the delay test's fixture caught
+it.
 `scripts/m15-venues.test.mjs` (mutation-checked) and the archive
 backtest's end-to-end test pin it.
 

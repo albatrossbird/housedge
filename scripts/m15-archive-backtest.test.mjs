@@ -98,7 +98,7 @@ console.log("resting orders (--maker)");
   ];
   const r = run(["--strategies=fav-final", "--maker"], tape);
   ok(r.code === 0, "runs cleanly", r.text);
-  ok(/resting-order replay: 1 windows replayed of 1 with a decision/.test(r.text), "replays the decided window", r.text);
+  ok(/final-window replay: 1 windows replayed of 1 with a decision/.test(r.text), "replays the decided window", r.text);
   ok(/fee_type quadratic\); trade sides agree with the book on 100\.0% of 1 trades/.test(r.text), "reads the maker fee from the series and checks the trade sides", r.text);
   ok(/fav-final\s+taker\s+1\s+1\s+100\.0%\s+\$0\.84/.test(r.text), "taker on the same decision: 10 at 0.91, fee 0.0573 -> 6c = +$0.84", r.text);
   ok(/\s+join\s+1\s+1\s+50\.0%\s+\$0\.50/.test(r.text), "join: 5 filled at 0.90, no fee = +$0.50", r.text);
@@ -137,6 +137,23 @@ console.log("across venues (--venues)");
   ok(mk.code === 0, "with --maker: runs cleanly", mk.text);
   ok(/RESTING ORDERS ON POLYMARKET US/.test(mk.text) && /trade sides agree with the book on 100\.0% of 1 trades/.test(mk.text), "replays the .us tape and checks its trade sides", mk.text);
   ok(/\s+join\s+1\s+1\s+\$1\.11\s+\+11\.10c/.test(mk.text), "join: 10 at 0.89, paid a 1c rebate = +$1.11", mk.text);
+  // The delay test. Kalshi's final two minutes are on the tape (90/91,
+  // unchanged); the .us offer at 0.90 is gone 60ms after the decision.
+  //   Kalshi alone   fills at every delay: +$0.84
+  //   best of both   +0 and +50ms: all 10 on .us = +$0.94; from +100ms the
+  //                  .us leg finds nothing: 0%
+  //   + rest on Kalshi  from +100ms buys the 10 on Kalshi at 0.91 = +$0.84
+  const kTape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.90, 100]], [[0.91, 50]]] }),
+  ];
+  const usMoved = [...usLines, (c, s) => ({ k: "pb", t: c - 29940, x: c - 29940, m: s, b: [[0.91, 100]], a: [[0.92, 50]] })];
+  const dl = run(["--strategies=fav-final", "--venues"], kTape, usMoved);
+  ok(dl.code === 0 && /DELAY — the same decisions/.test(dl.text), "prints the delay table", dl.text);
+  ok(/fav-final \(1\)\s+\+0ms\s+100\.0%\s+\+8\.40c\s+\$0\.84\s+100\.0%\s+—\s+\+9\.40c\s+\$0\.94\s+\+9\.40c\s+\$0\.94/.test(dl.text), "+0ms: everything fills as priced", dl.text);
+  ok(/\+50ms\s+100\.0%\s+\+8\.40c\s+\$0\.84\s+100\.0%\s+—\s+\+9\.40c\s+\$0\.94/.test(dl.text), "+50ms: the .us offer is still there", dl.text);
+  ok(/\+100ms\s+100\.0%\s+\+8\.40c\s+\$0\.84\s+0\.0%\s+—\s+—\s+\$0\.00\s+\+8\.40c\s+\$0\.84/.test(dl.text), "+100ms: the .us leg misses; the fallback buys on Kalshi", dl.text);
+  ok(/\+1000ms\s+100\.0%/.test(dl.text), "through +1000ms", dl.text);
   const none = run(["--strategies=fav-final", "--venues"], [], []);
   ok(none.code === 0 && !/ACROSS VENUES/.test(none.text), "no .us archive: nothing to compare, nothing printed", none.text);
 }

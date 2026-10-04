@@ -14,10 +14,15 @@
 //      the other at its depth, respects the price cap and a stale .us book.
 //   6. The resting-order replay runs on the .us tape, and the trade-side
 //      check picks the reading of SHORT prices that agrees with the book.
-import { pmusRow, secondly, usTakerSide, pmusFee, pmusMakerFee, bestOfBoth, legsTrade, newUsTape, feedUsTape, resolveUsWindow } from "../lib/m15Venues.js";
+//   7. Delay: the book at an instant is every change up to it; a limit leg
+//      fills only what is still offered at or better; an unknown book is
+//      null, not a miss; the fallback buys the rest at Kalshi's touch
+//      inside the price cap; an order after the close fills nothing.
+import { pmusRow, secondly, usTakerSide, pmusFee, pmusMakerFee, bestOfBoth, legsTrade, newUsTape, feedUsTape, resolveUsWindow,
+  availableAt, touchToBuy, delayedFill, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { pmusTakerFee } from "../lib/venueCompare.js";
 import { kalshiTakerFee } from "../lib/fees.js";
-import { simulateMaker, checkTradeSides, makerTrade, disrupted } from "../lib/m15Maker.js";
+import { simulateMaker, checkTradeSides, makerTrade, disrupted, snapshotsAt } from "../lib/m15Maker.js";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -92,6 +97,34 @@ console.log("resting orders on the .us tape");
   ok(near(t.pnl, 10 - 8.4 - pmusMakerFee(0.84, 10)) && t.pnl > 1.6, "and the .us rebate is added to the P&L", JSON.stringify(t));
   T.conn.push(C - 50000);
   ok(disrupted(T, w) === "socket event", "a .us socket event in the final two minutes excludes the window");
+}
+
+console.log("delay");
+{
+  const w = { ticker: "K", close: C, finalT: C - 120000, events: [
+    { k: "F", x: C - 120000, L: [[[0.84, 100]], [[0.85, 200], [0.86, 50]]] },
+    { k: "D", x: C - 60000, sd: "a", p: 0.85, q: -200 },
+    { k: "D", x: C - 60000, sd: "b", p: 0.85, q: 30 },
+  ] };
+  const sn = snapshotsAt(w, [C - 130000, C - 60001, C - 60000]);
+  ok(sn.get(C - 130000) === null, "before the first full book: unknown");
+  ok(JSON.stringify(sn.get(C - 60001)) === JSON.stringify({ bids: [[0.84, 100]], asks: [[0.85, 200], [0.86, 50]] }), "just before the change: the old book", JSON.stringify(sn.get(C - 60001)));
+  ok(JSON.stringify(sn.get(C - 60000)) === JSON.stringify({ bids: [[0.85, 30], [0.84, 100]], asks: [[0.86, 50]] }), "at the change's own instant: the new book", JSON.stringify(sn.get(C - 60000)));
+  const before = sn.get(C - 60001), after = sn.get(C - 60000);
+  ok(availableAt(before, "yes", 0.85) === 200 && availableAt(after, "yes", 0.85) === 0 && availableAt(after, "yes", 0.86) === 50, "YES limit: offers at or below it");
+  ok(availableAt(after, "no", 0.15) === 30 && availableAt(after, "no", 0.16) === 130, "NO limit: YES bids at 1 - p, at or better");
+  ok(availableAt(null, "yes", 0.9) === null && availableAt(CLOSED_BOOK, "yes", 0.99) === 0, "unknown is null; after the close nothing");
+  ok(JSON.stringify(touchToBuy(after, "yes")) === JSON.stringify({ price: 0.86, depth: 50 }) && touchToBuy(after, "no").price === 0.15, "the touch to chase, either side");
+  const fees = { kalshi: (p, n) => kalshiTakerFee(p, n, 1), polyus: pmusFee };
+  const legs = [{ venue: "polyus", price: 0.85, qty: 4 }, { venue: "kalshi", price: 0.85, qty: 6 }];
+  const usGone = { bids: [[0.85, 10]], asks: [[0.87, 40]] };
+  const f = delayedFill({ legs, side: "yes", won: true, snaps: { kalshi: before, polyus: usGone }, fees });
+  ok(f.qty === 6 && f.legFills.polyus.got === 0 && f.legFills.kalshi.got === 6 && near(f.pnl, 6 - 6 * 0.85 - fees.kalshi(0.85, 6)), "the .us offer moved away: only the Kalshi leg fills", JSON.stringify(f));
+  const fb = delayedFill({ legs, side: "yes", won: true, snaps: { kalshi: after, polyus: usGone }, fees, fallback: true, priceMax: 0.95 });
+  ok(fb.qty === 10 && fb.fallbackQty === 10 && near(fb.pnl, 10 - 10 * 0.86 - fees.kalshi(0.86, 10)), "both moved, neither leg fills: all 10 bought at Kalshi's new touch", JSON.stringify(fb));
+  const capped = delayedFill({ legs, side: "yes", won: true, snaps: { kalshi: after, polyus: usGone }, fees, fallback: true, priceMax: 0.855 });
+  ok(capped.qty === 0, "but not above the rule's price cap", JSON.stringify(capped));
+  ok(delayedFill({ legs, side: "yes", won: true, snaps: { kalshi: before, polyus: null }, fees }) === null, "a venue's book unknown at that instant: no answer, not a miss");
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }

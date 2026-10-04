@@ -36,8 +36,8 @@ import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
 import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, printVenueSection, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
-import { newTape, feedTape, disrupted, simulateMaker, checkTradeSides } from "../lib/m15Maker.js";
-import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow } from "../lib/m15Venues.js";
+import { newTape, feedTape, disrupted, simulateMaker, checkTradeSides, snapshotsAt } from "../lib/m15Maker.js";
+import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -122,8 +122,15 @@ for (const s of series) fees.set(s, await seriesFees(s));
 const maker = new Map();      // `${strategy}|${ticker}` -> { decision, sims: {variant: sim} }
 const makerStats = { windows: 0, excluded: {}, sides: { agree: 0, total: 0 } };
 const MAKER_VARIANTS = { join: { mode: "join" }, front: { mode: "front" }, improve: { mode: "improve" }, "join+take": { mode: "join", fallback: true } };
-if (MAKER) {
-  const decisions = new Map();   // ticker -> [{ name, decision }]
+// --venues also needs this pass: the delay test reads Kalshi's book at
+// each delay after a decision from the same change-by-change record.
+const decisions = new Map();     // ticker -> [{ name, decision }]
+const kSnaps = new Map(), uSnaps = new Map();   // `${strategy}|${ticker}` -> { [delayMs]: book }
+const snapsAfter = (w, decision) => {
+  const at = snapshotsAt(w, VENUE_DELAYS_MS.map(d => decision.t + d), 10);
+  return Object.fromEntries(VENUE_DELAYS_MS.map(d => [d, decision.t + d >= w.close ? CLOSED_BOOK : at.get(decision.t + d)]));
+};
+if (MAKER || VENUES) {
   for (const m of wanted.values()) {
     const path = (paths.get(m.ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     if (!path.length) continue;
@@ -148,6 +155,8 @@ if (MAKER) {
     const c = checkTradeSides(w);
     makerStats.sides.agree += c.agree; makerStats.sides.total += c.total;
     for (const { name, decision } of decisions.get(ticker)) {
+      if (VENUES) kSnaps.set(`${name}|${ticker}`, snapsAfter(w, decision));
+      if (!MAKER) continue;
       const sims = {};
       for (const [v, o] of Object.entries(MAKER_VARIANTS)) sims[v] = simulateMaker(w, decision, { ...o, latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS });
       maker.set(`${name}|${ticker}`, { decision, sims });
@@ -166,13 +175,14 @@ if (MAKER) {
     for (const [ticker, close] of want) if (!done.has(ticker) && close + 60000 < watermark) finalize(ticker);
   }
   for (const ticker of want.keys()) if (!done.has(ticker)) finalize(ticker);
-  console.log(`resting-order replay: ${makerStats.windows} windows replayed of ${want.size} with a decision, ${lines.toLocaleString()} lines, ${Math.round((Date.now() - t1) / 1000)}s; left out: ${JSON.stringify(makerStats.excluded)}`);
+  console.log(`final-window replay: ${makerStats.windows} windows replayed of ${want.size} with a decision, ${lines.toLocaleString()} lines, ${Math.round((Date.now() - t1) / 1000)}s; left out: ${JSON.stringify(makerStats.excluded)}`);
 }
 
 // 3b. Polymarket US (--venues): the .us archive, in order, one window at a
 //     time — its book as once-a-second rows for the taker comparison and,
 //     with --maker, its tape replayed for resting orders.
-const usPaths = new Map();     // kalshi ticker -> .us rows (secondly)
+const usPaths = new Map();     // kalshi ticker -> .us rows, once a second (the engine's path, like Kalshi's)
+const usFull = new Map();      // kalshi ticker -> every .us book within reach: best of both reads the book AT the decision
 const usMaker = new Map();     // `${strategy}|${ticker}` -> { decision, sims: { long: {...}, short: {...} } }
 const usStats = { windows: 0, excluded: {}, sides: { long: { agree: 0, total: 0 }, short: { agree: 0, total: 0 } } };
 if (VENUES) {
@@ -188,12 +198,15 @@ if (VENUES) {
   const usWanted = new Map(), rowsBy = new Map(), tape = newUsTape(), done = new Set();
   const finalizeUs = ticker => {
     done.add(ticker);
-    const rows = secondly(rowsBy.get(ticker) || []);
-    if (rows.length) usPaths.set(ticker, rows);
+    const all = (rowsBy.get(ticker) || []).sort((a, b) => a.t - b.t);
+    const rows = secondly(all);
+    if (rows.length) { usPaths.set(ticker, rows); usFull.set(ticker, all); }
     const w = tape.win.get(ticker);
     tape.win.delete(ticker);
-    if (!MAKER || !rows.length) return;
     const why = w ? disrupted(tape, w) : "not in the .us archive";
+    // The delay test: the .us book at each delay after each Kalshi decision.
+    if (!why) { const ws = resolveUsWindow(w, "long"); for (const { name, decision } of decisions.get(ticker) || []) uSnaps.set(`${name}|${ticker}`, snapsAfter(ws, decision)); }
+    if (!MAKER || !rows.length) return;
     if (why) { usStats.excluded[why] = (usStats.excluded[why] || 0) + 1; return; }
     usStats.windows++;
     const m = wanted.get(ticker);
@@ -213,7 +226,7 @@ if (VENUES) {
       usMaker.set(`${name}|${ticker}`, { decision, sims });
     }
   };
-  const keepU = line => line.startsWith('{"k":"pb"') || (MAKER && (line.startsWith('{"k":"tr"') || line.startsWith('{"k":"conn"')));
+  const keepU = line => line.startsWith('{"k":"pb"') || line.startsWith('{"k":"conn"') || (MAKER && line.startsWith('{"k":"tr"'));
   const t2 = Date.now();
   let watermark = -Infinity, ubytes = 0;
   for (const f of uFiles) {
@@ -227,7 +240,7 @@ if (VENUES) {
         const r = pmusRow(o, inf.close);
         if (r && r.secs <= reach && r.secs > -60) { if (!rowsBy.has(inf.ticker)) rowsBy.set(inf.ticker, []); rowsBy.get(inf.ticker).push(r); }
       }
-      if (MAKER) { usWanted.set(o.m, inf); feedUsTape(tape, o, usWanted); }
+      usWanted.set(o.m, inf); feedUsTape(tape, o, usWanted);
     }, keepU);
     for (const [slug, inf] of slugInfo) if (inf && !done.has(inf.ticker) && inf.close + 60000 < watermark) finalizeUs(inf.ticker);
   }
@@ -249,8 +262,9 @@ for (const s of series) {
   printSeriesTable({ strategies, covered, paths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH, daysPerYear: daysPerYearFor(fees.get(s)?.category) });
   if (MAKER) printMakerSection({ strategies, covered, paths, size: SIZE, mult, feeType: fees.get(s)?.feeType ?? null,
     requireDepth: !ASSUME_DEPTH, maker, variants: Object.keys(MAKER_VARIANTS), stats: makerStats, latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS });
-  if (VENUES) printVenueSection({ strategies, covered, kPaths: paths, uPaths: usPaths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH,
-    daysPerYear: daysPerYearFor(fees.get(s)?.category), usMaker: MAKER ? usMaker : null, usStats, variants: Object.keys(MAKER_VARIANTS), latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS });
+  if (VENUES) printVenueSection({ strategies, covered, kPaths: paths, uPaths: usPaths, uFull: usFull, size: SIZE, mult, requireDepth: !ASSUME_DEPTH,
+    daysPerYear: daysPerYearFor(fees.get(s)?.category), usMaker: MAKER ? usMaker : null, usStats, variants: Object.keys(MAKER_VARIANTS), latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS,
+    delaySnaps: { kalshi: kSnaps, polyus: uSnaps } });
 }
 
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
