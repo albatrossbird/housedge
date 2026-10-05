@@ -117,6 +117,65 @@ console.log("a window");
   ok(s.traded === 2 && near(s.pnl, won.pnl + capped.pnl) && s.days.length === 1, "summary totals", JSON.stringify({ t: s.traded, p: s.pnl }));
 }
 
+console.log("resting entries");
+{
+  const close = 900000, open = 0;
+  const flat = (t, bid, ask, bq = 100, aq = 100) => ({ t, bid, ask, bids: [[bid, bq]], asks: [[ask, aq]] });
+  const sig = () => ({ price: 100000, change_5m: 0.01 });
+  const rows = [flat(0, 0.49, 0.50)];
+  // Buy YES while flat and more than 400s remain: one resting bid at 0.49
+  // posted at t=10s (the first tick), with 100 already resting there.
+  const yesBook = compileRuleBook(base([{ name: "in", when: { all: [{ field: "position_size", op: "==", value: 0 }, { field: "time_to_expiry", op: ">", value: 400 }] }, action: "buy_yes", size: 30 }]));
+  const T = (x, yp, n, side) => ({ x, yp, n, side });
+  const run = (trades, o = {}, b = yesBook, rs = rows, result = "yes") =>
+    runWindow(b, { ticker: "T", close, result }, rs, sig, { entry: "maker", queue: "join", latencyMs: 500, trades, staleMs: 1e9, makerFee: () => 0, ...o });
+  const fills = r => r.actions.filter(a => a.maker && a.qty > 0);
+
+  let r = run([T(12000, 0.49, 80, "no"), T(13000, 0.49, 50, "no")]);
+  ok(fills(r).length === 1 && fills(r)[0].qty === 30, "join: 100 ahead, 80 then 50 sold into the bid -> 30 filled on the second", JSON.stringify(fills(r)));
+  ok(near(r.pnl, 30 - 30 * 0.49), "a resting YES fill pays its own price, no fee, and settles", String(r.pnl));
+  r = run([T(12000, 0.49, 80, "no")]);
+  ok(fills(r).length === 0, "join: 80 sold is still inside the queue ahead");
+  r = run([T(12000, 0.48, 5, "no")]);
+  ok(fills(r).length === 1 && fills(r)[0].qty === 30, "a trade THROUGH our price fills what is left");
+  r = run([T(12000, 0.49, 5, "no")], { queue: "front" });
+  ok(fills(r).length === 1 && fills(r)[0].qty === 5, "front: first in line, filled by the first 5");
+  r = run([T(12000, 0.49, 500, "yes")]);
+  ok(fills(r).length === 0, "a taker BUYING YES does not fill a resting YES bid");
+  r = run([T(10200, 0.48, 500, "no")]);
+  ok(fills(r).length === 0, "a trade before the order is live (+500ms) does not fill it");
+  r = run([T(505000, 0.48, 500, "no")]);
+  ok(fills(r).length === 0, "the order is cancelled once its rule stops acting (400s or less left)");
+  r = run([T(500000, 0.48, 500, "no")]);
+  ok(fills(r).length === 1, "control: a trade AT the cancelling tick still meets the order, since a cancel takes effect after it");
+  r = run([T(12000, 0.48, 500, "no")], { makerFee: (p, n) => 0.07 });
+  ok(near(r.fees, 0.07) && near(r.pnl, 30 - 30 * 0.49 - 0.07), "the maker fee function is charged per fill");
+
+  // NO is bought by offering YES at the ask: filled by takers BUYING YES.
+  const noBook = compileRuleBook(base([{ name: "in", when: { all: [{ field: "position_size", op: "==", value: 0 }] }, action: "buy_no", size: 10 }]));
+  r = run([T(12000, 0.50, 200, "yes")], { queue: "front" }, noBook, rows, "no");
+  ok(fills(r)[0]?.qty === 10 && near(r.pnl, 10 - 10 * 0.50), "a NO bid rests as a YES offer at the ask and costs 1 - ask", JSON.stringify(fills(r)));
+  r = run([T(895000, 0.50, 200, "yes")], { queue: "front" }, noBook, rows, "no");
+  ok(fills(r)[0]?.qty === 10, "a trade after the last tick but before the close still fills the order resting then");
+  r = run([T(12000, 0.50, 200, "no")], { queue: "front" }, noBook, rows, "no");
+  ok(fills(r).length === 0, "and a taker selling YES does not fill it");
+
+  // Netting: a resting YES bid fills 10 at 0.60 early; later the rule
+  // turns to NO, and a resting NO bid (a YES offer at 0.61, NO at 0.39)
+  // fills 4. A YES and a NO are a $1 pair, so 4 YES are closed at
+  // 1 - 0.39 = 0.61 and 6 stay. YES settles:
+  //   -10 x 0.60 - 4 x 0.39 + 4 (pairs) + 6 (settlement) = +2.44
+  const net = compileRuleBook(base([
+    { name: "yes", when: { all: [{ field: "time_to_expiry", op: ">", value: 600 }] }, action: "buy_yes", size: 10 },
+    { name: "no", when: { all: [{ field: "time_to_expiry", op: "<=", value: 600 }] }, action: "buy_no", size: 10 },
+  ]));
+  r = runWindow(net, { ticker: "T", close, result: "yes" }, [flat(0, 0.60, 0.61)], sig, { entry: "maker", queue: "front", latencyMs: 0, staleMs: 1e9, makerFee: () => 0,
+    trades: [T(12000, 0.60, 10, "no"), T(305000, 0.61, 4, "yes")] });
+  ok(r.heldAtClose === 6 && near(r.pnl, 2.44), "a resting NO fill nets against YES held: 4 closed as $1 pairs, 6 left", `${r.heldAtClose} ${r.pnl}`);
+  const sm = summarize([r]);
+  ok(sm.makerFilled === 14 && sm.posted >= 20, "posted and filled contracts are reported", JSON.stringify({ f: sm.makerFilled, p: sm.posted }));
+}
+
 console.log("signals");
 {
   // Candles start 10:00; each closes at minute end. At 11:00:30 the candle

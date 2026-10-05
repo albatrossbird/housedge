@@ -834,7 +834,12 @@ levels as a taker, Kalshi's fee per order, positions marked at the touch.
 Every run prints four variants — as written, +1s order delay, every
 matching rule acting, and **mid fills with no fees, the optimistic bound a
 simulator that ignores the book would report** — so a gap between a
-quoted figure and ours can be read off rather than argued about. An
+quoted figure and ours can be read off rather than argued about. Two more
+run the entries as RESTING orders at the touch (`entry: "maker"`), filled
+only by the archived trade tape at or through the price after 500ms —
+behind the queue resting there, or first in line — and cancelled the
+moment the acting rule stops buying that side; exits still cross. Fills
+net against an opposite position as $1 pairs, as Kalshi does. An
 unknown field, op or action is REFUSED at compile time; a condition the
 engine cannot read must not quietly read as false. Rule values are
 rounded to 1e-9 before comparing: 100 x 0.55 - 50 is 5.000000000000007,
