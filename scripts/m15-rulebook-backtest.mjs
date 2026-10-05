@@ -20,6 +20,12 @@
 //   mid, no fees      every order fills in full at the mid with no fee:
 //                     the OPTIMISTIC bound, which is what a simulator that
 //                     ignores the book reports. Never a result to trade on.
+//   resting, back / front of queue
+//                     entries posted as resting orders at the touch, filled
+//                     only by the recorded trade tape, half a second after
+//                     the decision; exits still cross. "back" waits behind
+//                     everything already at that price, "front" is first
+//                     in line — the truth is between them.
 //
 // The usable archive starts 2026-09-30 13:16 UTC: before then the recorder
 // ran behind its socket, and lines without the exchange's timestamp are
@@ -34,6 +40,7 @@ import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { seriesFees } from "../lib/m15BacktestReport.js";
 import { coinbaseCandles } from "../lib/coinbaseCandles.js";
+import { kalshiMakerFee } from "../lib/fees.js";
 import { toCandles, newTicks, addTick, makeSignals } from "../lib/btcSignals.js";
 import { compileRuleBook, runWindow, summarize } from "../lib/m15RuleBook.js";
 
@@ -60,6 +67,8 @@ const VARIANTS = {
   "+1s delay": { latencyMs: 1000 },
   "every match acts": { mode: "all" },
   "mid, no fees": { fill: "mid", fees: false, mark: "mid" },
+  "resting, back": { entry: "maker", queue: "join", latencyMs: 500 },
+  "resting, front": { entry: "maker", queue: "front", latencyMs: 500 },
 };
 
 async function rest(path) {
@@ -83,6 +92,9 @@ if (!wanted.size) { console.log("nothing settled in the window"); process.exit(0
 //    hour's VWAP and the EMA need history before the first decision.
 const fee = await seriesFees(SERIES);
 if (!fee) { console.error("::error::no fee_multiplier from Kalshi — not pricing fees by guess"); process.exit(1); }
+// A fee type we do not know prices nothing rather than zero (lib/fees.js).
+if (kalshiMakerFee(0.5, 100, fee.mult, fee.feeType) == null) { console.error(`::error::unknown fee_type "${fee.feeType}" — cannot price resting orders`); process.exit(1); }
+const makerFee = (p, n) => kalshiMakerFee(p, n, fee.mult, fee.feeType);
 const closes = [...wanted.values()].map(m => m.close);
 const errors = [];
 const candles = toCandles(await coinbaseCandles("BTC-USD", Math.floor((Math.min(...closes) - 900000 - 2 * 3600000) / 1000), Math.ceil(Math.max(...closes) / 1000), errors));
@@ -97,17 +109,18 @@ const signalsAt = makeSignals(candles, ticks);
 const reader = archiveReader({ url: URL, key: KEY });
 const files = await reader.listRange("m15", SINCE_MS - 2 * 3600000, Date.now());
 const needle = `"m":"${SERIES}-`;
-const keep = line => (line.startsWith('{"k":"b"') && line.includes(needle)) || (line.startsWith('{"k":"i5"') && line.includes('"id":"BRTI"'));
-const rows = new Map(), done = new Set();
+const keep = line => ((line.startsWith('{"k":"b"') || line.startsWith('{"k":"tr"')) && line.includes(needle)) || (line.startsWith('{"k":"i5"') && line.includes('"id":"BRTI"'));
+const rows = new Map(), tapes = new Map(), done = new Set();
 const results = Object.fromEntries(Object.keys(VARIANTS).map(v => [v, []]));
 const tsv = [];
-let watermark = -Infinity, bookLines = 0, noX = 0;
+let watermark = -Infinity, bookLines = 0, noX = 0, tradeLines = 0;
 const finalize = ticker => {
   done.add(ticker);
   const m = wanted.get(ticker), path = (rows.get(ticker) || []).sort((a, b) => a.t - b.t);
-  rows.delete(ticker);
+  const trades = (tapes.get(ticker) || []).sort((a, b) => a.x - b.x);
+  rows.delete(ticker); tapes.delete(ticker);
   for (const [v, o] of Object.entries(VARIANTS)) {
-    const r = runWindow(book, m, path, signalsAt, { ...o, mult: fee.mult });
+    const r = runWindow(book, m, path, signalsAt, { ...o, mult: fee.mult, trades, makerFee });
     results[v].push(r);
     if (v === "as written" && OUT) for (const a of r.actions)
       tsv.push([m.ticker, new Date(a.t).toISOString(), ((m.close - a.t) / 1000).toFixed(0), a.rule, a.action, a.want ?? "", a.qty, a.closed ?? "", a.cash != null ? a.cash.toFixed(2) : "", a.fee ?? "", m.result, r.pnl.toFixed(2)].join("\t"));
@@ -119,6 +132,14 @@ for (const f of files) {
     if (o.k === "i5") { addTick(ticks, o.x, Number(o.v)); return; }
     const m = wanted.get(o.m);
     if (!m) return;
+    if (o.k === "tr") {
+      // Trades are timed on the exchange's clock too; one without it is dropped.
+      if (!Number.isFinite(o.x) || o.x >= m.close || o.x < m.close - 905000 || (o.side !== "yes" && o.side !== "no")) return;
+      if (!tapes.has(o.m)) tapes.set(o.m, []);
+      tapes.get(o.m).push({ x: o.x, yp: Number(o.yp), n: Number(o.n), side: o.side });
+      tradeLines++;
+      return;
+    }
     if (!Number.isFinite(o.x)) { noX++; return; }
     if (o.x > watermark) watermark = o.x;
     if (o.x < m.close - 905000 || o.x >= m.close) return;
@@ -132,7 +153,7 @@ for (const f of files) {
   for (const [ticker, m] of wanted) if (!done.has(ticker) && m.close + 60000 < watermark) finalize(ticker);
 }
 for (const ticker of wanted.keys()) if (!done.has(ticker)) finalize(ticker);
-console.log(`archive: ${files.length} hourly files, ${bookLines.toLocaleString()} book rows, ${ticks.x.length.toLocaleString()} BRTI seconds, ${Math.round((Date.now() - t0) / 1000)}s${noX ? `, ${noX} book lines dropped without an exchange timestamp` : ""}`);
+console.log(`archive: ${files.length} hourly files, ${bookLines.toLocaleString()} book rows, ${tradeLines.toLocaleString()} trades, ${ticks.x.length.toLocaleString()} BRTI seconds, ${Math.round((Date.now() - t0) / 1000)}s${noX ? `, ${noX} book lines dropped without an exchange timestamp` : ""}`);
 
 // 4. Report.
 const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
@@ -146,8 +167,12 @@ for (const v of Object.keys(VARIANTS)) {
 const A = S["as written"];
 console.log(`\ndata: ${A.ticks.toLocaleString()} decision ticks read, ${A.stale.toLocaleString()} skipped for a missing or stale book, ${A.noSignal.toLocaleString()} with a Bitcoin signal missing (rules on it could not fire)`);
 console.log(`book depth: ${A.shortfall.toLocaleString()} contracts asked for that the top ten levels could not fill`);
+for (const v of ["resting, back", "resting, front"]) {
+  const s = S[v];
+  console.log(`${v}: ${s.makerFilled.toLocaleString()} of ${s.posted.toLocaleString()} posted contracts filled (${pc(s.makerFilled, s.posted)})`);
+}
 
-for (const v of ["as written", "mid, no fees"]) {
+for (const v of ["as written", "resting, back", "mid, no fees"]) {
   const s = S[v];
   console.log(`\n── ${v}: by day`);
   for (const d of s.days) console.log(`  ${d.day}  ${String(d.windows).padStart(3)} windows  ${String(d.traded).padStart(3)} traded  ${$(d.pnl).padStart(11)}`);
@@ -162,6 +187,8 @@ console.log(`
 NOTES
 - Fills are taker fills walked through the top ten levels of Kalshi's book as recorded once a second, so
   "as written" is the closest to what the file would have done; "+1s delay" is what a real order's flight costs.
+- "resting" posts each entry at the touch and fills it only from recorded trades at or through that price, so
+  its fills skew toward the moments the market moves against the order; exits still cross and pay.
 - "mid, no fees" fills everything at the mid for free. If a simulator reports a figure near that row, the gap
   to "as written" is the spread, the depth and the fee it never charged.
 - The price signal is BRTI, the index these markets settle on; the file asks for Coinbase BTC-USD, a few dollars

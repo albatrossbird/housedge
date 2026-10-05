@@ -14,6 +14,11 @@
 //   mid, no fees   buy at 0.495, mark at the mid; +$5.00 > $3 at
 //                  open+400s, sell at 0.545. Net +$5.00.
 //   +1s delay      the book a second later is the same row: +$0.51.
+//   resting        a bid for 100 at 0.49 posted at open+100s, live 500ms
+//                  later; 500 rest ahead. A taker sells 600 into 0.49 at
+//                  open+105s: the queue takes 500, we get 100, no fee
+//                  (quadratic). Out at the 0.54 bid, fee $1.74: +$3.26,
+//                  for both queue assumptions.
 import { execFileSync } from "node:child_process";
 import { writeFileSync, readFileSync, mkdtempSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -49,6 +54,8 @@ for (let t = open - 5000; t < close; t += 10000) {
   lines.push({ k: "b", t: t + 30, m: T, b, a, bs: 500, as: 500, d: [500, 500, 500, 500, 500, 500], L: [[[b, 500]], [[a, 500]]], x: t });
 }
 lines.push({ k: "b", t: close - 2000, m: T, b: 0.10, a: 0.11, L: [[[0.10, 500]], [[0.11, 500]]] });   // no x: dropped
+lines.push({ k: "tr", t: open + 105100, m: T, yp: 0.49, n: 600, side: "no", x: open + 105000 });
+lines.push({ k: "tr", t: open + 106100, m: T, yp: 0.49, n: 600, side: "no" });                            // no x: not on the tape
 lines.push({ k: "i5", t: close + 130000, id: "ETHUSD_RTI", v: 4000, x: close + 130000 });               // another index: ignored
 lines.sort((p, q) => (p.x ?? p.t) - (q.x ?? q.t));
 const gz = gzipSync(Buffer.from(lines.map(o => JSON.stringify(o)).join("\n") + "\n")).toString("base64");
@@ -94,6 +101,9 @@ ok(/1 book lines dropped without an exchange timestamp/.test(r.text) && /, 91 bo
 ok(/as written\s+1\s+1\s+100\.0%\s+100\s+\$3\.49\s+\+\$0\.51/.test(row("as written")), "as written: in at the ask, out at the bid, both fees: +$0.51", row("as written"));
 ok(/\+\$0\.51/.test(row("+1s delay")), "+1s delay: the same book a second later", row("+1s delay"));
 ok(/\$0\.00\s+\+\$5\.00/.test(row("mid, no fees")), "mid, no fees: +$5.00, the gap being spread and fee", row("mid, no fees"));
+ok(/resting, back\s+1\s+1\s+100\.0%\s+100\s+\$1\.74\s+\+\$3\.26/.test(row("resting, back")), "resting, back of queue: 100 of the 600 sold reach us past the 500 ahead: +$3.26", row("resting, back"));
+ok(/\+\$3\.26/.test(row("resting, front")), "resting, front of queue: the same here", row("resting, front"));
+ok(/, 1 trades,/.test(r.text) && /resting, back: 100 of \d+ posted contracts filled/.test(r.text), "keeps the timed trade and reports the fill rate", r.text);
 ok(/go\s+1 windows\s+won\s+100\.0%\s+\+\$0\.51/.test(r.text), "credits the window to the rule that opened it", r.text);
 ok(/target 1/.test(r.text) && !/held to settlement/.test(r.text.split("── as written: how positions ended")[1]?.split("\n")[0] || ""), "the position ended on the target, not at settlement", r.text);
 ok(existsSync(out) && readFileSync(out, "utf8").trim().split("\n").length === 3, "writes every action of the as-written run", existsSync(out) ? readFileSync(out, "utf8") : "no file");
