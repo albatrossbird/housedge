@@ -1,0 +1,554 @@
+{
+  "version": 1,
+  "platform": "kalshi",
+  "strategy_name": "momentum-ladder",
+  "market": {
+    "series_ticker": "KXBTC15M"
+  },
+  "risk": {
+    "max_position": 2001,
+    "price_floor": 0.01,
+    "price_ceiling": 0.99
+  },
+  "loop": {
+    "interval": 10
+  },
+  "edge": {
+    "btc": {
+      "provider": "coinbase",
+      "symbol": "BTC-USD",
+      "fields": [
+        "price",
+        "vwap_1h",
+        "change_5m",
+        "ema_12_1m",
+        "high_15m",
+        "low_15m",
+        "velocity_1m",
+        "sma_20_1m"
+      ],
+      "refresh": "5s"
+    }
+  },
+  "rules": [
+    {
+      "name": "position_limit",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">",
+            "value": 2001
+          }
+        ]
+      },
+      "action": "skip"
+    },
+    {
+      "name": "take_profit_tier_1",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": "<=",
+            "value": 500
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": ">",
+            "value": 30
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.1
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.9
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "take_profit_tier_2",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">=",
+            "value": 501
+          },
+          {
+            "field": "position_size",
+            "op": "<=",
+            "value": 1000
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": ">",
+            "value": 45
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.1
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.9
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "take_profit_tier_3",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">=",
+            "value": 1001
+          },
+          {
+            "field": "position_size",
+            "op": "<=",
+            "value": 1500
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": ">",
+            "value": 120
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "take_profit_tier_4",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">=",
+            "value": 1501
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": ">",
+            "value": 180
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "stop_loss_tier_1",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": "<=",
+            "value": 500
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": "<",
+            "value": -100
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "stop_loss_tier_2",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">=",
+            "value": 501
+          },
+          {
+            "field": "position_size",
+            "op": "<=",
+            "value": 1000
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": "<",
+            "value": -200
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "stop_loss_tier_3",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">=",
+            "value": 1001
+          },
+          {
+            "field": "position_size",
+            "op": "<=",
+            "value": 1500
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": "<",
+            "value": -300
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "stop_loss_tier_4",
+      "when": {
+        "all": [
+          {
+            "field": "position_size",
+            "op": ">=",
+            "value": 1501
+          },
+          {
+            "field": "unrealized_pnl",
+            "op": "<",
+            "value": -400
+          }
+        ]
+      },
+      "action": "sell_all"
+    },
+    {
+      "name": "buy_yes_above_vwap",
+      "when": {
+        "all": [
+          {
+            "field": "edge.btc.price",
+            "op": ">",
+            "value_field": "edge.btc.vwap_1h"
+          },
+          {
+            "field": "edge.btc.price",
+            "op": ">",
+            "value_field": "edge.btc.ema_12_1m"
+          },
+          {
+            "field": "edge.btc.change_5m",
+            "op": ">",
+            "value": 0.001
+          },
+          {
+            "field": "edge.btc.velocity_1m",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.35
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.65
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.015
+          }
+        ]
+      },
+      "action": "buy_yes",
+      "size": 500
+    },
+    {
+      "name": "buy_no_below_vwap",
+      "when": {
+        "all": [
+          {
+            "field": "edge.btc.price",
+            "op": "<",
+            "value_field": "edge.btc.vwap_1h"
+          },
+          {
+            "field": "edge.btc.price",
+            "op": "<",
+            "value_field": "edge.btc.ema_12_1m"
+          },
+          {
+            "field": "edge.btc.change_5m",
+            "op": "<",
+            "value": -0.001
+          },
+          {
+            "field": "edge.btc.velocity_1m",
+            "op": "<",
+            "value": 0
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.35
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.65
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.015
+          }
+        ]
+      },
+      "action": "buy_no",
+      "size": 500
+    },
+    {
+      "name": "accel_momentum_yes",
+      "when": {
+        "all": [
+          {
+            "field": "edge.btc.change_5m",
+            "op": ">",
+            "value": 0.0015
+          },
+          {
+            "field": "edge.btc.velocity_1m",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.2
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.8
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.015
+          }
+        ]
+      },
+      "action": "buy_yes",
+      "size": 500
+    },
+    {
+      "name": "accel_momentum_no",
+      "when": {
+        "all": [
+          {
+            "field": "edge.btc.change_5m",
+            "op": "<",
+            "value": -0.0015
+          },
+          {
+            "field": "edge.btc.velocity_1m",
+            "op": "<",
+            "value": 0
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.2
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.8
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.015
+          }
+        ]
+      },
+      "action": "buy_no",
+      "size": 500
+    },
+    {
+      "name": "early_entry_yes",
+      "when": {
+        "all": [
+          {
+            "field": "time_to_expiry",
+            "op": "<=",
+            "value": "5m"
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.4
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.6
+          },
+          {
+            "field": "edge.btc.change_5m",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "field": "edge.btc.velocity_1m",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "field": "edge.btc.price",
+            "op": ">",
+            "value_field": "edge.btc.vwap_1h"
+          },
+          {
+            "field": "edge.btc.ema_12_1m",
+            "op": ">",
+            "value_field": "edge.btc.sma_20_1m"
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.015
+          }
+        ]
+      },
+      "action": "buy_yes",
+      "size": 500
+    },
+    {
+      "name": "early_entry_no",
+      "when": {
+        "all": [
+          {
+            "field": "time_to_expiry",
+            "op": "<=",
+            "value": "5m"
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.4
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.6
+          },
+          {
+            "field": "edge.btc.change_5m",
+            "op": "<",
+            "value": 0
+          },
+          {
+            "field": "edge.btc.velocity_1m",
+            "op": "<",
+            "value": 0
+          },
+          {
+            "field": "edge.btc.price",
+            "op": "<",
+            "value_field": "edge.btc.vwap_1h"
+          },
+          {
+            "field": "edge.btc.ema_12_1m",
+            "op": "<",
+            "value_field": "edge.btc.sma_20_1m"
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.015
+          }
+        ]
+      },
+      "action": "buy_no",
+      "size": 500
+    },
+    {
+      "name": "late_momentum_yes",
+      "when": {
+        "all": [
+          {
+            "field": "time_to_expiry",
+            "op": "<=",
+            "value": "5m"
+          },
+          {
+            "field": "price",
+            "op": ">=",
+            "value": 0.88
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.03
+          },
+          {
+            "field": "edge.btc.high_15m",
+            "op": ">",
+            "value": 15
+          },
+          {
+            "field": "edge.btc.price",
+            "op": ">",
+            "value": 15
+          }
+        ]
+      },
+      "action": "buy_yes",
+      "size": 500
+    },
+    {
+      "name": "late_momentum_no",
+      "when": {
+        "all": [
+          {
+            "field": "time_to_expiry",
+            "op": "<=",
+            "value": "5m"
+          },
+          {
+            "field": "price",
+            "op": "<=",
+            "value": 0.12
+          },
+          {
+            "field": "spread",
+            "op": "<=",
+            "value": 0.03
+          },
+          {
+            "field": "edge.btc.low_15m",
+            "op": ">",
+            "value": 15
+          },
+          {
+            "field": "edge.btc.price",
+            "op": ">",
+            "value": 15
+          }
+        ]
+      },
+      "action": "buy_no",
+      "size": 500
+    }
+  ]
+}
