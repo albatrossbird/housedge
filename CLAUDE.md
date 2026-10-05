@@ -820,6 +820,27 @@ bot and by the daily report's backtest (`--strategy=paper`), so the two
 cannot drift; change the list in git. The unit is not started by
 bootstrap or a pull — `systemctl enable --now` it after `0031` is run.
 
+**Rule files** (`strategies/*.json`, `lib/m15RuleBook.js`, run by
+`scripts/m15-rulebook-backtest.mjs`, workflow input `source: rulebook`).
+A different shape from the entry rules above: a loop that every N seconds
+walks an ordered rule list — buy YES/NO in a size, sell everything, or
+skip — on the market's price and spread, the position's size and its
+dollar P&L, and Bitcoin signals (`lib/btcSignals.js`: BRTI from the
+archive, VWAP/EMA/SMA/15-minute range from COMPLETED Coinbase one-minute
+candles only, since the open candle's close is lookahead). It can add,
+net YES against NO as Kalshi does, and exit early, so it is simulated
+tick by tick: first matching rule acts, fills walk the archived top ten
+levels as a taker, Kalshi's fee per order, positions marked at the touch.
+Every run prints four variants — as written, +1s order delay, every
+matching rule acting, and **mid fills with no fees, the optimistic bound a
+simulator that ignores the book would report** — so a gap between a
+quoted figure and ours can be read off rather than argued about. An
+unknown field, op or action is REFUSED at compile time; a condition the
+engine cannot read must not quietly read as false. Rule values are
+rounded to 1e-9 before comparing: 100 x 0.55 - 50 is 5.000000000000007,
+which passed "> $5" a tick early. `scripts/m15-rulebook.test.mjs` and
+`scripts/m15-rulebook-backtest.test.mjs` pin it (mutation-checked).
+
 **The daily report** (`daily-15m-report.yml`, 04:23 UTC, in the
 `m15-analysis` queue) writes three things to its run summary: the 24h
 Kalshi vs Polymarket US spread, what the paper bot did, and the same

@@ -21,6 +21,7 @@ import { indexCandles, refPrice, predict, marginBps, agreementByMargin } from ".
 import { YAHOO_SYMBOLS, yahooChart, indexYahooChart } from "../lib/yahooCandles.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
+import { coinbaseCandles as candles } from "../lib/coinbaseCandles.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -46,8 +47,6 @@ function sourceFor(s) {
   return null;
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 async function rest(path) {
   const r = await fetch(`${URL}/rest/v1/${path}`, { headers: { ...authHeaders(KEY) } });
   if (!r.ok) throw new Error(`GET ${path.slice(0, 70)} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
@@ -69,30 +68,6 @@ async function rest(path) {
 const readAll = (table, select, extra, key = "id", dedupeOn = null) =>
   pageAll(rest, table, select, String(extra).replace(/&+$/, ""), { key, dedupeOn });
 
-// Coinbase caps a candle request at 300 buckets and rate-limits public
-// requests, so this walks the period in 300-minute slices with a pause.
-// A failed slice is REPORTED, never silently skipped: a missing slice
-// would drop markets from the sample and quietly shrink the denominator.
-async function candles(product, fromSecs, toSecs, errors) {
-  const all = [];
-  for (let s = fromSecs; s < toSecs; s += 300 * 60) {
-    const e = Math.min(s + 300 * 60, toSecs);
-    const u = `https://api.exchange.coinbase.com/products/${product}/candles` +
-              `?granularity=60&start=${new Date(s * 1000).toISOString()}&end=${new Date(e * 1000).toISOString()}`;
-    let ok = false;
-    for (let attempt = 0; attempt < 4 && !ok; attempt++) {
-      try {
-        const r = await fetch(u, { headers: { "User-Agent": "marketslap/1.0" } });
-        if (r.status === 429) { await sleep(1500 * (attempt + 1)); continue; }
-        if (!r.ok) throw new Error(`coinbase ${r.status}`);
-        all.push(...await r.json());
-        ok = true;
-      } catch (err) { if (attempt === 3) errors.push(`${new Date(s * 1000).toISOString()}: ${err.message}`); }
-      await sleep(250);
-    }
-  }
-  return all;
-}
 
 for (const s of series) {
   const src = sourceFor(s);

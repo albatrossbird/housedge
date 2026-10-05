@@ -4,6 +4,9 @@ name: Backtest 15-minute strategies
 # live-book path in Postgres (from 2026-09-26).
 # source=archive: scripts/m15-archive-backtest.mjs over the WebSocket
 # archive's once-a-second book in Storage; one small database read.
+# source=rulebook: scripts/m15-rulebook-backtest.mjs runs a rule file
+# (strategies/*.json) tick by tick over the same archive, with Coinbase
+# candles for the Bitcoin signals; every action goes up as an artifact.
 # Manual only, and run one at a time — not 15:45-16:45 UTC, while
 # discovery and matching load the database.
 
@@ -11,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "poller (15-second path, Postgres) or archive (1-second book, Storage)"
+        description: "poller (15-second path, Postgres), archive (1-second book, Storage), or rulebook (a strategies/*.json file over the archive)"
         type: choice
-        options: [poller, archive]
+        options: [poller, archive, rulebook]
         default: poller
       series:
         description: "Space-separated series"
@@ -43,6 +46,10 @@ on:
         description: "archive only: also run the rules on Polymarket US's book (Bitcoin), alone and best of both (lib/m15Venues.js)"
         type: boolean
         default: false
+      file:
+        description: "rulebook only: the rule file"
+        default: "strategies/momentum-ladder.json"
+        required: false
 
 concurrency:
   group: m15-analysis
@@ -72,7 +79,12 @@ jobs:
           SOURCE: ${{ github.event.inputs.source || 'poller' }}
           MAKER: ${{ github.event.inputs.maker }}
           VENUES: ${{ github.event.inputs.venues }}
+          RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
+          if [ "$SOURCE" = "rulebook" ]; then
+            node scripts/m15-rulebook-backtest.mjs "--file=$RULEFILE" "--days=$DAYS" --out=rulebook-actions.tsv
+            exit $?
+          fi
           SCRIPT=scripts/m15-backtest.mjs
           EXTRA=""
           if [ "$SOURCE" = "archive" ]; then
@@ -87,3 +99,11 @@ jobs:
           else
             node "$SCRIPT" "--days=$DAYS" "--size=$SIZE" "--strategies=$STRATEGIES" $EXTRA $SERIES
           fi
+      - name: Upload the rule file's actions
+        if: ${{ always() && github.event.inputs.source == 'rulebook' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rulebook-actions
+          path: rulebook-actions.tsv
+          if-no-files-found: ignore
+          retention-days: 14
