@@ -2,14 +2,15 @@
 //
 // WHY A TEST AND NOT A NOTE. The box's .us key can trade — Polymarket US
 // issues no read-only keys — and this repo uses it only for the market-
-// data socket (scripts/pmus15-stream.mjs). The account is kept at $0, but
-// that is a fact about today's balance, not a property of the code. A
-// helper that "just checks open orders" is one refactor away from one
+// data socket (scripts/pmus15-stream.mjs). The account behind it holds
+// REAL MONEY — it is traded from a separate instance with its own key —
+// so an order sent from here would spend it. A balance is not a property
+// of the code either way. A helper that "just checks open orders" is one refactor away from one
 // that places them, so the boundary is enforced where a change would
 // have to cross it: any tracked file naming the order routes fails here.
 //
-// Trading, if it ever happens, happens from a separate instance with its
-// own key and its own repository — not by deleting this test.
+// Trading happens from that separate instance with its own key and its
+// own repository — never by deleting this test.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 

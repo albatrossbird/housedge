@@ -294,7 +294,10 @@ same averaging, same tie rule). Files go to `stream-archive` under
 It uses the box's .us key **in place**: the id in `/etc/polyus/id.env`,
 the secret in `/etc/polyus/polyus.key`. Nothing needs creating. **That
 key can trade**, so this repo only ever opens the market-data socket with
-it, and the account must stay at $0 while the key exists.
+it. The account behind it holds real money and is traded from a separate
+instance with its own key, so any order from this box would spend it:
+keep this key market-data only, and revoke it at polymarket.us/developer
+if the box is ever in doubt.
 
 All commands are for the **box terminal**, one at a time.
 

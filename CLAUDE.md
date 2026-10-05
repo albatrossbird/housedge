@@ -1244,7 +1244,12 @@ so the two cannot drift into mismatched hours.
 - **It uses the box's .us key, and that key CAN TRADE.** Polymarket US
   issues no read-only keys. It is used only for the market-data socket;
   `scripts/no-order-endpoints.test.mjs` fails if any tracked file names
-  an order route. The account stays at $0 while the key exists.
+  an order route. **The account behind it holds real money** and is
+  traded from the separate trader box with its own key (2026-10-05; it
+  had held $20 throughout, never $0 as this file used to say). Any key
+  on the account can spend its balance, so this box is a place money can
+  be lost from: keep this key market-data only and the test above in
+  place, and revoke the key if the box is ever in doubt.
 - **Shared key, so: one socket**, backoff 1s doubling to 60s, and a
   backoff that resets only after a connection held for a minute.
 - **A deleted key must read as a failure, an outage must not.** Node
