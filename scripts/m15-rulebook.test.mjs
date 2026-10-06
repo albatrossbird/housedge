@@ -39,6 +39,9 @@ console.log("compiling");
   const real = compileRuleBook(JSON.parse(readFileSync("strategies/momentum-ladder.json", "utf8")));
   ok(real.rules.length === 17 && real.interval === 10 && real.maxPosition === 2001, "the repo's strategy file compiles", `${real.rules.length} rules`);
   ok(real.rules.find(r => r.name === "early_entry_yes").conds[0].value === 300, "its '5m' reads as 300 seconds");
+  const capped = compileRuleBook(JSON.parse(readFileSync("strategies/momentum-ladder-200.json", "utf8")));
+  ok(capped.rules.length === 17 && capped.maxPosition === 200 && capped.rules[0].conds[0].value === 200
+    && capped.rules.filter(r => r.size).every(r => r.size === 500), "the 200-cap copy differs only in its cap: same 17 rules, 500-lot orders");
 }
 
 console.log("matching");
