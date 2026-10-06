@@ -17,7 +17,7 @@
 //      and stale data gives null.
 //   8. The strategy file in the repo compiles.
 import { readFileSync } from "node:fs";
-import { compileRuleBook, matchRules, walk, kalshiOrderFee, runWindow, summarize, parseDuration } from "../lib/m15RuleBook.js";
+import { compileRuleBook, matchRules, walk, kalshiOrderFee, runWindow, runWindowBoth, pmusOrderFee, summarize, parseDuration } from "../lib/m15RuleBook.js";
 import { toCandles, newTicks, addTick, makeSignals } from "../lib/btcSignals.js";
 
 let failed = 0;
@@ -201,6 +201,106 @@ console.log("signals");
   ok(at(t + 60000).price === null, "a tick older than ten seconds is not 'now'");
   ok(at(t + 10 * 60000).vwap_1h === null, "candles that stopped minutes ago give null");
   ok(at(T * 1000 + 30000).ema_12_1m === null, "EMA needs twelve completed candles");
+}
+
+console.log("two venues");
+{
+  // One window. Buy 100 YES on the first tick only; sell everything once
+  // the position is worth $3 over its cost.
+  const b = compileRuleBook(base([
+    { name: "target", when: { all: [{ field: "unrealized_pnl", op: ">", value: 3 }] }, action: "sell_all" },
+    { name: "go", when: { all: [{ field: "position_size", op: "==", value: 0 }, { field: "time_to_expiry", op: ">=", value: 880 }] }, action: "buy_yes", size: 100 },
+  ]));
+  const close = 9000000, open = close - 900000, m = { ticker: "T", close, result: "yes" };
+  const sig = () => ({});
+  const K = [
+    { t: open + 5000, bid: 0.49, ask: 0.50, bids: [[0.49, 1000]], asks: [[0.50, 60], [0.51, 1000]] },
+    { t: open + 18000, bid: 0.60, ask: 0.61, bids: [[0.60, 1000]], asks: [[0.61, 1000]] },
+  ];
+  const U = [
+    { t: open + 9500, bid: 0.48, ask: 0.49, bids: [[0.48, 1000]], asks: [[0.49, 30], [0.52, 1000]] },
+    { t: open + 19500, bid: 0.58, ask: 0.59, bids: [[0.58, 1000]], asks: [[0.59, 1000]] },
+  ];
+
+  // Kalshi alone, as before: 60 @ .50 + 40 @ .51 = $50.40, fee $1.75; out at
+  // the .60 bid for $60.00, fee $1.68: +$6.17. Paid over the mid: $0.90 in
+  // (50.40 - 100 x .495) and $0.50 out (100 x .605 - 60).
+  const k = runWindow(b, m, K, sig);
+  ok(near(k.pnl, 6.17, 1e-6) && near(k.fees, 3.43, 1e-6), "Kalshi alone: in at the asks, out at the bid, both fees", `${k.pnl} ${k.fees}`);
+  ok(near(k.slip, 1.40, 1e-6), "slip: what the fills paid beyond the mid", `${k.slip}`);
+  const s = summarize([k]);
+  ok(near(s.grossAtMid, 11.00, 1e-6), "P&L + slip + fees is the move at the mid: 100 x (.605 - .495)", `${s.grossAtMid}`);
+
+  // The same with no .us book is the same run.
+  const k2 = runWindowBoth(b, m, K, [], sig);
+  ok(near(k2.pnl, k.pnl, 1e-9) && near(k2.fees, k.fees, 1e-9) && near(k2.slip, k.slip, 1e-9) && k2.bought.polyus === 0 && k2.bought.kalshi === 100,
+    "both venues with no .us book reproduces Kalshi alone", `${k2.pnl}`);
+
+  // Polymarket US alone, its own fees: 30 @ .49 + 70 @ .52 = $51.10, fees
+  // .0695 x 30 x .49 x .51 = .5210 -> .52 and .0695 x 70 x .52 x .48 = 1.2143
+  // -> 1.21. Out at its .58 bid for $58.00, fee 1.6930 -> 1.69: +$3.48.
+  const u = runWindow(b, m, U, sig, { feeFn: pmusOrderFee });
+  ok(near(u.pnl, 3.48, 1e-6) && near(u.fees, 3.42, 1e-6), "Polymarket US alone: its book and its half-even fee per fill", `${u.pnl} ${u.fees}`);
+
+  // Best of both. All-in a contract: .us .49 = .5074, Kalshi .50 = .5175,
+  // Kalshi .51 = .5275, .us .52 = .5373. So 30 on .us, then 60 + 10 on Kalshi.
+  // Cost $14.70 + $35.10, fees .52 + 1.23 (.07 x (60 x .25 + 10 x .2499) = 1.2249).
+  // Kalshi alone would have paid $52.15 all-in for the same 100: saved $0.60.
+  // Out: Kalshi's 70 at .60 ($42.00, fee 1.18), the .us 30 at ITS .58 bid
+  // ($17.40, fee .5079 -> .51). -51.55 + 40.82 + 16.89 = +$6.16.
+  const both = runWindowBoth(b, m, K, U, sig);
+  ok(both.bought.polyus === 30 && both.bought.kalshi === 70, "the cheaper venue first, spilling to the other", JSON.stringify(both.bought));
+  ok(near(both.routing.saved, 0.60, 1e-6) && both.routing.usedUs === 1 && both.routing.compared === 1, "what routing saved against Kalshi alone at the same moment", JSON.stringify(both.routing));
+  ok(near(both.pnl, 6.16, 1e-6), "each venue's holding is sold on its own book, at its own fee", `${both.pnl}`);
+  // Slip, each venue against its own mid: in .15 (.us, mid .485) + .45 (Kalshi,
+  // .495); out .35 (Kalshi, .605) + .15 (.us, .585).
+  ok(near(both.slip, 1.10, 1e-6), "slip counted on each venue against its own mid", `${both.slip}`);
+
+  // A .us book over 2s old at the decision is not used: all 100 on Kalshi.
+  const late = runWindowBoth(b, m, K, [{ ...U[0], t: open + 7500 }, U[1]], sig);
+  ok(late.bought.polyus === 0 && late.bought.kalshi === 100, "a .us book over 2s old is not bought from", JSON.stringify(late.bought));
+
+  // No .us book at the exit (none within 12s): Kalshi's 70 sell, the .us 30
+  // cannot and are held to settlement, paying $30. Marks fall back to
+  // Kalshi's touch: at the 30s tick Kalshi's 70 are +$6.90 and the .us 30
+  // +$3.30 at Kalshi's .60. -51.55 + 40.82 + 30 = +$19.27.
+  const K3 = [K[0], { ...K[1], t: open + 25000 }];
+  const stuck = runWindowBoth(b, m, K3, [U[0]], sig);
+  ok(stuck.unsoldUs === 30 && stuck.heldAtClose === 30 && near(stuck.pnl, 19.27, 1e-6), "a .us holding with no .us book to sell into stays held", `${stuck.unsoldUs} ${stuck.heldAtClose} ${stuck.pnl}`);
+
+  // All 100 on .us at .49 ($49.00, fee .0695 x 100 x .2499 = 1.7368 -> 1.74).
+  // Kalshi alone: $50.40 + $1.75. Saved $52.15 - $50.74 = $1.41 — $1.40 of
+  // price and a cent of fee, so a saving that ignored fees reads $1.40.
+  // At the 20s tick the .us holding marks at ITS .52 bid: $52.00 - $49.00 =
+  // $3.00, not over $3, so no exit there — marked at Kalshi's .60 it would be
+  // $11.00 and sell. It sells at the 30s tick, on .us's .55 bid.
+  const U2 = [
+    { t: open + 9500, bid: 0.48, ask: 0.49, bids: [[0.48, 1000]], asks: [[0.49, 1000]] },
+    { t: open + 19500, bid: 0.52, ask: 0.53, bids: [[0.52, 1000]], asks: [[0.53, 1000]] },
+    { t: open + 29500, bid: 0.55, ask: 0.56, bids: [[0.55, 1000]], asks: [[0.56, 1000]] },
+  ];
+  const K2 = [...K, { ...K[1], t: open + 28000 }];
+  const allUs = runWindowBoth(b, m, K2, U2, sig);
+  ok(allUs.bought.polyus === 100 && near(allUs.routing.saved, 1.41, 1e-6), "the saving counts both venues' fees", `${JSON.stringify(allUs.bought)} ${allUs.routing.saved}`);
+  const exitAt = allUs.actions.find(a => a.action === "sell_all" && a.qty > 0);
+  ok(exitAt && exitAt.t === open + 30000, "a .us holding is marked on the .us book, not Kalshi's", exitAt ? `${(exitAt.t - open) / 1000}s` : "no exit");
+
+  // Equal prices: .50 on both. All-in, .us's .0695 fee beats Kalshi's .07, so
+  // .us fills first; on price alone the tie would go to Kalshi.
+  const tieK = [{ t: open + 5000, bid: 0.49, ask: 0.50, bids: [[0.49, 1000]], asks: [[0.50, 1000]] }];
+  const tieU = [{ t: open + 9500, bid: 0.49, ask: 0.50, bids: [[0.49, 1000]], asks: [[0.50, 40]] }];
+  const tie = runWindowBoth(b, m, tieK, tieU, sig);
+  ok(tie.bought.polyus === 40 && tie.bought.kalshi === 60, "at equal prices the lower fee fills first", JSON.stringify(tie.bought));
+
+  // An opposite buy while a .us holding cannot be sold: Kalshi's 70 close,
+  // the .us 30 have no book, and the NO buy is refused rather than leaving
+  // YES on one venue and NO on the other.
+  const flip = compileRuleBook(base([
+    { name: "flip", when: { all: [{ field: "position_size", op: ">", value: 0 }, { field: "time_to_expiry", op: "<=", value: 875 }] }, action: "buy_no", size: 100 },
+    { name: "go", when: { all: [{ field: "position_size", op: "==", value: 0 }, { field: "time_to_expiry", op: ">=", value: 880 }] }, action: "buy_yes", size: 100 },
+  ]));
+  const fl = runWindowBoth(flip, m, K3, [U[0]], sig);
+  ok(fl.heldAtClose === 30 && fl.bought.kalshi === 70 && fl.bought.polyus === 30, "an opposite buy waits while a .us holding cannot be sold", `${fl.heldAtClose} ${JSON.stringify(fl.bought)}`);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }

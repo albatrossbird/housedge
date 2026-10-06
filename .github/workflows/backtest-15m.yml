@@ -43,7 +43,7 @@ on:
         type: boolean
         default: false
       venues:
-        description: "archive only: also run the rules on Polymarket US's book (Bitcoin), alone and best of both (lib/m15Venues.js)"
+        description: "archive and rulebook: also run on Polymarket US's book (Bitcoin), alone and best of both (lib/m15Venues.js, runWindowBoth)"
         type: boolean
         default: false
       file:
@@ -82,7 +82,9 @@ jobs:
           RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
           if [ "$SOURCE" = "rulebook" ]; then
-            node scripts/m15-rulebook-backtest.mjs "--file=$RULEFILE" "--days=$DAYS" --out=rulebook-actions.tsv
+            RB_EXTRA=""
+            if [ "$VENUES" = "true" ]; then RB_EXTRA="--venues"; fi
+            node scripts/m15-rulebook-backtest.mjs "--file=$RULEFILE" "--days=$DAYS" --out=rulebook-actions.tsv $RB_EXTRA
             exit $?
           fi
           SCRIPT=scripts/m15-backtest.mjs

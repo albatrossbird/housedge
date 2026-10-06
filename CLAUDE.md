@@ -841,7 +841,16 @@ behind the queue resting there, or first in line — and cancelled the
 moment the acting rule stops buying that side; exits still cross. Fills
 net against an opposite position as $1 pairs, as Kalshi does. An
 unknown field, op or action is REFUSED at compile time; a condition the
-engine cannot read must not quietly read as false. Rule values are
+engine cannot read must not quietly read as false. `--venues` (workflow
+input `venues`) runs the same file on Polymarket US: on the .us book alone
+at .us fees, and on BOTH (`runWindowBoth`) — decided on Kalshi's book,
+each buy walking both ladders cheapest all-in, a .us level only from a
+book under 2s old, contracts held and sold on the venue that bought them
+(a .us holding with no .us book to sell into stays held). Only windows
+.us covered end to end with no socket drop are compared, Kalshi's row
+included. Every taker fill also records what it paid beyond the mid, so
+P&L splits into the move at the mid, spread paid and fees on the SAME
+trades. Rule values are
 rounded to 1e-9 before comparing: 100 x 0.55 - 50 is 5.000000000000007,
 which passed "> $5" a tick early. `scripts/m15-rulebook.test.mjs` and
 `scripts/m15-rulebook-backtest.test.mjs` pin it (mutation-checked).

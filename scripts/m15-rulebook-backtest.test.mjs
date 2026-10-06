@@ -24,7 +24,7 @@ import { writeFileSync, readFileSync, mkdtempSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { kalshiM15Ticker, WINDOW_MS } from "../lib/pmus15.js";
+import { kalshiM15Ticker, pmusSlug, WINDOW_MS } from "../lib/pmus15.js";
 
 const HERE = new URL(".", import.meta.url).pathname;
 let failed = 0;
@@ -60,7 +60,27 @@ lines.push({ k: "i5", t: close + 130000, id: "ETHUSD_RTI", v: 4000, x: close + 1
 lines.sort((p, q) => (p.x ?? p.t) - (q.x ?? q.t));
 const gz = gzipSync(Buffer.from(lines.map(o => JSON.stringify(o)).join("\n") + "\n")).toString("base64");
 
-const h = join(dir, "h.mjs"), out = join(dir, "actions.tsv");
+// Polymarket US for the same window (--venues): 0.48/0.49, 1,000 a side,
+// until open+400s, then 0.53/0.54, a book every second on the .us clock.
+//   best of both   at open+100s .us's .49 is cheaper all-in than Kalshi's
+//                  .50 (.5074 vs .5175): all 100 on .us, $49.00, fee
+//                  .0695 x 100 x .49 x .51 = 1.7368 -> 1.74. At open+410s
+//                  the .us holding marks at ITS .53 bid, +$4.00: sold
+//                  there for $53.00, fee 1.7312 -> 1.73. Net +$0.53.
+//   .us alone      the same trades on the .us book: +$0.53.
+const usSlug = pmusSlug("btc", open);
+const usLines = (withDrop) => {
+  const L = [];
+  for (let t = open - 5000; t < close; t += 1000) {
+    const late = t >= open + 400000, b = late ? 0.53 : 0.48, a = late ? 0.54 : 0.49;
+    L.push({ k: "pb", t: t + 40, m: usSlug, x: t, b: [[b, 1000]], a: [[a, 1000]], st: "MARKET_STATE_OPEN" });
+  }
+  if (withDrop) L.push({ k: "conn", t: open + 300000, ev: "close", code: 1001 });
+  return gzipSync(Buffer.from(L.map(o => JSON.stringify(o)).join("\n") + "\n")).toString("base64");
+};
+
+const harness = (name, args, usGz) => {
+const h = join(dir, `${name}.mjs`), out = join(dir, `${name}.tsv`);
 writeFileSync(h, `
   const reply = (status, body, raw) => ({ ok: status < 400, status, headers: { get: () => null },
     json: async () => body, text: async () => JSON.stringify(body),
@@ -78,21 +98,24 @@ writeFileSync(h, `
       return reply(200, [{ ticker: "${T}", close_time: "${iso(close)}", result: "yes" }]);
     }
     if (u.includes("/storage/v1/object/list/")) {
-      const body = JSON.parse(init.body);
-      if (body.offset > 0 || body.prefix !== "m15/${iso(close - 1).slice(0, 10)}/${iso(close - 1).slice(11, 13)}/") return reply(200, []);
+      const body = JSON.parse(init.body), hour = "${iso(close - 1).slice(0, 10)}/${iso(close - 1).slice(11, 13)}/";
+      if (body.offset > 0 || (body.prefix !== "m15/" + hour && body.prefix !== "pmus15/" + hour)) return reply(200, []);
       return reply(200, [{ id: "1", name: "a_box.ndjson.gz", metadata: { size: 1234 } }]);
     }
+    if (u.includes("/storage/v1/object/authenticated/") && u.includes("pmus15/")) return reply(200, null, Buffer.from(${JSON.stringify(usGz || "")}, "base64"));
     if (u.includes("/storage/v1/object/authenticated/")) return reply(200, null, Buffer.from(${JSON.stringify(gz)}, "base64"));
     return reply(404, {});
   };
   process.env.SUPABASE_URL = "https://fake.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-  process.argv.push("--days=2", "--file=${file}", "--out=${out}");
+  process.argv.push("--days=2", "--file=${file}", "--out=${out}", ...${JSON.stringify(args)});
   await import(${JSON.stringify(join(HERE, "m15-rulebook-backtest.mjs"))});
 `);
-let r;
-try { r = { code: 0, text: execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }; }
-catch (e) { r = { code: e.status, text: String(e.stdout) + String(e.stderr) }; }
+try { return { code: 0, text: execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), out }; }
+catch (e) { return { code: e.status, text: String(e.stdout) + String(e.stderr), out }; }
+};
+const r = harness("h", []);
+const out = r.out;
 
 console.log("rule-file backtest end to end");
 const row = name => (r.text.split("\n").find(l => l.startsWith(name)) || "");
@@ -107,6 +130,21 @@ ok(/, 1 trades,/.test(r.text) && /resting, back: 100 of \d+ posted contracts fil
 ok(/go\s+1 windows\s+won\s+100\.0%\s+\+\$0\.51/.test(r.text), "credits the window to the rule that opened it", r.text);
 ok(/target 1/.test(r.text) && !/held to settlement/.test(r.text.split("── as written: how positions ended")[1]?.split("\n")[0] || ""), "the position ended on the target, not at settlement", r.text);
 ok(existsSync(out) && readFileSync(out, "utf8").trim().split("\n").length === 3, "writes every action of the as-written run", existsSync(out) ? readFileSync(out, "utf8") : "no file");
+
+console.log("with Polymarket US (--venues)");
+{
+  const v = harness("venues", ["--venues"], usLines(false));
+  const vrow = name => (v.text.split("\n").find(l => l.startsWith(name)) || "");
+  ok(v.code === 0, "runs cleanly", v.text);
+  ok(/1 of 1 windows covered end to end/.test(v.text), "the window counts: .us books span it and its socket never dropped", v.text);
+  ok(/kalshi alone\s+1\s+100\.0%\s+100\s+0\.0%.*\+\$0\.51/.test(vrow("kalshi alone ")), "kalshi alone is the as-written run on the same window: +$0.51", vrow("kalshi alone "));
+  ok(/best of both\s+1\s+100\.0%\s+100\s+100\.0%\s+\$3\.47.*\+\$0\.53/.test(vrow("best of both ")), "best of both buys all 100 on .us and sells there: +$0.53", vrow("best of both "));
+  ok(/polymarket us alone\s+1\s+100\.0%\s+100\s+100\.0%\s+\$3\.47.*\+\$0\.53/.test(vrow("polymarket us alone")), "polymarket us alone, its fees: +$0.53", vrow("polymarket us alone"));
+  // Kalshi alone would have paid 100 x .50 + 1.75 = $51.75 against $50.74.
+  ok(/best of both: 1 buys took a \.us level; against Kalshi alone at the same moment they saved \+\$1\.01/.test(v.text), "reports what routing saved: +$1.01", v.text);
+  const d = harness("dropped", ["--venues"], usLines(true));
+  ok(d.code === 0 && /0 of 1 windows covered end to end; left out \{"\.us socket event":1\}/.test(d.text) && !/^best of both /m.test(d.text), "a .us socket drop inside the window leaves it out of every venue row", d.text);
+}
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
