@@ -306,5 +306,32 @@ console.log("two venues");
   ok(fl.heldAtClose === 30 && fl.bought.kalshi === 70 && fl.bought.polyus === 30, "an opposite buy waits while a .us holding cannot be sold", `${fl.heldAtClose} ${JSON.stringify(fl.bought)}`);
 }
 
+console.log("per-contract exits");
+{
+  // 30 contracts bought at .50 (cost $15.00 + fee). Kalshi's bid then steps
+  // .52 -> .76 -> .77: marked at $15.60, $22.80, $23.10, i.e. +$0.60, +$7.80,
+  // +$8.10 — +2c, +26c, +27c a contract. "> $8" and "> 26.67c a contract"
+  // must both act at the third, and neither earlier.
+  const close = 9000000, open = close - 900000, m = { ticker: "T", close, result: "no" };
+  const row = (t, b) => ({ t, bid: b, ask: b + 0.01, bids: [[b, 1000]], asks: [[b + 0.01, 1000]] });
+  const K = [row(open + 5000, 0.49), row(open + 15000, 0.52), row(open + 25000, 0.76), row(open + 35000, 0.77)];
+  const go = { name: "go", when: { all: [{ field: "position_size", op: "==", value: 0 }, { field: "time_to_expiry", op: ">=", value: 880 }] }, action: "buy_yes", size: 30 };
+  const dollars = compileRuleBook(base([{ name: "tp", when: { all: [{ field: "unrealized_pnl", op: ">", value: 8 }] }, action: "sell_all" }, go]));
+  const per = compileRuleBook(base([{ name: "tp", when: { all: [{ field: "unrealized_pnl_per_contract", op: ">", value: 0.266666667 }] }, action: "sell_all" }, go]));
+  const exitT = r => r.actions.find(a => a.action === "sell_all" && a.qty > 0)?.t;
+  const d = runWindow(dollars, m, K, () => ({})), p = runWindow(per, m, K, () => ({}));
+  ok(exitT(d) === open + 40000 && exitT(p) === open + 40000 && near(d.pnl, p.pnl, 1e-9), "at 30 contracts, +26.67c a contract exits where +$8 does", `${(exitT(d) - open) / 1000} ${(exitT(p) - open) / 1000}`);
+  const db = runWindowBoth(dollars, m, K, [], () => ({})), pb = runWindowBoth(per, m, K, [], () => ({}));
+  ok(exitT(db) === open + 40000 && exitT(pb) === open + 40000, "the same on the two-venue engine");
+  // Flat, the field is null, so no per-contract rule can fire.
+  const flatOnly = compileRuleBook(base([{ name: "x", when: { all: [{ field: "unrealized_pnl_per_contract", op: "<=", value: 0 }] }, action: "buy_yes", size: 1 }]));
+  ok(!runWindow(flatOnly, m, K, () => ({})).actions.length, "unrealized_pnl_per_contract is null when flat: nothing reads it as zero");
+  for (const f of ["momentum-ladder-small-200", "momentum-ladder-small-200-dollars", "momentum-ladder-small-per-contract"]) {
+    const c = compileRuleBook(JSON.parse(readFileSync(`strategies/${f}.json`, "utf8")));
+    const n = f.includes("200") ? 200 : 30;
+    ok(c.maxPosition === n && c.rules[0].conds[0].value === n && c.rules.filter(r => r.size).every(r => r.size === n) && c.rules.filter(r => r.size).length === 8, `${f} compiles: 8 entries of ${n}, capped at ${n}`);
+  }
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
