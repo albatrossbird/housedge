@@ -76,6 +76,9 @@ const usLines = (withDrop) => {
     L.push({ k: "pb", t: t + 40, m: usSlug, x: t, b: [[b, 1000]], a: [[a, 1000]], st: "MARKET_STATE_OPEN" });
   }
   if (withDrop) L.push({ k: "conn", t: open + 300000, ev: "close", code: 1001 });
+  // The final 90s one-sided, as a decided window's losing side empties:
+  // the feed is alive, so the window still counts.
+  for (const o of L) if (o.k === "pb" && o.x >= close - 90000) o.a = [];
   return gzipSync(Buffer.from(L.map(o => JSON.stringify(o)).join("\n") + "\n")).toString("base64");
 };
 

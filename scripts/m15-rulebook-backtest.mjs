@@ -122,15 +122,19 @@ for (const e of errors.slice(0, 5)) console.log(`  ${e}`);
 // 2b. Polymarket US (--venues), read first: for each settled window, the
 //     .us books the engine will read — the latest at or before each
 //     decision tick, and a second later for the +1s run — top ten levels a
-//     side like Kalshi's record. A window counts only if .us has books
+//     side like Kalshi's record. A window counts only if .us sent books
 //     from its first minute to its last and its socket never dropped
 //     inside it; the others are left out of every venue row, Kalshi's too.
+//     Coverage is judged on EVERY book line, one-sided ones included: a
+//     decided window's losing side empties near the close, and judging on
+//     two-sided books alone dropped exactly the decisive windows and kept
+//     the close calls — a selection that made every venue row meaningless.
 const usRows = new Map();
 const usLeftOut = {};
 if (VENUES) {
   const reader0 = archiveReader({ url: URL, key: KEY });
   const uFiles = await reader0.listRange("pmus15", SINCE_MS - 3600000, Date.now());
-  const slugTo = new Map(), inflight = new Map(), conn = [], done = new Set();
+  const slugTo = new Map(), inflight = new Map(), span = new Map(), conn = [], done = new Set();
   const info = slug => {
     if (!slugTo.has(slug)) {
       const p = parsePmusSlug(slug), tk = p && kalshiM15Ticker(p.asset, p.close);
@@ -142,10 +146,11 @@ if (VENUES) {
   const finalizeUs = ticker => {
     done.add(ticker);
     const m = wanted.get(ticker), open = m.close - 900000;
-    const all = (inflight.get(ticker) || []).sort((a, b) => a.t - b.t);
-    inflight.delete(ticker);
-    if (!all.length) return leave("no .us book");
-    if (all[0].t > open + 60000 || all[all.length - 1].t < m.close - 60000) return leave(".us books do not span the window");
+    const all = (inflight.get(ticker) || []).sort((a, b) => a.t - b.t), sp = span.get(ticker);
+    inflight.delete(ticker); span.delete(ticker);
+    if (!sp) return leave("no .us book");
+    if (sp.first > open + 60000 || sp.last < m.close - 60000) return leave(".us books do not span the window");
+    if (!all.length) return leave("no two-sided .us book");
     if (conn.some(t => t >= open - 1000 && t <= m.close + 2000)) return leave(".us socket event");
     const keep = new Set();
     for (let g = open + book.interval * 1000; g < m.close; g += book.interval * 1000)
@@ -163,6 +168,8 @@ if (VENUES) {
       if (o.x > watermark) watermark = o.x;
       const m = wanted.get(tk);
       if (o.x < m.close - 905000 || o.x >= m.close) return;
+      const sp = span.get(tk);
+      if (!sp) span.set(tk, { first: o.x, last: o.x }); else { sp.first = Math.min(sp.first, o.x); sp.last = Math.max(sp.last, o.x); }
       const b = Array.isArray(o.b) ? o.b : [], a = Array.isArray(o.a) ? o.a : [];
       if (!b.length || !a.length) return;
       const bid = Number(b[0][0]), ask = Number(a[0][0]);
@@ -170,9 +177,9 @@ if (VENUES) {
       if (!inflight.has(tk)) inflight.set(tk, []);
       inflight.get(tk).push({ t: o.x, bid, ask, bids: b.slice(0, 10).map(([p, q]) => [Number(p), Number(q)]), asks: a.slice(0, 10).map(([p, q]) => [Number(p), Number(q)]) });
     }, line => line.startsWith('{"k":"pb"') || line.startsWith('{"k":"conn"'));
-    for (const tk of [...inflight.keys()]) if (!done.has(tk) && wanted.get(tk).close + 60000 < watermark) finalizeUs(tk);
+    for (const tk of [...span.keys()]) if (!done.has(tk) && wanted.get(tk).close + 60000 < watermark) finalizeUs(tk);
   }
-  for (const tk of [...inflight.keys()]) if (!done.has(tk)) finalizeUs(tk);
+  for (const tk of [...span.keys()]) if (!done.has(tk)) finalizeUs(tk);
   for (const tk of wanted.keys()) if (!done.has(tk) && !usRows.has(tk)) { done.add(tk); leave("no .us book"); }
   console.log(`polymarket us: ${uFiles.length} hourly files (${(ubytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t1) / 1000)}s; ${usRows.size} of ${wanted.size} windows covered end to end; left out ${JSON.stringify(usLeftOut)}`);
 }
