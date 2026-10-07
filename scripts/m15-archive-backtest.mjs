@@ -28,6 +28,15 @@
 // it is cheaper at that second. With --maker as well, the .us decisions
 // are replayed as resting orders on the .us tape, where makers are paid.
 //
+// --preplace keeps a resting bid on the favourite from 60 or 90 seconds
+// before the close while each favourite rule's conditions hold, instead
+// of posting only when the rule fires (lib/m15Maker.js simulatePrePlace):
+// at the bid or a cent below, back or front of the queue, with the
+// cancel/replace delay at 100, 250 and 500ms. Beside it, on the SAME
+// replayed windows: the rule as a taker and as a decision-time resting
+// order. Every settled window is replayed, not only decided ones, since
+// a pre-placed bid can fill where the rule never fires.
+//
 // Reads with the service-role key (the bucket is private, migration
 // 0029, and must stay so) and writes nothing.
 
@@ -36,7 +45,8 @@ import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
 import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, printVenueSection, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
-import { newTape, feedTape, disrupted, simulateMaker, checkTradeSides, snapshotsAt } from "../lib/m15Maker.js";
+import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt } from "../lib/m15Maker.js";
+import { kalshiMakerFee } from "../lib/fees.js";
 import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
@@ -50,6 +60,7 @@ const SIZE = Number(opt("size", 10));
 const ASSUME_DEPTH = process.argv.includes("--assume-depth");
 const MAKER = process.argv.includes("--maker");
 const VENUES = process.argv.includes("--venues");
+const PREPLACE = process.argv.includes("--preplace");
 const LATENCY_MS = Number(opt("latency-ms", 100));
 const CUTOFF_SECS = Number(opt("cutoff-secs", 5));
 const SINCE_MS = Date.now() - DAYS * 86400000;
@@ -130,7 +141,25 @@ const snapsAfter = (w, decision) => {
   const at = snapshotsAt(w, VENUE_DELAYS_MS.map(d => decision.t + d), 10);
   return Object.fromEntries(VENUE_DELAYS_MS.map(d => [d, decision.t + d >= w.close ? CLOSED_BOOK : at.get(decision.t + d)]));
 };
-if (MAKER || VENUES) {
+// --preplace: the variants, and every result row they produce.
+const PRE_VARIANTS = [
+  { key: "taker, at the rule", kind: "taker" },
+  { key: "resting at the rule, back", kind: "atRule", mode: "join" },
+  { key: "resting at the rule, front", kind: "atRule", mode: "front" },
+  ...[60, 90].flatMap(postSecs => [
+    { key: `from ${postSecs}s, back`, postSecs, mode: "join" },
+    { key: `from ${postSecs}s, front`, postSecs, mode: "front" },
+    { key: `from ${postSecs}s, 1c below, back`, postSecs, mode: "join", offset: 1 },
+    { key: `from ${postSecs}s, 1c below, front`, postSecs, mode: "front", offset: 1 },
+    { key: `from ${postSecs}s, back, 250ms`, postSecs, mode: "join", latencyMs: 250 },
+    { key: `from ${postSecs}s, back, 500ms`, postSecs, mode: "join", latencyMs: 500 },
+  ]),
+];
+const preRows = [];
+const preStats = { windows: 0, excluded: {}, unknownFee: 0 };
+const preStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && st.entry?.side === "favourite");
+if (PREPLACE && !preStrategies.length) { console.error("::error::--preplace needs a hold-to-settlement favourite rule (e.g. --strategy=paper)"); process.exit(2); }
+if (MAKER || VENUES || PREPLACE) {
   for (const m of wanted.values()) {
     const path = (paths.get(m.ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     if (!path.length) continue;
@@ -142,7 +171,7 @@ if (MAKER || VENUES) {
       decisions.get(m.ticker).push({ name, decision: { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, priceMax: strat.entry.priceMax } });
     }
   }
-  const want = new Map([...decisions.keys()].map(t => [t, wanted.get(t).close]));
+  const want = new Map([...(PREPLACE ? [...wanted.keys()].filter(t => paths.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
   const tape = newTape();
   const done = new Set();
   const finalize = ticker => {
@@ -150,11 +179,18 @@ if (MAKER || VENUES) {
     const w = tape.win.get(ticker);
     tape.win.delete(ticker);
     const why = w ? disrupted(tape, w) : "not in the archive";
-    if (why) { makerStats.excluded[why] = (makerStats.excluded[why] || 0) + 1; return; }
+    const decided = decisions.get(ticker) || [];
+    if (why) {
+      if (decided.length) makerStats.excluded[why] = (makerStats.excluded[why] || 0) + 1;
+      if (PREPLACE) preStats.excluded[why] = (preStats.excluded[why] || 0) + 1;
+      return;
+    }
+    if (PREPLACE) preplaceWindow(ticker, w, decided);
+    if (!decided.length) return;
     makerStats.windows++;
     const c = checkTradeSides(w);
     makerStats.sides.agree += c.agree; makerStats.sides.total += c.total;
-    for (const { name, decision } of decisions.get(ticker)) {
+    for (const { name, decision } of decided) {
       if (VENUES) kSnaps.set(`${name}|${ticker}`, snapsAfter(w, decision));
       if (!MAKER) continue;
       const sims = {};
@@ -162,6 +198,45 @@ if (MAKER || VENUES) {
       maker.set(`${name}|${ticker}`, { decision, sims });
     }
   };
+  // One replayed window through every pre-place variant, for every
+  // favourite rule. Rows: { series, strategy, variant, close, posted,
+  // qty, won, pnl, stale, firstFillSecs, ruleFired }.
+  function preplaceWindow(ticker, w, decided) {
+    preStats.windows++;
+    const m = wanted.get(ticker), fee = fees.get(m.series), mult = fee?.mult ?? 1, feeType = fee?.feeType ?? null;
+    const path = (paths.get(ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
+    for (const [name, strat] of preStrategies) {
+      const decision = decided.find(d => d.name === name)?.decision || null;
+      for (const v of PRE_VARIANTS) {
+        const row = { series: m.series, strategy: name, variant: v.key, close: m.close, ruleFired: !!decision, posted: false, qty: 0, won: null, pnl: 0, stale: 0, firstFillSecs: null };
+        if (v.kind === "taker") {
+          const t = decision ? runMarket(strat, m, path, { size: SIZE, mult, requireDepth: !ASSUME_DEPTH }) : null;
+          if (t) Object.assign(row, { posted: true, qty: t.qty, won: t.won, pnl: t.pnl, firstFillSecs: t.entrySecs });
+        } else if (v.kind === "atRule") {
+          if (decision) {
+            const sim = simulateMaker(w, decision, { mode: v.mode, latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS });
+            if (sim.status === "ok") {
+              row.posted = true; row.won = decision.side === m.result;
+              const t = makerTrade(m, decision, sim, { mult, feeType });
+              if (t) Object.assign(row, { qty: t.qty, pnl: t.pnl, firstFillSecs: sim.firstFillSecs });
+              else if (sim.filled) preStats.unknownFee++;
+            }
+          }
+        } else {
+          const sim = simulatePrePlace(w, strat.entry, { postSecs: v.postSecs, offset: v.offset || 0, mode: v.mode, latencyMs: v.latencyMs ?? LATENCY_MS, cutoffSecs: CUTOFF_SECS, qty: SIZE });
+          if (sim.posts) {
+            row.posted = true; row.won = sim.side === m.result;
+            if (sim.filled) {
+              const mf = kalshiMakerFee(sim.avgPrice, sim.filled, mult, feeType);
+              if (mf == null) preStats.unknownFee++;
+              else Object.assign(row, { qty: sim.filled, pnl: (row.won ? sim.filled : 0) - sim.cost - mf, stale: sim.stale, firstFillSecs: sim.firstFillSecs });
+            }
+          }
+        }
+        preRows.push(row);
+      }
+    }
+  }
   const tickerNeedle = series.map(s => `"${s}-`);
   const keepM = line => (
     ((line.startsWith('{"k":"d"') || line.startsWith('{"k":"tr"') || line.startsWith('{"k":"full"') || line.startsWith('{"k":"final"')) && needles.some(n => line.includes(n)))
@@ -267,5 +342,50 @@ for (const s of series) {
     delaySnaps: { kalshi: kSnaps, polyus: uSnaps } });
 }
 
+if (PREPLACE) printPrePlace();
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
 if (MAKER) printMakerFooter();
+
+// --preplace report: per series and favourite rule, every variant on the
+// same replayed windows.
+function printPrePlace() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  console.log(`\n${"=".repeat(118)}\nPRE-PLACED RESTING ORDERS — the favourite rules, ${SIZE} contracts, cancelled ${CUTOFF_SECS}s before the close`);
+  console.log(`${preStats.windows} windows replayed change by change; left out ${JSON.stringify(preStats.excluded)}${preStats.unknownFee ? `; ::warning::${preStats.unknownFee} fills priced nothing for an unknown fee_type` : ""}`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) for (const [name] of preStrategies) {
+    const rows = preRows.filter(r => r.series === s && r.strategy === name);
+    if (!rows.length) continue;
+    const days = [...new Set(rows.map(r => day(r.close)))].sort();
+    const ruleWindows = new Set(rows.filter(r => r.ruleFired).map(r => r.close)).size;
+    const winCount = new Set(rows.map(r => r.close)).size;
+    console.log(`\n${s} · ${name} — ${winCount} windows over ${days.length} days; the rule fired in ${ruleWindows}`);
+    console.log(`${"variant".padEnd(32)} ${"posted".padStart(6)} ${"filled".padStart(6)} ${"ctrs".padStart(6)} ${"won filled / not".padStart(17)} ${"P&L".padStart(10)} ${"per ctr".padStart(8)} ${"per day".padStart(9)} ${"t(days)".padStart(7)} ${"stale".padStart(6)} ${"fill s".padStart(6)} ${"no rule".padStart(15)}`);
+    for (const v of PRE_VARIANTS) {
+      const R = rows.filter(r => r.variant === v.key), P = R.filter(r => r.posted), F = P.filter(r => r.qty > 0), U = P.filter(r => r.qty === 0);
+      const ctrs = F.reduce((a, r) => a + r.qty, 0), pnl = F.reduce((a, r) => a + r.pnl, 0), stale = F.reduce((a, r) => a + r.stale, 0);
+      const wr = A => A.length ? `${(100 * A.filter(r => r.won).length / A.length).toFixed(1)}%` : "—";
+      const byDay = days.map(d => F.filter(r => day(r.close) === d).reduce((a, r) => a + r.pnl, 0));
+      const mean = byDay.reduce((a, b) => a + b, 0) / days.length;
+      const sd = days.length > 1 ? Math.sqrt(byDay.reduce((a, b) => a + (b - mean) ** 2, 0) / (days.length - 1)) : 0;
+      const fs = F.map(r => r.firstFillSecs).filter(x => x != null).sort((a, b) => a - b);
+      const med = fs.length ? fs[Math.floor(fs.length / 2)].toFixed(0) : "—";
+      const extra = F.filter(r => !r.ruleFired);
+      console.log(`${v.key.padEnd(32)} ${String(P.length).padStart(6)} ${String(F.length).padStart(6)} ${String(ctrs).padStart(6)} ${`${wr(F)} / ${wr(U)}`.padStart(17)} ${$(pnl).padStart(10)} ${(ctrs ? `${(100 * pnl / ctrs >= 0 ? "+" : "")}${(100 * pnl / ctrs).toFixed(2)}c` : "—").padStart(8)} ${$(mean).padStart(9)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(days.length))).toFixed(2) : "—").padStart(7)} ${(ctrs ? `${(100 * stale / ctrs).toFixed(0)}%` : "—").padStart(6)} ${med.padStart(6)} ${(extra.length ? `${extra.length}w ${$(extra.reduce((a, r) => a + r.pnl, 0))}` : "—").padStart(15)}`);
+    }
+  }
+  console.log(`
+READING THE PRE-PLACED TABLE
+- Every row is the same replayed windows. "taker" buys at the ask when the rule fires; "resting at the rule" posts a bid
+  then; "from 60s/90s" keeps a bid on the favourite from that many seconds out while the rule's price band and spread
+  hold, re-pegging to the bid as it moves (and losing queue place each time), cancelled ${CUTOFF_SECS}s before the close.
+- "back" waits behind everything already at its price; "front" is first in line. The truth is between them.
+- "won filled / not": the win rate where the order filled, against where it was posted and never filled. A large gap
+  is the market selling to you right before the favourite loses.
+- "stale": contracts filled while a cancel or move was still on its way — picked off. "250ms/500ms" rows slow the
+  cancel to show what a slower bot pays. "fill s": median seconds before the close at the first fill.
+- "no rule": windows filled where the rule itself never fired, and their P&L — trades the taker version never takes.
+- Makers pay the series' maker fee (none on fee_type quadratic). Fills are inferred from the recorded trade tape; our
+  own order is not in the replayed book and nobody reacts to it. An upper bound like every row here.`);
+}

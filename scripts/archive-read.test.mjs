@@ -1,6 +1,7 @@
 // lib/archiveRead.js fetchRetrying: Storage's 429s and 5xx are retried
 // with backoff (honouring Retry-After); answers are returned at once.
-import { fetchRetrying } from "../lib/archiveRead.js";
+import { fetchRetrying, archiveReader } from "../lib/archiveRead.js";
+import { gzipSync } from "node:zlib";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -33,6 +34,32 @@ console.log("retrying archive requests");
   const s = script([res(429)]);
   const r = await fetchRetrying(s.f, { sleep: async () => {}, tries: 3 });
   ok(r.status === 429 && s.calls() === 3, "and gives up after its tries, returning the last answer for the caller to report");
+}
+
+console.log("a file that stops early");
+{
+  // Two good lines, then bytes that are not gzip, and a body the server
+  // never finishes. gunzip errors (Z_DATA_ERROR) and the read stops early;
+  // the download must be cancelled, not left open and paused — a paused
+  // socket the server later closes makes Node's fetch assert and exit
+  // (it killed a backtest on 2026-10-07).
+  let cancelled = false;
+  const gz = gzipSync(Buffer.from('{"a":1}\n{"a":2}\n'));
+  globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => null },
+    body: new ReadableStream({
+      start(c) { c.enqueue(new Uint8Array(gz)); c.enqueue(new Uint8Array(Buffer.from("not-gzip"))); },
+      pull() { return new Promise(() => {}); },
+      cancel() { cancelled = true; },
+    }) });
+  const logs = [], got = [];
+  const reader = archiveReader({ url: "https://fake", key: "k", log: m => logs.push(m) });
+  const timer = setTimeout(() => { console.error("FAIL eachLine hung"); process.exit(1); }, 5000);
+  await reader.eachLine("m15/x.ndjson.gz", o => got.push(o.a));
+  await new Promise(r => setTimeout(r, 50));
+  clearTimeout(timer);
+  ok(got.join() === "1,2", "keeps what was readable", got.join());
+  ok(logs.some(l => /stopped early/.test(l)), "and says it stopped early", logs.join(" | "));
+  ok(cancelled, "the download is cancelled rather than left open");
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }

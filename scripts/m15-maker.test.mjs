@@ -15,7 +15,7 @@
 //   6. A window with a socket event or sequence gap is not replayed.
 //   7. The trade-side check agrees with a correct mapping and flags an
 //      inverted one.
-import { newTape, feedTape, disrupted, simulateMaker, makerTrade, checkTradeSides, selection } from "../lib/m15Maker.js";
+import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, selection, makeBook } from "../lib/m15Maker.js";
 import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
 
 let failed = 0;
@@ -144,4 +144,88 @@ console.log("trade sides and selection");
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
+console.log("pre-placed orders");
+{
+  const fav = { priceMin: 0.80, priceMax: 0.97, maxSpread: 0.03 };
+  // YES favourite at 84/85. Nothing is posted before postSecs; the first
+  // book change after it (C-89000) wants a YES bid at .84, which lands
+  // 100ms later behind the 100 resting there.
+  const base = [F(C - 120000, [[0.84, 100]], [[0.85, 200]]), D(C - 89000, "b", 0.83, 50)];
+  const fills = [T(C - 80000, "no", 0.84, 60), T(C - 70000, "no", 0.84, 50)];
+  const j = simulatePrePlace(win([...base, ...fills]), fav, { postSecs: 90, mode: "join", qty: 10 });
+  ok(j.filled === 10 && near(j.cost, 8.4) && j.firstFillSecs === 70 && j.side === "yes" && j.stale === 0 && j.posts === 1,
+    "join: behind the 100 resting; 60 then 40 clear it, the next 10 are ours", JSON.stringify(j));
+  const f = simulatePrePlace(win([...base, ...fills]), fav, { postSecs: 90, mode: "front", qty: 10 });
+  ok(f.filled === 10 && f.firstFillSecs === 80, "front: the first seller fills it", JSON.stringify(f));
+  const late = simulatePrePlace(win([...base, ...fills]), fav, { postSecs: 60, mode: "front", qty: 10 });
+  ok(late.filled === 0 && late.posts === 0, "nothing is posted before postSecs, and no book change after it means no order", JSON.stringify(late));
+
+  // The spread widens to 5c at C-60000 (bid .84 pulled, .80 best): the
+  // rule no longer holds and a cancel goes out. A seller hits our .84 at
+  // C-59950, before the cancel lands: a stale fill.
+  const widen = [F(C - 120000, [[0.84, 100], [0.80, 100]], [[0.85, 200]]), D(C - 89000, "b", 0.83, 50),
+    D(C - 60000, "b", 0.84, -100), T(C - 59950, "no", 0.84, 10)];
+  const st = simulatePrePlace(win(widen), fav, { postSecs: 90, mode: "front", latencyMs: 100, qty: 10 });
+  ok(st.filled === 10 && st.stale === 10, "a fill while the cancel is in flight is counted stale", JSON.stringify(st));
+  const quick = simulatePrePlace(win(widen), fav, { postSecs: 90, mode: "front", latencyMs: 0, qty: 10 });
+  ok(quick.filled === 0, "with an instant cancel the same seller finds nothing", JSON.stringify(quick));
+
+  // The touch moves up to 85/86: the order re-pegs to .85 and joins the
+  // back of that level (40 ahead, not the 100 it had at .84). 45 sell at
+  // .85: 5 are ours.
+  const up = [...base, D(C - 75001, "a", 0.85, -200), D(C - 75001, "a", 0.86, 300), D(C - 75000, "b", 0.85, 40),
+    T(C - 70000, "no", 0.85, 45)];
+  const rp = simulatePrePlace(win(up), fav, { postSecs: 90, mode: "join", qty: 10 });
+  ok(rp.filled === 5 && near(rp.cost, 5 * 0.85) && rp.posts === 2, "re-pegging to a new bid joins the back of THAT level", JSON.stringify(rp));
+
+  // NO favourite at YES 10/11: buy NO at .89 = a YES offer at .11, filled by
+  // takers BUYING YES. 4 fill (front); then YES becomes the favourite at
+  // 88/89 — locked to NO, so nothing is bid there and the rest never fills.
+  const noEv = [F(C - 120000, [[0.10, 100]], [[0.11, 100]]), D(C - 89000, "b", 0.09, 10), T(C - 80000, "yes", 0.11, 4),
+    D(C - 79000, "b", 0.88, 50), D(C - 79000, "a", 0.89, 50), D(C - 79000, "a", 0.11, -100), D(C - 79000, "b", 0.10, -100), D(C - 79000, "b", 0.09, -10),
+    T(C - 70000, "no", 0.88, 50)];
+  const nf = simulatePrePlace(win(noEv), fav, { postSecs: 90, mode: "front", qty: 10 });
+  ok(nf.filled === 4 && near(nf.cost, 4 * 0.89) && nf.side === "no", "NO is a YES offer at 1 - p, and the side locks after the first fill", JSON.stringify(nf));
+
+  // Offset 1c: the bid rests at .83, so trades at .84 do not reach it.
+  const off = simulatePrePlace(win([F(C - 120000, [[0.84, 100], [0.83, 500]], [[0.85, 200]]), D(C - 89000, "b", 0.82, 5),
+    T(C - 80000, "no", 0.84, 100), T(C - 70000, "no", 0.83, 10)]), fav, { postSecs: 90, mode: "front", offset: 1, qty: 10 });
+  ok(off.filled === 10 && near(off.cost, 8.3) && off.firstFillSecs === 70, "an order a cent below the bid fills only at that cent", JSON.stringify(off));
+
+  // Outside the band (buy price .98) nothing is posted; nothing fills after the cutoff.
+  ok(simulatePrePlace(win([F(C - 120000, [[0.97, 100]], [[0.98, 100]]), D(C - 89000, "b", 0.96, 5), T(C - 80000, "no", 0.97, 50)]), fav, { postSecs: 90, mode: "front" }).posts === 0,
+    "a favourite priced above the band is not bid");
+  ok(simulatePrePlace(win([...base, T(C - 4000, "no", 0.84, 500)]), fav, { postSecs: 90, mode: "front", cutoffSecs: 5 }).filled === 0, "nothing fills after the cutoff");
+}
+
+console.log("the book's touch, kept incrementally");
+{
+  // 20,000 random changes — adds, partial removals, levels emptied
+  // (including the best), and full snapshots — checked after EVERY one
+  // against a full scan of the levels the book reports.
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const book = makeBook();
+  const price = () => Math.round((0.01 + rnd() * 0.98) * 100) / 100;
+  book.apply({ k: "F", L: [[[0.40, 10], [0.39, 5]], [[0.41, 10], [0.42, 5]]] });
+  let bad = 0, checked = 0, emptiedBest = 0;
+  for (let i = 0; i < 20000; i++) {
+    const r = rnd();
+    if (r < 0.002) book.apply({ k: "F", L: [[[price(), 7]], [[price(), 9]]] });
+    else {
+      const sd = rnd() < 0.5 ? "b" : "a", lv = book.levels(200), side = sd === "b" ? lv.bids : lv.asks;
+      if (side.length && rnd() < 0.45) {
+        const [p, q] = side[rnd() < 0.5 ? 0 : Math.floor(rnd() * side.length)];
+        if (p === side[0][0]) emptiedBest++;
+        book.apply({ k: "D", sd, p, q: -q });                       // empty a level, often the best
+      } else book.apply({ k: "D", sd, p: price(), q: Math.ceil(rnd() * 20) });
+    }
+    const lv = book.levels(1000), t = book.touch();
+    const want = { bid: lv.bids[0]?.[0] ?? null, ask: lv.asks[0]?.[0] ?? null };
+    checked++;
+    if (t.bid !== want.bid || t.ask !== want.ask) bad++;
+  }
+  ok(bad === 0 && checked === 20000 && emptiedBest > 1000, `the incremental touch matches a full scan after all ${checked} changes (best level emptied ${emptiedBest} times)`, `${bad} mismatches`);
+}
+
 console.log("\nall passed");

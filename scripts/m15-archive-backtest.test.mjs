@@ -158,5 +158,38 @@ console.log("across venues (--venues)");
   ok(none.code === 0 && !/ACROSS VENUES/.test(none.text), "no .us archive: nothing to compare, nothing printed", none.text);
 }
 
+console.log("pre-placed resting orders (--preplace)");
+{
+  // The final two minutes: 100 resting on the 0.90 bid, 50 offered at
+  // 0.91. A book change at 59s (a lower bid level appears) is the first
+  // after 60s out, so a pre-placed YES bid goes up at 0.90 then. 105 are
+  // sold into 0.90 at 50s out — BEFORE the rule fires at 30s.
+  //   taker at the rule     10 at 0.91, fee 6c                   -> +$0.84
+  //   resting at the rule   posted at 30s, after the selling: nothing
+  //   from 60s, back        behind 100: 5 at 0.90, no fee        -> +$0.50
+  //   from 60s, front       10 at 0.90                           -> +$1.00
+  //   1c below (0.89)       the selling stops at 0.90: nothing
+  const tape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.90, 100]], [[0.91, 50]]] }),
+    (c, T) => ({ k: "d", t: c - 59000, x: c - 59000, m: T, sd: "b", p: 0.89, q: 10 }),
+    (c, T) => ({ k: "tr", t: c - 50000, x: c - 50000, m: T, yp: 0.90, n: 105, side: "no" }),
+  ];
+  const r = run(["--strategies=fav-final", "--preplace"], tape);
+  const row = name => (r.text.split("\n").find(l => l.startsWith(name)) || "");
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/1 windows replayed change by change/.test(r.text) && /KXBTC15M · fav-final — 1 windows over 1 days; the rule fired in 1/.test(r.text), "replays every settled window and says where the rule fired", r.text);
+  ok(/^taker, at the rule\s+1\s+1\s+10\s+100\.0% \/ —\s+\+\$0\.84\s+\+8\.40c/.test(row("taker, at the rule")), "taker: 10 at 0.91 = +$0.84", row("taker, at the rule"));
+  ok(/\s+1\s+0\s+0\s+— \/ 100\.0%\s+\+\$0\.00/.test(row("resting at the rule, back")), "resting at the rule: posted after the selling, never filled", row("resting at the rule, back"));
+  ok(/\s+1\s+1\s+5\s+100\.0% \/ —\s+\+\$0\.50\s+\+10\.00c/.test(row("from 60s, back ")), "from 60s, back: 5 at 0.90 behind the 100 = +$0.50", row("from 60s, back "));
+  ok(/\s+1\s+1\s+10\s+100\.0% \/ —\s+\+\$1\.00\s+\+10\.00c/.test(row("from 60s, front")), "from 60s, front: 10 at 0.90 = +$1.00", row("from 60s, front"));
+  ok(/\s+1\s+0\s+0\s+— \/ 100\.0%\s+\+\$0\.00/.test(row("from 60s, 1c below, front")), "a cent below: the selling never reaches 0.89", row("from 60s, 1c below, front"));
+  ok(/READING THE PRE-PLACED TABLE/.test(r.text), "and says how to read it", r.text);
+  const plain = run(["--strategies=fav-final"]);
+  ok(!/PRE-PLACED/.test(plain.text), "without --preplace nothing changes", plain.text);
+  const dog = run(["--strategies=dog-late", "--preplace"], tape);
+  ok(dog.code === 2 && /needs a hold-to-settlement favourite rule/.test(dog.text), "refuses a rule set with no favourite rule to pre-place", dog.text);
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");

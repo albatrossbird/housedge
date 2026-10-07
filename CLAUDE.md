@@ -757,6 +757,32 @@ trust fills if they disagree. `scripts/m15-maker.test.mjs` pins the
 model (mutation-checked: side filter, trade-through, latency, queue,
 cutoff); `scripts/m15-archive-backtest.test.mjs` runs it end to end.
 
+**Pre-placed resting orders** (`simulatePrePlace`, `--preplace` on the
+archive backtest, the `preplace` input on its workflow). Instead of
+posting when the rule fires, keep a bid on the favourite from 60 or 90s
+out while the rule's band and spread hold, re-pegging to the bid (losing
+queue place) as it moves, side locked after the first fill, cancelled at
+the cutoff. Every settled window is replayed, not only decided ones, and
+each variant sits beside the rule as a taker and as a decision-time resting
+order on the SAME windows: at the bid or 1c below, back or front of the
+queue, and with the cancel/replace delay at 100/250/500ms. `stale` counts
+contracts filled while a cancel was still in flight — a resting quote
+picked off — and "no rule" the fills in windows the rule never fired.
+
+**Kalshi's order fields, read from the V2 spec 2026-10-07** (`POST
+/portfolio/events/orders`): `post_only` (boolean) exists, and a post-only
+order that would cross is CANCELLED, not repriced — reported as
+`PostOnlyCrossCancel` in `last_update_reason` (REST, `orderbook_delta`)
+and `POST_ONLY_CROSS` on FIX. `self_trade_prevention_type`
+(`taker_at_cross` | `maker`) is REQUIRED on every V2 order. An expiring
+resting order is `good_till_canceled` plus `expiration_time` (Unix
+seconds). Maker fees exist only on fee types `quadratic_with_maker_fees`
+and `quadratic_with_combo_maker_fees`; KXBTC15M and KXGOLD15M were
+`quadratic` with no series or event fee override on record that day.
+The fee schedule itself (kalshi.com/fee-schedule) answers 429 to
+datacenter IPs, so a live maker bot should log every fill's fee and stop
+if a resting fill is ever charged.
+
 **Across venues** (`lib/m15Venues.js`, `--venues` on the archive
 backtest, the `venues` input on its workflow, on in the daily report).
 For the series Polymarket US lists (the Bitcoin 15-minute market; gold
@@ -841,7 +867,16 @@ behind the queue resting there, or first in line — and cancelled the
 moment the acting rule stops buying that side; exits still cross. Fills
 net against an opposite position as $1 pairs, as Kalshi does. An
 unknown field, op or action is REFUSED at compile time; a condition the
-engine cannot read must not quietly read as false. Rule values are
+engine cannot read must not quietly read as false. `--venues` (workflow
+input `venues`) runs the same file on Polymarket US: on the .us book alone
+at .us fees, and on BOTH (`runWindowBoth`) — decided on Kalshi's book,
+each buy walking both ladders cheapest all-in, a .us level only from a
+book under 2s old, contracts held and sold on the venue that bought them
+(a .us holding with no .us book to sell into stays held). Only windows
+.us covered end to end with no socket drop are compared, Kalshi's row
+included. Every taker fill also records what it paid beyond the mid, so
+P&L splits into the move at the mid, spread paid and fees on the SAME
+trades. Rule values are
 rounded to 1e-9 before comparing: 100 x 0.55 - 50 is 5.000000000000007,
 which passed "> $5" a tick early. `scripts/m15-rulebook.test.mjs` and
 `scripts/m15-rulebook-backtest.test.mjs` pin it (mutation-checked).
