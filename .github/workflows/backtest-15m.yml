@@ -46,6 +46,10 @@ on:
         description: "archive and rulebook: also run on Polymarket US's book (Bitcoin), alone and best of both (lib/m15Venues.js, runWindowBoth)"
         type: boolean
         default: false
+      preplace:
+        description: "archive only: keep a resting bid on the favourite from 60/90s out while the rule's band holds, beside the rule as a taker and a decision-time resting order (lib/m15Maker.js simulatePrePlace)"
+        type: boolean
+        default: false
       file:
         description: "rulebook only: the rule file"
         default: "strategies/momentum-ladder.json"
@@ -79,6 +83,7 @@ jobs:
           SOURCE: ${{ github.event.inputs.source || 'poller' }}
           MAKER: ${{ github.event.inputs.maker }}
           VENUES: ${{ github.event.inputs.venues }}
+          PREPLACE: ${{ github.event.inputs.preplace }}
           RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
           if [ "$SOURCE" = "rulebook" ]; then
@@ -93,7 +98,8 @@ jobs:
             SCRIPT=scripts/m15-archive-backtest.mjs
             if [ "$MAKER" = "true" ]; then EXTRA="--maker"; fi
             if [ "$VENUES" = "true" ]; then EXTRA="$EXTRA --venues"; fi
-          elif [ "$MAKER" = "true" ] || [ "$VENUES" = "true" ]; then
+            if [ "$PREPLACE" = "true" ]; then EXTRA="$EXTRA --preplace"; fi
+          elif [ "$MAKER" = "true" ] || [ "$VENUES" = "true" ] || [ "$PREPLACE" = "true" ]; then
             echo "::warning::resting orders and the venue comparison need the WebSocket archives; ignored for source=poller"
           fi
           if [ -n "$STRATEGY" ]; then
