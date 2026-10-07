@@ -15,7 +15,7 @@
 //   6. A window with a socket event or sequence gap is not replayed.
 //   7. The trade-side check agrees with a correct mapping and flags an
 //      inverted one.
-import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, selection } from "../lib/m15Maker.js";
+import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, selection, makeBook } from "../lib/m15Maker.js";
 import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
 
 let failed = 0;
@@ -196,6 +196,36 @@ console.log("pre-placed orders");
   ok(simulatePrePlace(win([F(C - 120000, [[0.97, 100]], [[0.98, 100]]), D(C - 89000, "b", 0.96, 5), T(C - 80000, "no", 0.97, 50)]), fav, { postSecs: 90, mode: "front" }).posts === 0,
     "a favourite priced above the band is not bid");
   ok(simulatePrePlace(win([...base, T(C - 4000, "no", 0.84, 500)]), fav, { postSecs: 90, mode: "front", cutoffSecs: 5 }).filled === 0, "nothing fills after the cutoff");
+}
+
+console.log("the book's touch, kept incrementally");
+{
+  // 20,000 random changes — adds, partial removals, levels emptied
+  // (including the best), and full snapshots — checked after EVERY one
+  // against a full scan of the levels the book reports.
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const book = makeBook();
+  const price = () => Math.round((0.01 + rnd() * 0.98) * 100) / 100;
+  book.apply({ k: "F", L: [[[0.40, 10], [0.39, 5]], [[0.41, 10], [0.42, 5]]] });
+  let bad = 0, checked = 0, emptiedBest = 0;
+  for (let i = 0; i < 20000; i++) {
+    const r = rnd();
+    if (r < 0.002) book.apply({ k: "F", L: [[[price(), 7]], [[price(), 9]]] });
+    else {
+      const sd = rnd() < 0.5 ? "b" : "a", lv = book.levels(200), side = sd === "b" ? lv.bids : lv.asks;
+      if (side.length && rnd() < 0.45) {
+        const [p, q] = side[rnd() < 0.5 ? 0 : Math.floor(rnd() * side.length)];
+        if (p === side[0][0]) emptiedBest++;
+        book.apply({ k: "D", sd, p, q: -q });                       // empty a level, often the best
+      } else book.apply({ k: "D", sd, p: price(), q: Math.ceil(rnd() * 20) });
+    }
+    const lv = book.levels(1000), t = book.touch();
+    const want = { bid: lv.bids[0]?.[0] ?? null, ask: lv.asks[0]?.[0] ?? null };
+    checked++;
+    if (t.bid !== want.bid || t.ask !== want.ask) bad++;
+  }
+  ok(bad === 0 && checked === 20000 && emptiedBest > 1000, `the incremental touch matches a full scan after all ${checked} changes (best level emptied ${emptiedBest} times)`, `${bad} mismatches`);
 }
 
 console.log("\nall passed");
