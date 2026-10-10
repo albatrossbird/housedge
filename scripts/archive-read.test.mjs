@@ -38,28 +38,50 @@ console.log("retrying archive requests");
 
 console.log("a file that stops early");
 {
-  // Two good lines, then bytes that are not gzip, and a body the server
-  // never finishes. gunzip errors (Z_DATA_ERROR) and the read stops early;
-  // the download must be cancelled, not left open and paused — a paused
-  // socket the server later closes makes Node's fetch assert and exit
-  // (it killed a backtest on 2026-10-07).
-  let cancelled = false;
-  const gz = gzipSync(Buffer.from('{"a":1}\n{"a":2}\n'));
-  globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => null },
-    body: new ReadableStream({
-      start(c) { c.enqueue(new Uint8Array(gz)); c.enqueue(new Uint8Array(Buffer.from("not-gzip"))); },
-      pull() { return new Promise(() => {}); },
-      cancel() { cancelled = true; },
-    }) });
+  // A file whose tail is not gzip: what a recorder that crashed mid-write
+  // leaves. gunzip errors (Z_DATA_ERROR) and the read keeps the lines it
+  // decoded before the bad bytes, and says so. (zlib drops its last
+  // unflushed piece with the error: of 5,000 lines, ~4,930 survive.)
+  const body = Array.from({ length: 5000 }, (_, i) => JSON.stringify({ a: i, pad: "x".repeat(50) })).join("\n") + "\n";
+  const gz = gzipSync(Buffer.from(body));
+  for (const [what, file] of [["a corrupt tail", Buffer.concat([gz, Buffer.from("not-gzip")])], ["a truncated file", gz.subarray(0, Math.floor(gz.length * 0.7))]]) {
+    globalThis.fetch = async () => new Response(file);
+    const logs = [], got = [];
+    const reader = archiveReader({ url: "https://fake", key: "k", log: m => logs.push(m) });
+    await reader.eachLine("m15/x.ndjson.gz", o => got.push(o.a));
+    ok(got.length > 3000 && got.every((a, i) => a === i), `${what}: keeps what was readable, in order`, got.length);
+    ok(logs.some(l => /stopped early/.test(l)), `${what}: and says it stopped early`, logs.join(" | "));
+  }
+}
+
+console.log("a download cut off part way");
+{
+  // The connection drops after half the file. Read as it streamed, that
+  // was a short file kept as if it were the hour; it is a failed download,
+  // and fetching again returns the whole thing.
+  const gz = gzipSync(Buffer.from(Array.from({ length: 2000 }, (_, i) => JSON.stringify({ a: i })).join("\n") + "\n"));
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls > 1) return new Response(gz);
+    return new Response(new ReadableStream({
+      start(c) { c.enqueue(new Uint8Array(gz.subarray(0, gz.length >> 1))); c.error(new TypeError("terminated")); },
+    }));
+  };
   const logs = [], got = [];
-  const reader = archiveReader({ url: "https://fake", key: "k", log: m => logs.push(m) });
-  const timer = setTimeout(() => { console.error("FAIL eachLine hung"); process.exit(1); }, 5000);
-  await reader.eachLine("m15/x.ndjson.gz", o => got.push(o.a));
-  await new Promise(r => setTimeout(r, 50));
-  clearTimeout(timer);
-  ok(got.join() === "1,2", "keeps what was readable", got.join());
-  ok(logs.some(l => /stopped early/.test(l)), "and says it stopped early", logs.join(" | "));
-  ok(cancelled, "the download is cancelled rather than left open");
+  const reader = archiveReader({ url: "https://fake", key: "k", log: m => logs.push(m), retry: { sleep: async () => {} } });
+  await reader.eachLine("m15/y.ndjson.gz", o => got.push(o.a));
+  ok(calls === 2, "it is fetched again", calls);
+  ok(got.length === 2000 && got[1999] === 1999, "and every line is read, not the half that arrived", got.length);
+  ok(!logs.some(l => /stopped early/.test(l)), "with no early stop reported", logs.join(" | "));
+}
+{
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } })); };
+  const reader = archiveReader({ url: "https://fake", key: "k", log: () => {}, retry: { sleep: async () => {}, tries: 3 } });
+  let err = null;
+  try { await reader.eachLine("m15/z.ndjson.gz", () => {}); } catch (e) { err = e; }
+  ok(err && /cut off 3 times/.test(err.message) && calls === 3, "a download that never completes fails loudly after its tries", err?.message);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
