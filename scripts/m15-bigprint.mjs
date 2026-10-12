@@ -84,8 +84,11 @@ async function pass(venue, top, keep, toTrade) {
 // Kalshi: yp is YES's price; the taker bought `side`, so paid YES's price
 // or NO's (1 - yp).
 const needles = series.map(s => `"m":"${s}-`);
+const seenK = new Set(); let dupes = 0;
 const kFiles = await pass("kalshi", "m15", line => line.startsWith('{"k":"tr"') && needles.some(n => line.includes(n)), o => {
   if (!wanted.has(o.m) || (o.side !== "yes" && o.side !== "no")) return null;
+  // Kalshi numbers every trade; a restart that wrote one twice counts once.
+  if (o.id) { if (seenK.has(o.id)) { dupes++; return null; } seenK.add(o.id); }
   return [o.m, { x: o.x, n: Number(o.n), side: o.side, paid: o.side === "yes" ? o.yp : 1 - o.yp }];
 });
 // Polymarket US: p is Up's price for every intent (measured 2026-10-04,
@@ -97,7 +100,7 @@ const uFiles = await pass("polyus", "pmus15", line => line.startsWith('{"k":"tr"
   if (!side || !(o.p > 0 && o.p < 1)) return null;
   return [tk, { x: o.x, n: Number(o.q), side, paid: side === "yes" ? o.p : 1 - o.p }];
 });
-console.log(`trades read: ${nTrades.toLocaleString()} in ${nWindows} venue-windows (${kFiles} + ${uFiles} hourly files)${noTime ? `; ${noTime} dropped for no exchange time` : ""}`);
+console.log(`trades read: ${nTrades.toLocaleString()} in ${nWindows} venue-windows (${kFiles} + ${uFiles} hourly files)${noTime ? `; ${noTime} dropped for no exchange time` : ""}${dupes ? `; ${dupes} duplicate Kalshi trade ids dropped` : ""}`);
 
 const c = v => `${v >= 0 ? "+" : ""}${(100 * v).toFixed(2)}c`;
 const fmtBand = ([lo, hi]) => hi === Infinity ? `${lo.toLocaleString()}+` : `${lo.toLocaleString()}-${hi.toLocaleString()}`;

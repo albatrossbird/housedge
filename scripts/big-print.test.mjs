@@ -58,7 +58,10 @@ console.log("aggregation by day");
   const s = summary(agg.get("k"));
   ok(s.n === 3 && s.days === 2 && near(s.edge, (0.1 - 0.9 + 0.1) / 3), "edge is per trade over all trades", s.edge);
   // day means -0.4 and 0.1 -> mean -0.15, sd 0.3536, se 0.25, t -0.6
-  ok(near(s.t, -0.6), "t is over DAY means, not trades", s.t);
+  ok(s.t === null, "two days give no t: under three it is noise", s.t);
+  add(agg, "k", "d3", 0.10, { won: 1, paid: 0.9, ctrs: 10 });
+  // day means -0.4, 0.1, 0.1 -> mean -0.0667, sd 0.2887, se 0.1667, t -0.4
+  ok(near(summary(agg.get("k")).t, -0.4), "t is over DAY means, not trades", summary(agg.get("k")).t);
   ok(summary(agg.get("missing")) === null, "an empty band is null, not zero");
   ok(bandOf(SIZE_BANDS, 99) === 0 && bandOf(SIZE_BANDS, 100) === 1 && bandOf(SIZE_BANDS, 25000) === 3, "size bands");
 }

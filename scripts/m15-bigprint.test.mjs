@@ -18,7 +18,8 @@ const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
 const iso = ms => new Date(ms).toISOString();
 const T = kalshiM15Ticker("btc", close), SLUG = pmusSlug("btc", close - WINDOW_MS);
 const k = [
-  { k: "tr", t: close - 60000, x: close - 60000, m: T, yp: 0.60, n: 5000, side: "yes" },   // the big print
+  { k: "tr", t: close - 60000, x: close - 60000, m: T, yp: 0.60, n: 5000, side: "yes", id: "t1" },   // the big print
+  { k: "tr", t: close - 60000, x: close - 60000, m: T, yp: 0.60, n: 5000, side: "yes", id: "t1" },   // the same trade, written twice
   { k: "tr", t: close - 59000, x: close - 59000, m: T, yp: 0.64, n: 10, side: "yes" },     // +1000ms, same side
   { k: "tr", t: close - 58000, x: close - 58000, m: T, yp: 0.70, n: 10, side: "no" },      // NO paid 0.30
   { k: "tr", t: close - 50000, m: T, yp: 0.5, n: 10, side: "yes" },                        // no exchange time: dropped
@@ -65,6 +66,7 @@ console.log("big prints end to end");
 ok(code === 0, "runs cleanly", text);
 ok(/trades read: 5 in 2 venue-windows/.test(text), "3 Kalshi + 2 .us trades on the one window; the untimed one and the other series are not counted", text);
 ok(/1 dropped for no exchange time/.test(text), "and the untimed trade is counted as dropped", text);
+ok(/1 duplicate Kalshi trade ids dropped/.test(text), "a Kalshi trade written twice counts once", text);
 // Kalshi, the big print followed: own price 1 - 0.60 - 17c/10 = +38.30c;
 // +1000ms the next YES taker paid 0.64: 1 - 0.64 - 17c/10 = +34.30c.
 ok(/KXBTC15M on Kalshi[\s\S]*prints of 1,000\+\s+own price: \+38\.30c \(n1[^|]*\|\s+\+250ms: \+34\.30c[^|]*\|\s+\+1000ms: \+34\.30c/.test(text), "Kalshi: followed at its own price and at the next same-side taker's", text);
