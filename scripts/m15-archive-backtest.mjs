@@ -104,6 +104,10 @@ const paths = new Map();
 let kept = 0, noExchangeTime = 0, bytes = 0;
 const t0 = Date.now();
 let next = 0;
+// --path-check: where do each window's snapshot lines fall, by the
+// exchange time the engine uses (x) and by when they were written (t)?
+const PATH_CHECK = process.argv.includes("--path-check");
+const pc = new Map();   // ticker -> counts
 async function worker() {
   while (next < files.length) {
     const f = files[next++];
@@ -111,6 +115,14 @@ async function worker() {
     await reader.eachLine(f.path, o => {
       const m = wanted.get(o.m);
       if (!m) return;
+      if (PATH_CHECK) {
+        const c = pc.get(o.m) || pc.set(o.m, { x45: 0, x120: 0, t45: 0, t120: 0, staleMax: 0, stale45: 0 }).get(o.m);
+        const xs = Number.isFinite(o.x) ? (m.close - o.x) / 1000 : null, ts = (m.close - o.t) / 1000;
+        if (xs != null && xs > 0 && xs <= 45) c.x45++;
+        if (xs != null && xs > 0 && xs <= 120) c.x120++;
+        if (ts > 0 && ts <= 45) { c.t45++; if (xs != null) { c.staleMax = Math.max(c.staleMax, xs - ts); if (xs > 45) c.stale45++; } }
+        if (ts > 0 && ts <= 120) c.t120++;
+      }
       const r = archiveRow(o, m.close);
       if (!r) { noExchangeTime++; return; }
       if (r.secs > reach || r.secs < -60) return;
@@ -122,6 +134,16 @@ async function worker() {
 }
 // Two at a time: four drew HTTP 429 from Storage on the first real run.
 await Promise.all([worker(), worker()]);
+if (PATH_CHECK) {
+  for (const s of series) {
+    const rows = [...pc].filter(([t]) => wanted.get(t).series === s).map(([, c]) => c);
+    const n = rows.length, q = (a, p) => a.length ? a.sort((x, y) => x - y)[Math.floor(p * (a.length - 1))] : null;
+    const had = k => rows.filter(c => c[k] > 0).length;
+    console.log(`PATH CHECK ${s}: ${n} windows with lines | any line WRITTEN in the last 45s: ${had("t45")}, last 120s: ${had("t120")} | any line STAMPED (x) in the last 45s: ${had("x45")}, last 120s: ${had("x120")}`);
+    console.log(`  windows whose last-45s lines all carry an x older than 45s: ${rows.filter(c => c.t45 > 0 && c.x45 === 0).length}; how stale x gets (x age minus write age), median/p90/max of each window's worst: ${q(rows.map(c => c.staleMax), 0.5)?.toFixed(1)}s / ${q(rows.map(c => c.staleMax), 0.9)?.toFixed(1)}s / ${q(rows.map(c => c.staleMax), 1)?.toFixed(1)}s`);
+  }
+  process.exit(0);
+}
 console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t0) / 1000)}s, ${kept.toLocaleString()} book lines within ${reach}s of a close${noExchangeTime ? `, ${noExchangeTime} dropped for having no exchange timestamp` : ""}`);
 
 // 3. Resting orders (--maker): every decision the taker backtest makes,
