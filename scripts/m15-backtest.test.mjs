@@ -145,6 +145,26 @@ console.log("otherwise: a fallback for the windows the rule skips");
   ok(/entry only/.test(err || ""), "a fallback with its own exit is refused rather than ignored", err);
 }
 
+console.log("alternative: a second rule in the same window, first met wins");
+{
+  // The pilot, or "buy the underdog at 20-50c" in the same 15-45s window.
+  const s = { entry: { side: "favourite", secsMin: 15, secsMax: 45, priceMin: 0.80, priceMax: 0.97, maxSpread: 0.03 },
+              alternative: { entry: { side: "underdog", secsMin: 15, secsMax: 45, priceMin: 0.20, priceMax: 0.50, maxSpread: 0.03 } } };
+  // At 40s the race is close (underdog NO at 0.30); at 30s the favourite is in band. The underdog came first.
+  const a = findEntry(s, mk(), [row(40, 0.69, 0.70), row(30, 0.85, 0.86)], { size: 10 });
+  ok(a && a.alternative === true && a.side === "no" && near(a.price, 0.31) && a.row.secs === 40, "the alternative is met first: it takes the window", JSON.stringify(a));
+  const t = runMarket(s, mk("yes"), [row(40, 0.69, 0.70), row(30, 0.85, 0.86)]);
+  ok(t && t.side === "no" && t.entrySecs === 40, "and the main rule does not also trade it", JSON.stringify(t && { side: t.side, s: t.entrySecs }));
+  const b = findEntry(s, mk(), [row(40, 0.85, 0.86), row(30, 0.69, 0.70)], { size: 10 });
+  ok(b && !b.alternative && b.side === "yes" && b.row.secs === 40, "the main rule met first keeps the window", JSON.stringify(b));
+  // Both met on one row: the main rule wins.
+  const both = { entry: s.entry, alternative: { entry: { side: "no", secsMin: 15, secsMax: 45, priceMin: 0.01, priceMax: 0.99, maxSpread: 0.03 } } };
+  const c = findEntry(both, mk(), [row(40, 0.85, 0.86)], { size: 10 });
+  ok(c && !c.alternative && c.side === "yes", "met on the same row, the main rule wins", JSON.stringify(c));
+  let err = null; try { parseStrategies(JSON.stringify({ x: { entry: s.entry, alternative: { entry: s.alternative.entry, exit: { exitAtSecs: 5 } } } })); } catch (e) { err = e.message; }
+  ok(/entry only/.test(err || ""), "an alternative with its own exit is refused", err);
+}
+
 console.log("archive rows (WebSocket book lines)");
 {
   // Copied from a live k:"b" line, 2026-10-01.
