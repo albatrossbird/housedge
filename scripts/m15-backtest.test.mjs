@@ -1,6 +1,6 @@
 // lib/m15Backtest.js — each rule that decides whether a backtest result
 // means anything, pinned with hand-built paths.
-import { runMarket, summarize, splitHalves, parseStrategies, toPathRow, archiveRow, PRESETS } from "../lib/m15Backtest.js";
+import { runMarket, findEntry, summarize, splitHalves, parseStrategies, toPathRow, archiveRow, PRESETS } from "../lib/m15Backtest.js";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -113,6 +113,36 @@ console.log("strategy maps");
   ok(m.a.entry.side === "yes" && m.b.entry.side === "no", "a map keeps its names");
   let threw = false; try { parseStrategies('{"a":{"exit":{}}}'); } catch { threw = true; }
   ok(threw, "a map entry with no entry rule is refused, not silently skipped");
+}
+
+console.log("otherwise: a fallback for the windows the rule skips");
+{
+  // The pilot rule (favourite 0.80-0.97, 15-45s) with "otherwise buy NO, 5-15s".
+  const s = { entry: { side: "favourite", secsMin: 15, secsMax: 45, priceMin: 0.80, priceMax: 0.97, maxSpread: 0.03 },
+              otherwise: { entry: { side: "no", secsMin: 5, secsMax: 15, priceMin: 0.01, priceMax: 0.99, maxSpread: 0.03 } } };
+  const fired = runMarket(s, mk("yes"), [row(30, 0.85, 0.86), row(10, 0.88, 0.89)]);
+  ok(fired && fired.side === "yes" && fired.entrySecs === 30, "the rule fires: the fallback never acts", JSON.stringify(fired && { side: fired.side, s: fired.entrySecs }));
+  // A close race: the favourite never reaches 0.80, so the rule skips and NO is bought at 10s.
+  const skipped = runMarket(s, mk("no"), [row(30, 0.60, 0.61), row(10, 0.62, 0.63)]);
+  ok(skipped && skipped.side === "no" && skipped.entrySecs === 10 && near(skipped.entry, 0.38), "the rule skips: NO is bought at 1 - YES bid once its window has closed", JSON.stringify(skipped && { side: skipped.side, s: skipped.entrySecs, p: skipped.entry }));
+  // A row at exactly 15s is still the rule's: the fallback may not act on it, even though its own window includes 15.
+  const edge = findEntry(s, mk(), [row(15, 0.60, 0.61)], { size: 10 });
+  ok(edge === null, "a row at the rule's own secsMin belongs to the rule, not the fallback", JSON.stringify(edge));
+  const after = findEntry(s, mk(), [row(14.9, 0.60, 0.61)], { size: 10 });
+  ok(after && after.fallback === true && after.side === "no", "just after it, the fallback acts and says so", JSON.stringify(after));
+  // The paper bot calls a row at a time: a rule that fired on an earlier row must block the fallback.
+  const path = [row(30, 0.85, 0.86), row(10, 0.60, 0.61)];
+  ok(findEntry(s, mk(), path, { size: 10, from: 1 }) === null, "called a row at a time, an earlier firing still blocks the fallback");
+  ok(findEntry({ entry: s.entry }, mk(), path, { size: 10, from: 1 }) === null, "and without a fallback nothing changes");
+}
+{
+  const bad = { entry: { side: "favourite", secsMin: 15, secsMax: 45 }, otherwise: { entry: { side: "no", secsMin: 5, secsMax: 30 } } };
+  let err = null; try { parseStrategies(JSON.stringify({ x: bad })); } catch (e) { err = e.message; }
+  ok(/secsMax must be <= entry.secsMin/.test(err || ""), "a fallback window that overlaps the rule's is refused", err);
+  err = null; try { parseStrategies(JSON.stringify(bad)); } catch (e) { err = e.message; }
+  ok(/secsMax must be <= entry.secsMin/.test(err || ""), "as a single custom strategy too", err);
+  err = null; try { parseStrategies(JSON.stringify({ x: { ...bad, otherwise: { entry: { side: "no", secsMax: 10 }, exit: { exitAtSecs: 5 } } } })); } catch (e) { err = e.message; }
+  ok(/entry only/.test(err || ""), "a fallback with its own exit is refused rather than ignored", err);
 }
 
 console.log("archive rows (WebSocket book lines)");
