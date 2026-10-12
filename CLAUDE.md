@@ -2489,8 +2489,11 @@ not decoration — each one exists because its absence misled someone.
   "auto-refreshes every 60s" — true of the page, not of the numbers.
 - **Volume is three different quantities and is never summed.** Kalshi
   reports CONTRACTS (`volume_fp`), polymarket.com reports US DOLLARS
-  (`volumeNum`), and polymarket.us publishes no volume field on a market
-  at all. Adding them produced a "Total volume" that reconciled with
+  (`volumeNum`), and polymarket.us carries no volume on the MARKET object
+  — but its `/v1/markets/<slug>/bbo` does: `sharesTraded` (all-time) and
+  `openInterest`, cached 30s (checked 2026-10-12; no 24h figure, so a
+  recent rate needs our own snapshots). The site has not read it yet, so
+  the card still shows .us volume as null. Adding them produced a "Total volume" that reconciled with
   neither exchange. Kalshi's is also the TOTAL, not `volume_24h_fp`:
   across KXFED's 98 markets the 24h figure sums to 72k against the
   total's 4.29M, so every market read about sixty times too small.
