@@ -31,6 +31,7 @@ function run(args = ["--strategies=fav-final"], tape = [], usLines = []) {
     // a late-recorded book is still a book from before the close.
     JSON.stringify({ k: "b", t: close + 300000, m: T, b: 0.92, a: 0.93, d: [400, 0, 0, 400, 0, 0], L: [[], []], x: close - 20000 }),
     JSON.stringify({ k: "b", t: close - 15000, m: T, b: 0.5, a: 0.51, d: [400, 0, 0, 400, 0, 0], L: [[], []] }),   // no x: dropped
+    JSON.stringify({ k: "b", t: close - 10000, m: T, b: 0.99, a: null, d: [400, 0, 0, 0, 0, 0], L: [[], []], x: close - 10000 }),   // decided: one-sided
     JSON.stringify({ k: "tr", t: close - 30000, m: T, yp: 0.91, n: 5 }),
     book(30, 0.10, 0.11, { m: "KXETH15M-OTHER-00" }),          // another series: ignored
     ...tape.map(o => JSON.stringify(typeof o === "function" ? o(close, T) : o)),
@@ -79,7 +80,7 @@ console.log("archive backtest end to end");
   // fav-final reaches back 45s, so the line 100s out is not kept: 30s and
   // the late-received 20s one are.
   ok(/2 book lines within 45s/.test(r.text), "keeps this series' timed lines within reach, including one received late", r.text);
-  ok(/1 dropped for having no exchange timestamp/.test(r.text), "and drops, and counts, the one with no exchange timestamp", r.text);
+  ok(/1 dropped for having no exchange timestamp, 1 one-sided books/.test(r.text), "and drops, and counts apart, the one with no exchange timestamp and the one-sided one", r.text);
   ok(/settled markets 1, with an archived book path 1 over 1 days/.test(r.text), "reports what it covered", r.text);
   ok(/fav-final\s+1\s+1\s+100\.0%\s+0\.91/.test(r.text), "the favourite at 0.91 with 30s left is bought, through the shared engine", r.text);
 }

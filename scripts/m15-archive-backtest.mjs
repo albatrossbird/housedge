@@ -101,7 +101,7 @@ const files = await reader.listRange("m15", SINCE_MS - 3600000, Date.now());
 const needles = series.map(s => `"m":"${s}-`);
 const keep = line => line.startsWith('{"k":"b"') && needles.some(n => line.includes(n));
 const paths = new Map();
-let kept = 0, noExchangeTime = 0, bytes = 0;
+let kept = 0, noExchangeTime = 0, oneSided = 0, bytes = 0;
 const t0 = Date.now();
 let next = 0;
 // --path-check: where do each window's snapshot lines fall, by the
@@ -124,7 +124,10 @@ async function worker() {
         if (ts > 0 && ts <= 120) c.t120++;
       }
       const r = archiveRow(o, m.close);
-      if (!r) { noExchangeTime++; return; }
+      // Two different reasons, counted apart: a line from before the
+      // recorder stamped exchange time, and a one-sided book (a decided
+      // window: a bid at 99c and nothing offered), which has no spread.
+      if (!r) { if (!Number.isFinite(o.x)) noExchangeTime++; else oneSided++; return; }
       if (r.secs > reach || r.secs < -60) return;
       if (!paths.has(o.m)) paths.set(o.m, []);
       paths.get(o.m).push(r);
@@ -144,7 +147,7 @@ if (PATH_CHECK) {
   }
   process.exit(0);
 }
-console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t0) / 1000)}s, ${kept.toLocaleString()} book lines within ${reach}s of a close${noExchangeTime ? `, ${noExchangeTime} dropped for having no exchange timestamp` : ""}`);
+console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t0) / 1000)}s, ${kept.toLocaleString()} book lines within ${reach}s of a close${noExchangeTime ? `, ${noExchangeTime} dropped for having no exchange timestamp` : ""}${oneSided ? `, ${oneSided} one-sided books (nothing to buy on one side) left out` : ""}`);
 
 // 3. Resting orders (--maker): every decision the taker backtest makes,
 //    executed instead as a bid at the touch, against the final two
