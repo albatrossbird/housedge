@@ -38,54 +38,18 @@ for (const s of series) {
 console.log(`BIG PRINTS — ${series.join(", ")}, settled since ${SINCE.slice(0, 10)}: ${wanted.size} windows`);
 
 const reader = archiveReader({ url: URL, key: KEY });
-const trades = new Map();   // `${venue}|${ticker}` -> [{ x, n, side, paid }]
-const push = (k, t) => { if (!trades.has(k)) trades.set(k, []); trades.get(k).push(t); };
-let noTime = 0;
-// Kalshi: yp is YES's price; the taker bought `side`, so paid YES's price
-// or NO's (1 - yp).
-const kFiles = await reader.listRange("m15", SINCE_MS - 3600000, Date.now());
-const needles = series.map(s => `"m":"${s}-`);
-let next = 0;
-async function kWorker() {
-  while (next < kFiles.length) {
-    const f = kFiles[next++];
-    await reader.eachLine(f.path, o => {
-      if (!wanted.has(o.m)) return;
-      if (!Number.isFinite(o.x)) { noTime++; return; }
-      const side = o.side === "yes" || o.side === "no" ? o.side : null;
-      if (!side) return;
-      push(`kalshi|${o.m}`, { x: o.x, n: Number(o.n), side, paid: side === "yes" ? o.yp : 1 - o.yp });
-    }, line => line.startsWith('{"k":"tr"') && needles.some(n => line.includes(n)));
-  }
-}
-await Promise.all([kWorker(), kWorker()]);   // two at a time: four drew 429s from Storage
-// Polymarket US: p is Up's price for every intent (measured 2026-10-04,
-// CLAUDE.md), and Up is YES.
-const uFiles = await reader.listRange("pmus15", SINCE_MS - 3600000, Date.now());
-next = 0;
-async function uWorker() {
-  while (next < uFiles.length) {
-    const f = uFiles[next++];
-    await reader.eachLine(f.path, o => {
-      const p = parsePmusSlug(o.m), tk = p && kalshiM15Ticker(p.asset, p.close);
-      if (!tk || !wanted.has(tk)) return;
-      if (!Number.isFinite(o.x)) { noTime++; return; }
-      const side = usTakerSide(o.intent);
-      if (!side || !(o.p > 0 && o.p < 1)) return;
-      push(`polyus|${tk}`, { x: o.x, n: Number(o.q), side, paid: side === "yes" ? o.p : 1 - o.p });
-    }, line => line.startsWith('{"k":"tr"'));
-  }
-}
-await Promise.all([uWorker(), uWorker()]);
-console.log(`trades read: ${[...trades.values()].reduce((s, v) => s + v.length, 0).toLocaleString()} in ${trades.size} venue-windows (${kFiles.length} + ${uFiles.length} hourly files)${noTime ? `; ${noTime} dropped for no exchange time` : ""}`);
-
 const kFee = (p, q) => kalshiTakerFee(p, q, 1), uFee = (p, q) => pmusTakerFee(p, q);
 const groups = new Map();   // `${venue}|${series}` -> { cal, fol }
-for (const [k, ts] of trades) {
-  const [venue, ticker] = k.split("|"), m = wanted.get(ticker), g = `${venue}|${m.series}`;
-  if (!groups.has(g)) groups.set(g, { cal: newAgg(), fol: newAgg(), sizes: [] });
+let nTrades = 0, nWindows = 0, noTime = 0;
+// Each window is reduced as soon as the record has moved a minute past its
+// close and then dropped: holding every trade of a fortnight ran the
+// runner's 4GB heap out on the first attempt.
+function finalize(venue, ticker, ts) {
+  const m = wanted.get(ticker), g = `${venue}|${m.series}`;
+  if (!groups.has(g)) groups.set(g, { cal: newAgg(), fol: newAgg() });
   const G = groups.get(g), day = new Date(m.close).toISOString().slice(0, 10);
   const { rows, follows } = windowRecords(ts, { close: m.close, result: m.result, fee: venue === "kalshi" ? kFee : uFee });
+  nTrades += rows.length; nWindows++;
   for (const r of rows) {
     const sb = bandOf(SIZE_BANDS, r.n), tb = bandOf(TIME_BANDS, r.secs);
     if (sb < 0 || tb < 0) continue;
@@ -96,6 +60,44 @@ for (const [k, ts] of trades) {
     for (const min of FOLLOW_MIN) if (f.n >= min) add(G.fol, `${min}|${f.delay}`, day, f.edge);
   }
 }
+// One pass over a venue's hourly files, in order. `toTrade(o)` returns
+// [ticker, { x, n, side, paid }] or null.
+async function pass(venue, top, keep, toTrade) {
+  const files = await reader.listRange(top, SINCE_MS - 3600000, Date.now());
+  const open = new Map();
+  let watermark = -Infinity;
+  for (const f of files) {
+    await reader.eachLine(f.path, o => {
+      const r = toTrade(o);
+      if (!r) return;
+      const [ticker, t] = r;
+      if (!Number.isFinite(t.x)) { noTime++; return; }
+      if (t.x > watermark) watermark = t.x;
+      if (!open.has(ticker)) open.set(ticker, []);
+      open.get(ticker).push(t);
+    }, keep);
+    for (const [ticker, ts] of open) if (wanted.get(ticker).close + 60000 < watermark) { finalize(venue, ticker, ts); open.delete(ticker); }
+  }
+  for (const [ticker, ts] of open) finalize(venue, ticker, ts);
+  return files.length;
+}
+// Kalshi: yp is YES's price; the taker bought `side`, so paid YES's price
+// or NO's (1 - yp).
+const needles = series.map(s => `"m":"${s}-`);
+const kFiles = await pass("kalshi", "m15", line => line.startsWith('{"k":"tr"') && needles.some(n => line.includes(n)), o => {
+  if (!wanted.has(o.m) || (o.side !== "yes" && o.side !== "no")) return null;
+  return [o.m, { x: o.x, n: Number(o.n), side: o.side, paid: o.side === "yes" ? o.yp : 1 - o.yp }];
+});
+// Polymarket US: p is Up's price for every intent (measured 2026-10-04,
+// CLAUDE.md), and Up is YES.
+const uFiles = await pass("polyus", "pmus15", line => line.startsWith('{"k":"tr"'), o => {
+  const p = parsePmusSlug(o.m), tk = p && kalshiM15Ticker(p.asset, p.close);
+  if (!tk || !wanted.has(tk)) return null;
+  const side = usTakerSide(o.intent);
+  if (!side || !(o.p > 0 && o.p < 1)) return null;
+  return [tk, { x: o.x, n: Number(o.q), side, paid: side === "yes" ? o.p : 1 - o.p }];
+});
+console.log(`trades read: ${nTrades.toLocaleString()} in ${nWindows} venue-windows (${kFiles} + ${uFiles} hourly files)${noTime ? `; ${noTime} dropped for no exchange time` : ""}`);
 
 const c = v => `${v >= 0 ? "+" : ""}${(100 * v).toFixed(2)}c`;
 const fmtBand = ([lo, hi]) => hi === Infinity ? `${lo.toLocaleString()}+` : `${lo.toLocaleString()}-${hi.toLocaleString()}`;
