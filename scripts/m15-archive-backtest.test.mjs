@@ -192,5 +192,31 @@ console.log("pre-placed resting orders (--preplace)");
   ok(dog.code === 2 && /needs a hold-to-settlement favourite rule/.test(dog.text), "refuses a rule set with no favourite rule to pre-place", dog.text);
 }
 
+console.log("every book change (--per-change)");
+{
+  // The final two minutes: 0.80/0.85 (spread too wide for fav-final) until
+  // a 20-lot offer at 0.82 flickers in 40s out and is gone 50ms later; then
+  // 0.90/0.91 from 30s, which is what the once-a-second line shows.
+  //   once a second  YES 10 at 0.91 from 30s; fills at every delay: 10 - 9.10 - 6c   = +$0.84
+  //   every change   YES 10 at 0.82 from 40s; +0ms fills: 10 - 8.20 - 11c (10.33c) = +$1.69
+  //                  +50ms the offer is gone: nothing at 0.82 or better, a miss
+  const tape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.80, 100]], [[0.85, 100]]] }),
+    (c, T) => ({ k: "d", t: c - 40000, x: c - 40000, m: T, sd: "a", p: 0.82, q: 20 }),
+    (c, T) => ({ k: "d", t: c - 39950, x: c - 39950, m: T, sd: "a", p: 0.82, q: -20 }),
+    (c, T) => ({ k: "full", t: c - 30000, x: c - 30000, m: T, L: [[[0.90, 100]], [[0.91, 50]]] }),
+  ];
+  const r = run(["--strategies=fav-final", "--per-change"], tape);
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/1 windows replayed change by change/.test(r.text), "replays the window", r.text);
+  ok(/decided once a second: 1 \| on every change: 1 \| both: 1 \(same side 1\) \| only on a change: 0/.test(r.text), "both ways decide", r.text);
+  ok(/came earlier by \(s\) median 10\.00/.test(r.text), "the change-by-change decision is the flicker, 10s earlier", r.text);
+  ok(/ONCE A SECOND[^\n]*\n[^\n]*\n\s+\+0ms\s+1\s+10\/10 100\.0%\s+100\.0% \/ —\s+\+\$0\.84\s+\+8\.40c/.test(r.text), "once a second: 10 at 0.91 = +$0.84", r.text);
+  ok(/EVERY BOOK CHANGE\n[^\n]*\n\s+\+0ms\s+1\s+10\/10 100\.0%\s+100\.0% \/ —\s+\+\$1\.69/.test(r.text), "every change, on the book it decided on: 10 at 0.82 = +$1.69", r.text);
+  ok(/EVERY BOOK CHANGE\n[^\n]*\n[^\n]*\n\s+\+50ms\s+1\s+0\/10 0\.0%\s+— \/ 100\.0%\s+\+\$0\.00/.test(r.text), "50ms later the flicker is gone: a miss, on a window that won", r.text);
+  ok(/READING THE PER-CHANGE TABLE/.test(r.text), "and says how to read it", r.text);
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");

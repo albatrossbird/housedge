@@ -4,6 +4,9 @@ name: Backtest 15-minute strategies
 # live-book path in Postgres (from 2026-09-26).
 # source=archive: scripts/m15-archive-backtest.mjs over the WebSocket
 # archive's once-a-second book in Storage; one small database read.
+# source=perchange: the archive backtest with --per-change — each rule
+# acting in the final two minutes decided once a second AND on every
+# book change, both filled at +0..1000ms against the real book.
 # source=rulebook: scripts/m15-rulebook-backtest.mjs runs a rule file
 # (strategies/*.json) tick by tick over the same archive, with Coinbase
 # candles for the Bitcoin signals; every action goes up as an artifact.
@@ -16,9 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "poller (15-second path, Postgres), archive (1-second book, Storage), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
+        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
         type: choice
-        options: [poller, archive, rulebook, bigprint]
+        options: [poller, archive, perchange, rulebook, bigprint]
         default: poller
       series:
         description: "Space-separated series"
@@ -100,9 +103,10 @@ jobs:
           fi
           SCRIPT=scripts/m15-backtest.mjs
           EXTRA=""
+          if [ "$SOURCE" = "perchange" ]; then SOURCE=archive; EXTRA="--per-change"; fi
           if [ "$SOURCE" = "archive" ]; then
             SCRIPT=scripts/m15-archive-backtest.mjs
-            if [ "$MAKER" = "true" ]; then EXTRA="--maker"; fi
+            if [ "$MAKER" = "true" ]; then EXTRA="$EXTRA --maker"; fi
             if [ "$VENUES" = "true" ]; then EXTRA="$EXTRA --venues"; fi
             if [ "$PREPLACE" = "true" ]; then EXTRA="$EXTRA --preplace"; fi
           elif [ "$MAKER" = "true" ] || [ "$VENUES" = "true" ] || [ "$PREPLACE" = "true" ]; then

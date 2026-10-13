@@ -819,6 +819,16 @@ it.
 `scripts/m15-venues.test.mjs` (mutation-checked) and the archive
 backtest's end-to-end test pin it.
 
+**Every book change vs once a second** (`--per-change` on the archive
+backtest, workflow `source: perchange`; `changeRows` in
+`lib/m15Maker.js`). The once-a-second path cannot say whether a bot that
+decides on every book change does better, so for rules acting in the
+final two minutes it decides both ways on the same windows — the
+change-by-change path rebuilt from the full-depth record, changes stamped
+with one exchange millisecond taken together — and fills each as a limit
+at the price seen, 0-1000ms later on Kalshi's clock. "Only on a change"
+isolates the windows where only a sub-second book met the rule.
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win

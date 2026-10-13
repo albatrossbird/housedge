@@ -45,9 +45,9 @@ import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
 import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, printVenueSection, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
-import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt } from "../lib/m15Maker.js";
-import { kalshiMakerFee } from "../lib/fees.js";
-import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
+import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt, changeRows } from "../lib/m15Maker.js";
+import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
+import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -61,6 +61,7 @@ const ASSUME_DEPTH = process.argv.includes("--assume-depth");
 const MAKER = process.argv.includes("--maker");
 const VENUES = process.argv.includes("--venues");
 const PREPLACE = process.argv.includes("--preplace");
+const PER_CHANGE = process.argv.includes("--per-change");
 const LATENCY_MS = Number(opt("latency-ms", 100));
 const CUTOFF_SECS = Number(opt("cutoff-secs", 5));
 const SINCE_MS = Date.now() - DAYS * 86400000;
@@ -184,7 +185,14 @@ const preRows = [];
 const preStats = { windows: 0, excluded: {}, unknownFee: 0 };
 const preStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && st.entry?.side === "favourite");
 if (PREPLACE && !preStrategies.length) { console.error("::error::--preplace needs a hold-to-settlement favourite rule (e.g. --strategy=paper)"); process.exit(2); }
-if (MAKER || VENUES || PREPLACE) {
+// --per-change: the rules whose window sits inside the final-two-minutes
+// record, decided on every book change as well as once a second.
+const PC_MAX_SECS = 110;
+const pcStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && (st.entry?.secsMax ?? 900) + (st.entry?.lookbackSecs ?? 0) <= PC_MAX_SECS);
+if (PER_CHANGE && !pcStrategies.length) { console.error(`::error::--per-change needs a hold-to-settlement rule acting within ${PC_MAX_SECS}s of the close (e.g. --strategy=paper)`); process.exit(2); }
+const pcRows = [];
+const pcStats = { windows: 0, excluded: {} };
+if (MAKER || VENUES || PREPLACE || PER_CHANGE) {
   for (const m of wanted.values()) {
     const path = (paths.get(m.ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     if (!path.length) continue;
@@ -193,10 +201,10 @@ if (MAKER || VENUES || PREPLACE) {
       const hit = findEntry(strat, m, path, { size: SIZE, requireDepth: !ASSUME_DEPTH });
       if (!hit) continue;
       if (!decisions.has(m.ticker)) decisions.set(m.ticker, []);
-      decisions.get(m.ticker).push({ name, decision: { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, priceMax: strat.entry.priceMax } });
+      decisions.get(m.ticker).push({ name, decision: { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, price: hit.price, priceMax: strat.entry.priceMax } });
     }
   }
-  const want = new Map([...(PREPLACE ? [...wanted.keys()].filter(t => paths.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
+  const want = new Map([...(PREPLACE || PER_CHANGE ? [...wanted.keys()].filter(t => paths.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
   const tape = newTape();
   const done = new Set();
   const finalize = ticker => {
@@ -208,9 +216,11 @@ if (MAKER || VENUES || PREPLACE) {
     if (why) {
       if (decided.length) makerStats.excluded[why] = (makerStats.excluded[why] || 0) + 1;
       if (PREPLACE) preStats.excluded[why] = (preStats.excluded[why] || 0) + 1;
+      if (PER_CHANGE) pcStats.excluded[why] = (pcStats.excluded[why] || 0) + 1;
       return;
     }
     if (PREPLACE) preplaceWindow(ticker, w, decided);
+    if (PER_CHANGE) perChangeWindow(ticker, w, decided);
     if (!decided.length) return;
     makerStats.windows++;
     const c = checkTradeSides(w);
@@ -223,6 +233,29 @@ if (MAKER || VENUES || PREPLACE) {
       maker.set(`${name}|${ticker}`, { decision, sims });
     }
   };
+  // One replayed window: each rule decided on the once-a-second path (as
+  // everywhere else) and on every book change, and each decision sent as
+  // a limit at the price it saw, filled against the book DELAY ms later.
+  function perChangeWindow(ticker, w, decided) {
+    pcStats.windows++;
+    const m = wanted.get(ticker), rows = changeRows(w, { maxSecs: PC_MAX_SECS + 5 });
+    for (const [name, strat] of pcStrategies) {
+      const sec = decided.find(d => d.name === name)?.decision || null;
+      const hit = findEntry(strat, m, rows, { size: SIZE, requireDepth: !ASSUME_DEPTH });
+      const pc = hit ? { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, price: hit.price } : null;
+      const one = sec ? { ...sec } : null;
+      const times = [one, pc].filter(Boolean).flatMap(d => VENUE_DELAYS_MS.map(x => d.t + x));
+      const snaps = snapshotsAt(w, times, 10);
+      const fills = d => d && Object.fromEntries(VENUE_DELAYS_MS.map(x => {
+        if (d.t + x >= m.close) return [x, 0];
+        const a = availableAt(snaps.get(d.t + x), d.side, d.price);
+        return [x, a == null ? null : Math.min(d.qty, Math.floor(a + 1e-9))];
+      }));
+      if (one) one.fills = fills(one);
+      if (pc) pc.fills = fills(pc);
+      pcRows.push({ series: m.series, strategy: name, close: m.close, result: m.result, one, pc });
+    }
+  }
   // One replayed window through every pre-place variant, for every
   // favourite rule. Rows: { series, strategy, variant, close, posted,
   // qty, won, pnl, stale, firstFillSecs, ruleFired }.
@@ -368,6 +401,7 @@ for (const s of series) {
 }
 
 if (PREPLACE) printPrePlace();
+if (PER_CHANGE) printPerChange();
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
 if (MAKER) printMakerFooter();
 
@@ -413,4 +447,66 @@ READING THE PRE-PLACED TABLE
 - "no rule": windows filled where the rule itself never fired, and their P&L — trades the taker version never takes.
 - Makers pay the series' maker fee (none on fee_type quadratic). Fills are inferred from the recorded trade tape; our
   own order is not in the replayed book and nobody reacts to it. An upper bound like every row here.`);
+}
+
+// --per-change report: the same windows, each rule decided once a second
+// and on every book change, filled at each delay.
+function printPerChange() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const c = (pnl, n) => n ? `${pnl / n >= 0 ? "+" : ""}${(100 * pnl / n).toFixed(2)}c` : "—";
+  console.log(`\n${"=".repeat(118)}\nEVERY BOOK CHANGE vs ONCE A SECOND — ${SIZE} contracts, a limit at the price seen, filled against the book DELAY ms later`);
+  console.log(`${pcStats.windows} windows replayed change by change; left out ${JSON.stringify(pcStats.excluded)}`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) for (const [name] of pcStrategies) {
+    const R = pcRows.filter(r => r.series === s && r.strategy === name);
+    if (!R.length) continue;
+    const mult = fees.get(s)?.mult ?? 1;
+    const days = [...new Set(R.map(r => day(r.close)))].sort();
+    const both = R.filter(r => r.one && r.pc), onlyPc = R.filter(r => r.pc && !r.one), onlyOne = R.filter(r => r.one && !r.pc);
+    const earlier = both.map(r => (r.one.t - r.pc.t) / 1000).sort((a, b) => a - b);
+    const q = p => earlier.length ? earlier[Math.floor(p * (earlier.length - 1))].toFixed(2) : "—";
+    const sameSide = both.filter(r => r.one.side === r.pc.side).length;
+    console.log(`\n${s} · ${name} — ${R.length} windows over ${days.length} days`);
+    console.log(`  decided once a second: ${R.filter(r => r.one).length} | on every change: ${R.filter(r => r.pc).length} | both: ${both.length} (same side ${sameSide}) | only on a change: ${onlyPc.length} | only once a second: ${onlyOne.length}`);
+    console.log(`  where both decided, the change-by-change decision came earlier by (s) median ${q(0.5)}, p10 ${q(0.1)}, p90 ${q(0.9)}`);
+    const table = (label, rows, key) => {
+      console.log(`  ${label}`);
+      console.log(`    ${"delay".padEnd(7)} ${"decided".padStart(7)} ${"filled".padStart(14)} ${"won filled / missed".padStart(20)} ${"P&L".padStart(10)} ${"per ctr".padStart(8)} ${"t(days)".padStart(7)}`);
+      for (const d of VENUE_DELAYS_MS) {
+        const D = rows.map(r => r[key]).filter(x => x && x.fills[d] != null);
+        let want = 0, got = 0, pnl = 0;
+        const byDay = new Map(days.map(x => [x, 0]));
+        const F = [], M = [];
+        for (const r of rows) {
+          const x = r[key];
+          if (!x || x.fills[d] == null) continue;
+          const n = x.fills[d], won = x.side === r.result;
+          want += x.qty; got += n;
+          (n > 0 ? F : M).push(won);
+          if (!n) continue;
+          const p = (won ? n : 0) - n * x.price - kalshiTakerFee(x.price, n, mult);
+          pnl += p; byDay.set(day(r.close), byDay.get(day(r.close)) + p);
+        }
+        const v = [...byDay.values()], mean = v.reduce((a, b) => a + b, 0) / v.length;
+        const sd = v.length > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (v.length - 1)) : 0;
+        const wr = A => A.length ? `${(100 * A.filter(Boolean).length / A.length).toFixed(1)}%` : "—";
+        console.log(`    ${`+${d}ms`.padEnd(7)} ${String(D.length).padStart(7)} ${`${got}/${want} ${want ? (100 * got / want).toFixed(1) : "—"}%`.padStart(14)} ${`${wr(F)} / ${wr(M)}`.padStart(20)} ${$(pnl).padStart(10)} ${c(pnl, got).padStart(8)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(v.length))).toFixed(2) : "—").padStart(7)}`);
+      }
+    };
+    table("ONCE A SECOND (the rule as backtested)", R, "one");
+    table("EVERY BOOK CHANGE", R, "pc");
+    if (onlyPc.length) table(`  of which: the ${onlyPc.length} windows ONLY a change-by-change check traded`, onlyPc, "pc");
+  }
+  console.log(`
+READING THE PER-CHANGE TABLE
+- Same windows for both rows: every settled window whose final two minutes were recorded without a gap. "Once a second"
+  decides on the archived one-a-second books, as every other figure here; "every book change" on the book after each
+  change, changes stamped with the same exchange millisecond taken together.
+- Each decision is a limit buy at the price seen, for the contracts it saw within 1c of the touch, filled against the
+  real book DELAY ms after the change it decided on — counted from the exchange's own timestamp, so the delay must
+  cover the socket, deciding and sending. "+0ms" is the book it decided on: an upper bound nobody gets.
+- "won filled / missed": does the market fill you mostly on the ones that lose? "only on a change": windows where a
+  sub-second book met the rule and no once-a-second book did — transient books, the question this table exists for.
+- An upper bound like every row here: our own order is not in the book, and nobody reacts to it.`);
 }
