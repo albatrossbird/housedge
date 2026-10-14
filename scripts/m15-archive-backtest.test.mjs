@@ -248,6 +248,24 @@ console.log("both venues at once (--per-change --venues, several sizes)");
   ok(/once a second\s+polyus\s+1\s+\+\$4\.69 \(100%\)/.test(block(200)), ".us at 200 buys the 50 within 1c: +$4.69", block(200));
   ok(/once a second\s+both\s+2(\s+\+\$8\.90 \(\d+%\)){4}/.test(block(200)), "both at 200: +$8.90", block(200));
   ok(/READING THE BOTH-VENUES TABLE/.test(r.text), "and says how to read it", r.text);
+
+  // One target routed across both venues, on Kalshi's every-change decision
+  // (YES at 0.82, the 20-lot flicker that is gone 50ms later; .us 0.90 x 50).
+  //   10:  Kalshi's 0.82 is cheaper all-in (.831 vs .906): best of both = Kalshi alone.
+  //        + rest on Kalshi: at +50ms the 0.82 is gone, so 10 at Kalshi's 0.85 touch,
+  //        fee 8.925c -> 9c: 10 - 8.50 - 0.09 = +$1.41
+  //   200: Kalshi 20 at 0.82 (fee 21c) then .us 50 at 0.90 (fee 31.275c -> 31c):
+  //        +0ms 70 - 16.40 - 0.21 - 45.00 - 0.31 = +$8.08, 50 of 70 on .us
+  //        +50ms only the .us 50: +$4.69; with the rest on Kalshi, 20 more at 0.85
+  //        (fee 17.85c -> 18c): +$4.69 + 20 - 17.18 = +$7.51, still 50 of 70 on .us
+  const route = n => (r.text.split(`fav-final · target ${n} contracts`)[1] || "").split("\n\n")[0];
+  const line = (n, v) => (route(n).split("\n").find(l => l.trimStart().startsWith(v)) || "");
+  ok(/\+\$1\.69 \(100%, 0%\)\s+\+\$1\.41 \(100%, 0%\)/.test(line(10, "+ rest on Kalshi")), "10: the rest bought at Kalshi's touch when the flicker is gone: +$1.41", route(10));
+  ok(/\+\$1\.69 \(100%, 0%\)\s+\+\$0\.00 \(0%, 0%\)/.test(line(10, "best of both")), "10: Kalshi is cheaper, so best of both is Kalshi alone", route(10));
+  ok(/\+\$8\.08 \(100%, 71%\)\s+\+\$4\.69 \(71%, 100%\)/.test(line(200, "best of both")), "200: Kalshi's 20 then .us's 50: +$8.08, then only .us fills", route(200));
+  ok(/\+\$8\.08 \(100%, 71%\)\s+\+\$7\.51 \(100%, 71%\)/.test(line(200, "+ rest on Kalshi")), "200: with the rest on Kalshi's touch: +$7.51", route(200));
+  ok(/\+\$8\.08 \(100%, 71%\)\s+\+\$4\.69 \(71%, 100%\)/.test(line(200, "Kalshi + overflow")), "200: overflow sends .us only what Kalshi's book did not show", route(200));
+  ok(/\+\$3\.39 \(100%, 0%\)\s+\+\$0\.00 \(0%, 0%\)/.test(line(200, "kalshi alone")), "200: Kalshi alone has only the 20", route(200));
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }

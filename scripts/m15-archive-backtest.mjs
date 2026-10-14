@@ -47,7 +47,7 @@ import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
 import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, printVenueSection, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
 import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt, changeRows } from "../lib/m15Maker.js";
 import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
-import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
+import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, bestOfBoth, delayedFill, latestAtOrBefore, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { pmusTakerFee } from "../lib/venueCompare.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
@@ -196,12 +196,51 @@ const pcStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && (
 if (PER_CHANGE && !pcStrategies.length) { console.error(`::error::--per-change needs a hold-to-settlement rule acting within ${PC_MAX_SECS}s of the close (e.g. --strategy=paper)`); process.exit(2); }
 const pcRows = [];
 const pcStats = { windows: 0, excluded: {}, usWindows: 0, usExcluded: {} };
+// --per-change --venues: each Kalshi change-by-change decision routed
+// across both venues for ONE target size (the same money at risk as Kalshi
+// alone), every leg a limit at the price seen, filled DELAY ms later.
+//   kalshi alone        what the pilot does
+//   best of both        cheapest all-in first, spilling at depth
+//   + rest on Kalshi    then whatever did not fill, at Kalshi's touch
+//   Kalshi + overflow   Kalshi for what its book showed, .us for the rest
+const routeRows = [];
+function routeAcrossVenues(m, ws, usAll) {
+  const mult = fees.get(m.series)?.mult ?? 1;
+  const kFee = (p, n) => kalshiTakerFee(p, n, mult), uFee = (p, n) => pmusTakerFee(p, n), feeBy = { kalshi: kFee, polyus: uFee };
+  for (const r of pcRows) {
+    if (r.venue !== "kalshi" || r.ticker !== m.ticker || !r.pc?.books) continue;
+    const d0 = r.pc, strat = Object.fromEntries(pcStrategies)[r.strategy], priceMax = strat.entry?.priceMax ?? 1;
+    const uBooks = snapshotsAt(ws, VENUE_DELAYS_MS.map(x => d0.t + x), 10);
+    const books = x => ({ kalshi: d0.books[x], polyus: d0.t + x >= m.close ? CLOSED_BOOK : uBooks.get(d0.t + x) });
+    const kLeg = [{ venue: "kalshi", price: d0.price, qty: d0.qty }];
+    const bob = bestOfBoth({ side: d0.side, t: d0.t, size: r.size, priceMax, requireDepth: !ASSUME_DEPTH, kRow: d0.row, uRows: usAll, kFee, uFee }).legs;
+    // Overflow: the rest of the target on .us, at its touch, inside the band.
+    const over = [...kLeg];
+    const uRow = latestAtOrBefore(usAll, d0.t), left = r.size - d0.qty;
+    if (left > 0 && uRow && d0.t - uRow.t <= 2000) {
+      const price = d0.side === "yes" ? uRow.ask : Math.round((1 - uRow.bid) * 10000) / 10000, depth = d0.side === "yes" ? uRow.askD1 : uRow.bidD1;
+      const n = Math.min(left, Math.floor(depth ?? 0));
+      if (price > 0 && price <= priceMax + 1e-9 && n >= 1) over.push({ venue: "polyus", price, qty: n });
+    }
+    const won = d0.side === m.result, out = {};
+    let complete = true;
+    for (const [v, legs, fallback] of [["kalshi alone", kLeg, false], ["best of both", bob, false], ["+ rest on Kalshi", bob, true], ["Kalshi + overflow", over, false]]) {
+      out[v] = {};
+      for (const x of VENUE_DELAYS_MS) {
+        const f = legs.length ? delayedFill({ legs, side: d0.side, won, snaps: books(x), priceMax, fees: feeBy, fallback }) : { qty: 0, wanted: 0, pnl: 0, legFills: {} };
+        if (!f) { complete = false; break; }
+        out[v][x] = { qty: f.qty, wanted: f.wanted, pnl: f.pnl, us: f.legFills?.polyus?.got ?? 0 };
+      }
+    }
+    if (complete) routeRows.push({ series: m.series, strategy: r.strategy, size: r.size, close: m.close, ticker: m.ticker, out });
+  }
+}
 // One venue's window: each rule at each size decided on the once-a-second
 // rows and on every book change, and each decision sent as a limit at the
 // price it saw, filled against that venue's book DELAY ms later.
 function perChangeVenue(venue, m, w, oneRows, changeRowsList) {
   for (const [name, strat] of pcStrategies) for (const size of SIZES) {
-    const dec = rows => { const h = findEntry(strat, m, rows, { size, requireDepth: !ASSUME_DEPTH }); return h ? { t: h.row.t, secs: h.row.secs, side: h.side, qty: h.qty, price: h.price } : null; };
+    const dec = rows => { const h = findEntry(strat, m, rows, { size, requireDepth: !ASSUME_DEPTH }); return h ? { t: h.row.t, secs: h.row.secs, side: h.side, qty: h.qty, price: h.price, row: h.row } : null; };
     const one = dec(oneRows), pc = dec(changeRowsList);
     const snaps = snapshotsAt(w, [one, pc].filter(Boolean).flatMap(d => VENUE_DELAYS_MS.map(x => d.t + x)), 10);
     const fills = d => d && Object.fromEntries(VENUE_DELAYS_MS.map(x => {
@@ -211,6 +250,9 @@ function perChangeVenue(venue, m, w, oneRows, changeRowsList) {
     }));
     if (one) one.fills = fills(one);
     if (pc) pc.fills = fills(pc);
+    // The books at each delay, kept for routing the Kalshi decision across
+    // both venues once the .us record has been read (printRouting).
+    if (pc && venue === "kalshi") pc.books = Object.fromEntries(VENUE_DELAYS_MS.map(x => [x, pc.t + x >= m.close ? CLOSED_BOOK : snaps.get(pc.t + x)]));
     pcRows.push({ venue, size, series: m.series, ticker: m.ticker, strategy: name, close: m.close, result: m.result, one, pc });
   }
 }
@@ -355,7 +397,9 @@ if (VENUES) {
       else {
         pcStats.usWindows++;
         const live = r => r.t < m.close && r.secs > 0;
-        perChangeVenue("polyus", m, resolveUsWindow(w, "long"), rows.filter(live), all.filter(r => live(r) && r.secs <= PC_MAX_SECS + 5));
+        const ws = resolveUsWindow(w, "long");
+        perChangeVenue("polyus", m, ws, rows.filter(live), all.filter(r => live(r) && r.secs <= PC_MAX_SECS + 5));
+        routeAcrossVenues(m, ws, all);
       }
     }
     if (!MAKER || !rows.length) return;
@@ -421,7 +465,7 @@ for (const s of series) {
 
 if (PREPLACE) printPrePlace();
 if (PER_CHANGE) printPerChange();
-if (PER_CHANGE && VENUES) printBothVenues();
+if (PER_CHANGE && VENUES) { printBothVenues(); printRouting(); }
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
 if (MAKER) printMakerFooter();
 
@@ -594,4 +638,46 @@ READING THE BOTH-VENUES TABLE
   same side — which they usually do, because it is the same market. It is not diversification.
 - Size is the most a decision buys: what sits within 1c of the touch, capped at the size, filled as a limit at the
   price seen against the book DELAY ms later. An upper bound: our order is not in the replayed book.`);
+}
+
+// --per-change --venues: one target size routed across the two venues.
+function printRouting() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const SHOW = [0, 50, 100, 250, 500];
+  const V = ["kalshi alone", "best of both", "+ rest on Kalshi", "Kalshi + overflow"];
+  console.log(`\n${"=".repeat(118)}\nONE TARGET SIZE ACROSS BOTH VENUES — Kalshi's every-change decision, the same money at risk as Kalshi alone`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) for (const [name] of pcStrategies) for (const size of SIZES) {
+    const R = routeRows.filter(r => r.series === s && r.strategy === name && r.size === size);
+    if (!R.length) continue;
+    const days = [...new Set(R.map(r => day(r.close)))].sort();
+    console.log(`\n${s} · ${name} · target ${size} contracts — ${R.length} decisions both venues' books cover, over ${days.length} days`);
+    console.log(`  ${"routing".padEnd(18)} ${SHOW.map(d => `${`+${d}ms P&L (filled, on .us)`.padStart(30)}`).join("")} ${"per ctr @100".padStart(13)} ${"t @100".padStart(7)}`);
+    for (const v of V) {
+      let per100 = "—", t100 = "—";
+      const cells = SHOW.map(d => {
+        let q = 0, w = 0, pnl = 0, us = 0;
+        const byDay = new Map(days.map(x => [x, 0]));
+        for (const r of R) { const o = r.out[v][d]; q += o.qty; w += o.wanted; pnl += o.pnl; us += o.us; byDay.set(day(r.close), byDay.get(day(r.close)) + o.pnl); }
+        if (d === 100) {
+          const vals = [...byDay.values()], mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+          const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1)) : 0;
+          per100 = q ? `${pnl / q >= 0 ? "+" : ""}${(100 * pnl / q).toFixed(2)}c` : "—";
+          t100 = sd > 1e-12 ? (mean / (sd / Math.sqrt(vals.length))).toFixed(2) : "—";
+        }
+        return `${$(pnl)} (${w ? (100 * q / w).toFixed(0) : "—"}%, ${q ? (100 * us / q).toFixed(0) : 0}%)`.padStart(30);
+      });
+      console.log(`  ${v.padEnd(18)} ${cells.join("")} ${per100.padStart(13)} ${t100.padStart(7)}`);
+    }
+  }
+  console.log(`
+READING THE ROUTING TABLE
+- Every row is the SAME Kalshi decisions at the SAME target size, so the same most-at-risk per window: only where the
+  contracts come from differs. "filled" is contracts filled over the target the book showed; "on .us" is the share
+  of filled contracts bought on Polymarket US.
+- "best of both" takes the cheaper venue all-in first and spills to the other at its depth; "+ rest on Kalshi" then
+  buys what did not fill at Kalshi's touch when the orders land, inside the rule's price cap; "Kalshi + overflow"
+  sends Kalshi what its book showed and only the remainder to .us. A .us book over 2s old is not used.
+- Limits at the prices seen, filled against each venue's book DELAY ms after the decision; upper bounds as everywhere.`);
 }
