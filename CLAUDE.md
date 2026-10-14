@@ -2044,9 +2044,18 @@ confident wrong answers. Both are stored per market row.
 
 - **A missing `fee_multiplier` means 1, not 0.** Defaulting it to zero
   prices every Kalshi leg as free and manufactures edges.
-- **Kalshi rounds its fee up to the cent per ORDER.** Charging that
-  against a single contract bills 1.00¢ where the rate is 0.875¢ — 14%
-  high — so per-contract cost amortises over `DEFAULT_ORDER_SIZE`.
+- **Kalshi rounds its fee UP per ORDER, to the ACCOUNT's precision** —
+  $0.01 for an FCM-cleared account, **$0.0001 for a direct member**
+  (Kalshi's "Fee Rounding" page: per-fill fee ceil'd to $0.000001, the
+  balance aligned to the account's precision, overpayment rebated per
+  order). Measured on the trader's direct account 2026-10-14: six
+  one-contract KXBTC15M fills charged exactly ceil($0.0001) of the
+  formula (0.005733 -> 0.0058), where whole-cent rounding charged 1c on
+  every one. `kalshiTakerFee` defaults to $0.0001 (every m15 backtest, the
+  paper bot, the trader's vendored copy); the SITE passes
+  `KALSHI_FCM_FEE_PRECISION` and still prices the cent, as its `/fees`
+  copy says — true for FCM accounts, pessimistic for direct ones.
+  `scripts/kalshi-fee.test.mjs` pins the six fills.
 - **Polymarket quotes one book per market, on outcome 0.** The other
   outcome is its exact complement in a binary CLOB, so it is derived at
   read time (`complementBook`) using the same identifier-based outcome

@@ -69,7 +69,8 @@ console.log("fills");
   ok(walk(row, "buy_yes", 200, { priceCeiling: 0.505 }).qty === 100, "the price ceiling stops the walk");
   ok(near(walk(row, "sell_no", 10).cash, 10 * 0.50), "selling NO lifts YES offers and receives 1 - p");
   ok(kalshiOrderFee([[0.5, 100]]) === 1.75, "fee: 100 at 50c is $1.75, not $1.76", String(kalshiOrderFee([[0.5, 100]])));
-  ok(kalshiOrderFee([[0.5, 100], [0.9, 10]]) === Math.ceil((1.75 + 0.063) * 100) / 100, "fee: summed over the order's fills, rounded up once");
+  ok(kalshiOrderFee([[0.5, 100], [0.9, 10]]) === 1.813, "fee: summed over the order's fills (1.75 + 0.063), rounded up once to $0.0001");
+  ok(kalshiOrderFee([[0.91, 1], [0.964, 1]]) === 0.0082, "fee: 0.005733 + 0.002429 = 0.008162 -> 0.0082 once, not 0.0058 + 0.0025 = 0.0083 per fill");
 }
 
 console.log("a window");
@@ -225,11 +226,12 @@ console.log("two venues");
     { t: open + 19500, bid: 0.58, ask: 0.59, bids: [[0.58, 1000]], asks: [[0.59, 1000]] },
   ];
 
-  // Kalshi alone, as before: 60 @ .50 + 40 @ .51 = $50.40, fee $1.75; out at
-  // the .60 bid for $60.00, fee $1.68: +$6.17. Paid over the mid: $0.90 in
+  // Kalshi alone, as before: 60 @ .50 + 40 @ .51 = $50.40, fee .07 x 24.996 =
+  // 1.74972 -> $1.7498 (up to $0.0001); out at the .60 bid for $60.00, fee
+  // $1.68: +$6.1702. Paid over the mid: $0.90 in
   // (50.40 - 100 x .495) and $0.50 out (100 x .605 - 60).
   const k = runWindow(b, m, K, sig);
-  ok(near(k.pnl, 6.17, 1e-6) && near(k.fees, 3.43, 1e-6), "Kalshi alone: in at the asks, out at the bid, both fees", `${k.pnl} ${k.fees}`);
+  ok(near(k.pnl, 6.1702, 1e-6) && near(k.fees, 3.4298, 1e-6), "Kalshi alone: in at the asks, out at the bid, both fees", `${k.pnl} ${k.fees}`);
   ok(near(k.slip, 1.40, 1e-6), "slip: what the fills paid beyond the mid", `${k.slip}`);
   const s = summarize([k]);
   ok(near(s.grossAtMid, 11.00, 1e-6), "P&L + slip + fees is the move at the mid: 100 x (.605 - .495)", `${s.grossAtMid}`);
@@ -247,14 +249,14 @@ console.log("two venues");
 
   // Best of both. All-in a contract: .us .49 = .5074, Kalshi .50 = .5175,
   // Kalshi .51 = .5275, .us .52 = .5373. So 30 on .us, then 60 + 10 on Kalshi.
-  // Cost $14.70 + $35.10, fees .52 + 1.23 (.07 x (60 x .25 + 10 x .2499) = 1.2249).
-  // Kalshi alone would have paid $52.15 all-in for the same 100: saved $0.60.
-  // Out: Kalshi's 70 at .60 ($42.00, fee 1.18), the .us 30 at ITS .58 bid
-  // ($17.40, fee .5079 -> .51). -51.55 + 40.82 + 16.89 = +$6.16.
+  // Cost $14.70 + $35.10, fees .52 + 1.2250 (.07 x (60 x .25 + 10 x .2499) =
+  // 1.22493). Kalshi alone would have paid $52.1498 all-in for the same 100:
+  // saved $0.6048. Out: Kalshi's 70 at .60 ($42.00, fee 1.176), the .us 30 at
+  // ITS .58 bid ($17.40, fee .5079 -> .51). -51.545 + 40.824 + 16.89 = +$6.169.
   const both = runWindowBoth(b, m, K, U, sig);
   ok(both.bought.polyus === 30 && both.bought.kalshi === 70, "the cheaper venue first, spilling to the other", JSON.stringify(both.bought));
-  ok(near(both.routing.saved, 0.60, 1e-6) && both.routing.usedUs === 1 && both.routing.compared === 1, "what routing saved against Kalshi alone at the same moment", JSON.stringify(both.routing));
-  ok(near(both.pnl, 6.16, 1e-6), "each venue's holding is sold on its own book, at its own fee", `${both.pnl}`);
+  ok(near(both.routing.saved, 0.6048, 1e-6) && both.routing.usedUs === 1 && both.routing.compared === 1, "what routing saved against Kalshi alone at the same moment", JSON.stringify(both.routing));
+  ok(near(both.pnl, 6.169, 1e-6), "each venue's holding is sold on its own book, at its own fee", `${both.pnl}`);
   // Slip, each venue against its own mid: in .15 (.us, mid .485) + .45 (Kalshi,
   // .495); out .35 (Kalshi, .605) + .15 (.us, .585).
   ok(near(both.slip, 1.10, 1e-6), "slip counted on each venue against its own mid", `${both.slip}`);
@@ -266,14 +268,14 @@ console.log("two venues");
   // No .us book at the exit (none within 12s): Kalshi's 70 sell, the .us 30
   // cannot and are held to settlement, paying $30. Marks fall back to
   // Kalshi's touch: at the 30s tick Kalshi's 70 are +$6.90 and the .us 30
-  // +$3.30 at Kalshi's .60. -51.55 + 40.82 + 30 = +$19.27.
+  // +$3.30 at Kalshi's .60. -51.545 + 40.824 + 30 = +$19.279.
   const K3 = [K[0], { ...K[1], t: open + 25000 }];
   const stuck = runWindowBoth(b, m, K3, [U[0]], sig);
-  ok(stuck.unsoldUs === 30 && stuck.heldAtClose === 30 && near(stuck.pnl, 19.27, 1e-6), "a .us holding with no .us book to sell into stays held", `${stuck.unsoldUs} ${stuck.heldAtClose} ${stuck.pnl}`);
+  ok(stuck.unsoldUs === 30 && stuck.heldAtClose === 30 && near(stuck.pnl, 19.279, 1e-6), "a .us holding with no .us book to sell into stays held", `${stuck.unsoldUs} ${stuck.heldAtClose} ${stuck.pnl}`);
 
   // All 100 on .us at .49 ($49.00, fee .0695 x 100 x .2499 = 1.7368 -> 1.74).
-  // Kalshi alone: $50.40 + $1.75. Saved $52.15 - $50.74 = $1.41 — $1.40 of
-  // price and a cent of fee, so a saving that ignored fees reads $1.40.
+  // Kalshi alone: $50.40 + $1.7498. Saved $52.1498 - $50.74 = $1.4098 — $1.40
+  // of price and ~a cent of fee, so a saving that ignored fees reads $1.40.
   // At the 20s tick the .us holding marks at ITS .52 bid: $52.00 - $49.00 =
   // $3.00, not over $3, so no exit there — marked at Kalshi's .60 it would be
   // $11.00 and sell. It sells at the 30s tick, on .us's .55 bid.
@@ -284,7 +286,7 @@ console.log("two venues");
   ];
   const K2 = [...K, { ...K[1], t: open + 28000 }];
   const allUs = runWindowBoth(b, m, K2, U2, sig);
-  ok(allUs.bought.polyus === 100 && near(allUs.routing.saved, 1.41, 1e-6), "the saving counts both venues' fees", `${JSON.stringify(allUs.bought)} ${allUs.routing.saved}`);
+  ok(allUs.bought.polyus === 100 && near(allUs.routing.saved, 1.4098, 1e-6), "the saving counts both venues' fees", `${JSON.stringify(allUs.bought)} ${allUs.routing.saved}`);
   const exitAt = allUs.actions.find(a => a.action === "sell_all" && a.qty > 0);
   ok(exitAt && exitAt.t === open + 30000, "a .us holding is marked on the .us book, not Kalshi's", exitAt ? `${(exitAt.t - open) / 1000}s` : "no exit");
 

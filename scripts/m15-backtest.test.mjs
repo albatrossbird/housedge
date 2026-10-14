@@ -15,11 +15,12 @@ console.log("pricing and fees");
 {
   const s = { entry: { side: "yes", secsMin: 60, secsMax: 120 } };
   const t = runMarket(s, mk("yes"), [row(90, 0.79, 0.80)], { size: 10 });
-  // 10 x 0.07 x 0.8 x 0.2 = 0.112 -> rounded UP to 0.12 for the order.
-  ok(t && t.entry === 0.80 && t.entryFee === 0.12, "YES is bought at the ask; the fee rounds up per order", JSON.stringify(t));
-  ok(near(t.pnl, 10 * 0.20 - 0.12), "a win pays $1 a contract, settlement is free", t.pnl);
+  // 10 x 0.07 x 0.8 x 0.2 = 0.112, rounded UP to $0.0001 for the order
+  // (a direct account; the trader measured it 2026-10-14). Exact here.
+  ok(t && t.entry === 0.80 && t.entryFee === 0.112, "YES is bought at the ask; the fee rounds up per order", JSON.stringify(t));
+  ok(near(t.pnl, 10 * 0.20 - 0.112), "a win pays $1 a contract, settlement is free", t.pnl);
   const l = runMarket(s, mk("no"), [row(90, 0.79, 0.80)], { size: 10 });
-  ok(near(l.pnl, -8.00 - 0.12), "a loss costs the stake and the fee", l.pnl);
+  ok(near(l.pnl, -8.00 - 0.112), "a loss costs the stake and the fee", l.pnl);
   const n = runMarket({ entry: { side: "no", secsMin: 60, secsMax: 120 } }, mk("no"), [row(90, 0.30, 0.32)], { size: 10 });
   ok(n && near(n.entry, 0.70), "NO is bought at 1 - YES bid (hitting the YES bid queue)", JSON.stringify(n));
 }
@@ -69,7 +70,7 @@ console.log("exits");
   const stop = runMarket(s, mk("yes"), [row(360, 0.69, 0.70), row(330, 0.60, 0.61), row(300, 0.54, 0.55), row(30, 0.98, 0.99)], { size: 10 });
   ok(stop.exits[0]?.why === "stop" && near(stop.exits[0].price, 0.54) && stop.held === 0,
     "stop-loss sells at the BID once it is 15c under entry — and the later recovery does not count", JSON.stringify(stop.exits));
-  const fee = x => Math.ceil(10 * 0.07 * x * (1 - x) * 100) / 100;
+  const fee = x => Math.ceil(10 * 0.07 * x * (1 - x) * 10000 - 1e-9) / 10000;
   ok(near(stop.pnl, -7.0 - fee(0.70) + 5.4 - fee(0.54)), "both fees are paid", stop.pnl);
   const tgt = runMarket(s, mk("no"), [row(360, 0.69, 0.70), row(330, 0.80, 0.81)], { size: 10 });
   ok(tgt.exits[0]?.why === "target" && near(tgt.pnl, 10 * 0.10 - fee(0.70) - fee(0.80)), "target banks the gain even if the market later settles against", tgt.pnl);

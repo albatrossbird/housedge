@@ -67,9 +67,10 @@ ok(code === 0, "runs cleanly", text);
 ok(/trades read: 5 in 2 venue-windows/.test(text), "3 Kalshi + 2 .us trades on the one window; the untimed one and the other series are not counted", text);
 ok(/1 dropped for no exchange time/.test(text), "and the untimed trade is counted as dropped", text);
 ok(/1 duplicate Kalshi trade ids dropped/.test(text), "a Kalshi trade written twice counts once", text);
-// Kalshi, the big print followed: own price 1 - 0.60 - 17c/10 = +38.30c;
-// +1000ms the next YES taker paid 0.64: 1 - 0.64 - 17c/10 = +34.30c.
-ok(/KXBTC15M on Kalshi[\s\S]*prints of 1,000\+\s+own price: \+38\.30c \(n1[^|]*\|\s+\+250ms: \+34\.30c[^|]*\|\s+\+1000ms: \+34\.30c/.test(text), "Kalshi: followed at its own price and at the next same-side taker's", text);
+// Kalshi, the big print followed: own price 1 - 0.60 - 16.8c/10 = +38.32c;
+// +1000ms the next YES taker paid 0.64: fee 16.128c -> 16.13c ($0.0001 up),
+// 1 - 0.64 - 1.613c = +34.39c.
+ok(/KXBTC15M on Kalshi[\s\S]*prints of 1,000\+\s+own price: \+38\.32c \(n1[^|]*\|\s+\+250ms: \+34\.39c[^|]*\|\s+\+1000ms: \+34\.39c/.test(text), "Kalshi: followed at its own price and at the next same-side taker's", text);
 // The NO taker paid 1 - 0.70 = 0.30 and lost: in the 1-99 band with the 10-lot YES.
 ok(/KXBTC15M on Kalshi[\s\S]*1-99\s+2\s+47\.0%\s+50\.0%/.test(text), "Kalshi: a NO taker paid 1 - yp (0.64 and 0.30 average 47.0%), one of the two won", text);
 // .us: BUY_LONG at 0.55 is Up (YES) and won; fee 0.0695 x 10 x 0.2475 = 17.2c -> 17c half-even: 1 - 0.55 - 0.017.

@@ -74,7 +74,7 @@ console.log("the book holds: the decision fills");
   ok(r.code === 0 && r.rows.length === 1, "one decision for the window, and a clean exit", r.text);
   ok(t && t.side === "yes" && t.decided_price === 0.91 && t.decided_secs <= 6 && t.decided_secs > 0, "buys the favourite at the offer it saw, inside the rule's window", JSON.stringify(t));
   ok(t && t.qty_filled === 10 && t.fill_price === 0.91, "a second read still offering 0.91 fills all ten", JSON.stringify(t));
-  ok(t && t.result === "yes" && Math.abs(t.pnl - (10 * 0.09 - 0.06)) < 1e-9, "settles from Kalshi's result, after the taker fee", JSON.stringify(t));
+  ok(t && t.result === "yes" && Math.abs(t.pnl - (10 * 0.09 - 0.0574)) < 1e-9 && t.fee === 0.0574, "settles from Kalshi's result, after the taker fee (10 x 0.07 x .91 x .09 = 0.05733 -> 0.0574)", JSON.stringify(t));
   ok(r.kalshi.every(k => k.method === "GET"), "every request to Kalshi is a GET — nothing is ever sent", JSON.stringify(r.kalshi.filter(k => k.method !== "GET")));
   ok(!r.kalshi.some(k => /portfolio|order(?!book)/.test(k.u)), "and none names an order or portfolio route");
 }
