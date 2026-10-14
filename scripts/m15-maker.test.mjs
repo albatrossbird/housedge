@@ -107,8 +107,9 @@ console.log("P&L and fees");
   ok(near(tf.pnl, 10 - (5 * 0.84 + 5 * 0.85 + kalshiTakerFee(0.85, 5, 1))) && tf.makerQty === 5 && tf.takerQty === 5, "half resting, half taken: the taker half pays the taker fee", JSON.stringify(tf));
   ok(makerTrade(m, yesDec, sim, { feeType: "flat" }) === null, "an unread fee schedule prices nothing");
   ok(kalshiMakerFee(0.5, 100, 1, "quadratic") === 0, "quadratic series: makers pay nothing");
-  ok(kalshiMakerFee(0.5, 100, 1, "quadratic_with_maker_fees") === 0.44, "maker-fee series: 0.0175 x 100 x 0.25 = 0.4375 -> 0.44");
-  ok(kalshiMakerFee(0.5, 100, 1, "quadratic_with_combo_maker_fees") === 0.88, "combo: 0.035 x 100 x 0.25 = 0.875 -> 0.88");
+  ok(kalshiMakerFee(0.5, 100, 1, "quadratic_with_maker_fees") === 0.4375, "maker-fee series: 0.0175 x 100 x 0.25 = 0.4375, already on a $0.0001 step");
+  ok(kalshiMakerFee(0.5, 100, 1, "quadratic_with_combo_maker_fees") === 0.875, "combo: 0.035 x 100 x 0.25 = 0.875");
+  ok(kalshiMakerFee(0.5, 1, 1, "quadratic_with_maker_fees") === 0.0044, "one contract: 0.004375 -> 0.0044, rounded UP to $0.0001");
   ok(kalshiMakerFee(0.5, 100, 1, "flat") === null && kalshiMakerFee(0.5, 100, 1, undefined) === null, "flat or unknown: null, not zero");
 }
 

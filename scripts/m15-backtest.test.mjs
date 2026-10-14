@@ -1,6 +1,6 @@
 // lib/m15Backtest.js — each rule that decides whether a backtest result
 // means anything, pinned with hand-built paths.
-import { runMarket, summarize, splitHalves, parseStrategies, toPathRow, archiveRow, PRESETS } from "../lib/m15Backtest.js";
+import { runMarket, findEntry, summarize, splitHalves, parseStrategies, toPathRow, archiveRow, PRESETS } from "../lib/m15Backtest.js";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -15,11 +15,12 @@ console.log("pricing and fees");
 {
   const s = { entry: { side: "yes", secsMin: 60, secsMax: 120 } };
   const t = runMarket(s, mk("yes"), [row(90, 0.79, 0.80)], { size: 10 });
-  // 10 x 0.07 x 0.8 x 0.2 = 0.112 -> rounded UP to 0.12 for the order.
-  ok(t && t.entry === 0.80 && t.entryFee === 0.12, "YES is bought at the ask; the fee rounds up per order", JSON.stringify(t));
-  ok(near(t.pnl, 10 * 0.20 - 0.12), "a win pays $1 a contract, settlement is free", t.pnl);
+  // 10 x 0.07 x 0.8 x 0.2 = 0.112, rounded UP to $0.0001 for the order
+  // (a direct account; the trader measured it 2026-10-14). Exact here.
+  ok(t && t.entry === 0.80 && t.entryFee === 0.112, "YES is bought at the ask; the fee rounds up per order", JSON.stringify(t));
+  ok(near(t.pnl, 10 * 0.20 - 0.112), "a win pays $1 a contract, settlement is free", t.pnl);
   const l = runMarket(s, mk("no"), [row(90, 0.79, 0.80)], { size: 10 });
-  ok(near(l.pnl, -8.00 - 0.12), "a loss costs the stake and the fee", l.pnl);
+  ok(near(l.pnl, -8.00 - 0.112), "a loss costs the stake and the fee", l.pnl);
   const n = runMarket({ entry: { side: "no", secsMin: 60, secsMax: 120 } }, mk("no"), [row(90, 0.30, 0.32)], { size: 10 });
   ok(n && near(n.entry, 0.70), "NO is bought at 1 - YES bid (hitting the YES bid queue)", JSON.stringify(n));
 }
@@ -69,7 +70,7 @@ console.log("exits");
   const stop = runMarket(s, mk("yes"), [row(360, 0.69, 0.70), row(330, 0.60, 0.61), row(300, 0.54, 0.55), row(30, 0.98, 0.99)], { size: 10 });
   ok(stop.exits[0]?.why === "stop" && near(stop.exits[0].price, 0.54) && stop.held === 0,
     "stop-loss sells at the BID once it is 15c under entry — and the later recovery does not count", JSON.stringify(stop.exits));
-  const fee = x => Math.ceil(10 * 0.07 * x * (1 - x) * 100) / 100;
+  const fee = x => Math.ceil(10 * 0.07 * x * (1 - x) * 10000 - 1e-9) / 10000;
   ok(near(stop.pnl, -7.0 - fee(0.70) + 5.4 - fee(0.54)), "both fees are paid", stop.pnl);
   const tgt = runMarket(s, mk("no"), [row(360, 0.69, 0.70), row(330, 0.80, 0.81)], { size: 10 });
   ok(tgt.exits[0]?.why === "target" && near(tgt.pnl, 10 * 0.10 - fee(0.70) - fee(0.80)), "target banks the gain even if the market later settles against", tgt.pnl);
@@ -113,6 +114,56 @@ console.log("strategy maps");
   ok(m.a.entry.side === "yes" && m.b.entry.side === "no", "a map keeps its names");
   let threw = false; try { parseStrategies('{"a":{"exit":{}}}'); } catch { threw = true; }
   ok(threw, "a map entry with no entry rule is refused, not silently skipped");
+}
+
+console.log("otherwise: a fallback for the windows the rule skips");
+{
+  // The pilot rule (favourite 0.80-0.97, 15-45s) with "otherwise buy NO, 5-15s".
+  const s = { entry: { side: "favourite", secsMin: 15, secsMax: 45, priceMin: 0.80, priceMax: 0.97, maxSpread: 0.03 },
+              otherwise: { entry: { side: "no", secsMin: 5, secsMax: 15, priceMin: 0.01, priceMax: 0.99, maxSpread: 0.03 } } };
+  const fired = runMarket(s, mk("yes"), [row(30, 0.85, 0.86), row(10, 0.88, 0.89)]);
+  ok(fired && fired.side === "yes" && fired.entrySecs === 30, "the rule fires: the fallback never acts", JSON.stringify(fired && { side: fired.side, s: fired.entrySecs }));
+  // A close race: the favourite never reaches 0.80, so the rule skips and NO is bought at 10s.
+  const skipped = runMarket(s, mk("no"), [row(30, 0.60, 0.61), row(10, 0.62, 0.63)]);
+  ok(skipped && skipped.side === "no" && skipped.entrySecs === 10 && near(skipped.entry, 0.38), "the rule skips: NO is bought at 1 - YES bid once its window has closed", JSON.stringify(skipped && { side: skipped.side, s: skipped.entrySecs, p: skipped.entry }));
+  // A row at exactly 15s is still the rule's: the fallback may not act on it, even though its own window includes 15.
+  const edge = findEntry(s, mk(), [row(15, 0.60, 0.61)], { size: 10 });
+  ok(edge === null, "a row at the rule's own secsMin belongs to the rule, not the fallback", JSON.stringify(edge));
+  const after = findEntry(s, mk(), [row(14.9, 0.60, 0.61)], { size: 10 });
+  ok(after && after.fallback === true && after.side === "no", "just after it, the fallback acts and says so", JSON.stringify(after));
+  // The paper bot calls a row at a time: a rule that fired on an earlier row must block the fallback.
+  const path = [row(30, 0.85, 0.86), row(10, 0.60, 0.61)];
+  ok(findEntry(s, mk(), path, { size: 10, from: 1 }) === null, "called a row at a time, an earlier firing still blocks the fallback");
+  ok(findEntry({ entry: s.entry }, mk(), path, { size: 10, from: 1 }) === null, "and without a fallback nothing changes");
+}
+{
+  const bad = { entry: { side: "favourite", secsMin: 15, secsMax: 45 }, otherwise: { entry: { side: "no", secsMin: 5, secsMax: 30 } } };
+  let err = null; try { parseStrategies(JSON.stringify({ x: bad })); } catch (e) { err = e.message; }
+  ok(/secsMax must be <= entry.secsMin/.test(err || ""), "a fallback window that overlaps the rule's is refused", err);
+  err = null; try { parseStrategies(JSON.stringify(bad)); } catch (e) { err = e.message; }
+  ok(/secsMax must be <= entry.secsMin/.test(err || ""), "as a single custom strategy too", err);
+  err = null; try { parseStrategies(JSON.stringify({ x: { ...bad, otherwise: { entry: { side: "no", secsMax: 10 }, exit: { exitAtSecs: 5 } } } })); } catch (e) { err = e.message; }
+  ok(/entry only/.test(err || ""), "a fallback with its own exit is refused rather than ignored", err);
+}
+
+console.log("alternative: a second rule in the same window, first met wins");
+{
+  // The pilot, or "buy the underdog at 20-50c" in the same 15-45s window.
+  const s = { entry: { side: "favourite", secsMin: 15, secsMax: 45, priceMin: 0.80, priceMax: 0.97, maxSpread: 0.03 },
+              alternative: { entry: { side: "underdog", secsMin: 15, secsMax: 45, priceMin: 0.20, priceMax: 0.50, maxSpread: 0.03 } } };
+  // At 40s the race is close (underdog NO at 0.30); at 30s the favourite is in band. The underdog came first.
+  const a = findEntry(s, mk(), [row(40, 0.69, 0.70), row(30, 0.85, 0.86)], { size: 10 });
+  ok(a && a.alternative === true && a.side === "no" && near(a.price, 0.31) && a.row.secs === 40, "the alternative is met first: it takes the window", JSON.stringify(a));
+  const t = runMarket(s, mk("yes"), [row(40, 0.69, 0.70), row(30, 0.85, 0.86)]);
+  ok(t && t.side === "no" && t.entrySecs === 40, "and the main rule does not also trade it", JSON.stringify(t && { side: t.side, s: t.entrySecs }));
+  const b = findEntry(s, mk(), [row(40, 0.85, 0.86), row(30, 0.69, 0.70)], { size: 10 });
+  ok(b && !b.alternative && b.side === "yes" && b.row.secs === 40, "the main rule met first keeps the window", JSON.stringify(b));
+  // Both met on one row: the main rule wins.
+  const both = { entry: s.entry, alternative: { entry: { side: "no", secsMin: 15, secsMax: 45, priceMin: 0.01, priceMax: 0.99, maxSpread: 0.03 } } };
+  const c = findEntry(both, mk(), [row(40, 0.85, 0.86)], { size: 10 });
+  ok(c && !c.alternative && c.side === "yes", "met on the same row, the main rule wins", JSON.stringify(c));
+  let err = null; try { parseStrategies(JSON.stringify({ x: { entry: s.entry, alternative: { entry: s.alternative.entry, exit: { exitAtSecs: 5 } } } })); } catch (e) { err = e.message; }
+  ok(/entry only/.test(err || ""), "an alternative with its own exit is refused", err);
 }
 
 console.log("archive rows (WebSocket book lines)");

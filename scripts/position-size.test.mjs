@@ -6,7 +6,7 @@
 // cost really does move with size, and it moves most at the sizes a
 // first-time reader types.
 import {
-  positionAtSize, bestArb, tradeableArb, kalshiTakerFee, DEFAULT_ORDER_SIZE,
+  positionAtSize, bestArb, tradeableArb, kalshiTakerFee, KALSHI_FCM_FEE_PRECISION, DEFAULT_ORDER_SIZE,
 } from "../lib/fees.js";
 
 let bad = 0;
@@ -30,11 +30,17 @@ const P = { yesAsk: 0.44, noAsk: 0.46, yesAskSize: null, yesBidSize: null,
   const hundred = positionAtSize(K, P, 100);
   eq(one.costPerPair > hundred.costPerPair, true, "one contract costs MORE per pair than a hundred");
   eq(one.profit < hundred.profit / 100, true, "profit is sublinear at small size");
-  // And the reason is Kalshi's per-order cent rounding, not the rate.
+  // And the reason is per-order cent rounding, not the rate — the site
+  // prices an FCM-cleared account, whose balance moves in whole cents.
   // 1 x 0.07 x 0.53 x 0.47 = $0.01744, rounded up to $0.02 — so a
   // single contract pays 2c where a hundred pay 1.75c each.
-  near(kalshiTakerFee(0.53, 1, 1), 0.02, "one contract pays a rounded-up cent");
-  near(kalshiTakerFee(0.53, 100, 1), 1.75, "a hundred contracts pay the true rate");
+  near(kalshiTakerFee(0.53, 1, 1, KALSHI_FCM_FEE_PRECISION), 0.02, "FCM account: one contract pays a rounded-up cent");
+  near(kalshiTakerFee(0.53, 100, 1, KALSHI_FCM_FEE_PRECISION), 1.75, "FCM account: a hundred contracts pay the true rate, to the cent");
+  // A direct member is rounded to $0.0001 (Kalshi's Fee Rounding page;
+  // measured on the trader's account 2026-10-14: 0.005733 -> 0.0058).
+  near(kalshiTakerFee(0.53, 1, 1), 0.0175, "direct account (the default): $0.01744 rounds up to $0.0175");
+  near(kalshiTakerFee(0.91, 1, 1), 0.0058, "direct account: the trader's measured fill at 0.91 (0.005733 -> 0.0058)");
+  near(kalshiTakerFee(0.53, 100, 1), 1.7437, "direct account: a hundred contracts pay the exact rate, $1.7437");
 }
 {
   // Payout is exactly $1 per matched pair, so profit is edge x size at

@@ -819,6 +819,23 @@ it.
 `scripts/m15-venues.test.mjs` (mutation-checked) and the archive
 backtest's end-to-end test pin it.
 
+**Every book change vs once a second** (`--per-change` on the archive
+backtest, workflow `source: perchange`; `changeRows` in
+`lib/m15Maker.js`). The once-a-second path cannot say whether a bot that
+decides on every book change does better, so for rules acting in the
+final two minutes it decides both ways on the same windows — the
+change-by-change path rebuilt from the full-depth record, changes stamped
+with one exchange millisecond taken together — and fills each as a limit
+at the price seen, 0-1000ms later on Kalshi's clock. "Only on a change"
+isolates the windows where only a sub-second book met the rule.
+With `--venues` too it runs the rule on Polymarket US's every book change
+as well (its archive records every whole book) and prints **both venues
+at once** — each on its own book and fees, two accounts added, not best
+of both — and `--size=10,30,200` repeats that section per size. The rule
+files' venue table carries the same "both at once" row
+(`strategies/momentum-ladder-small-10.json` is the 10-contract file
+beside the 30 and 200 ones).
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win
@@ -2027,9 +2044,18 @@ confident wrong answers. Both are stored per market row.
 
 - **A missing `fee_multiplier` means 1, not 0.** Defaulting it to zero
   prices every Kalshi leg as free and manufactures edges.
-- **Kalshi rounds its fee up to the cent per ORDER.** Charging that
-  against a single contract bills 1.00¢ where the rate is 0.875¢ — 14%
-  high — so per-contract cost amortises over `DEFAULT_ORDER_SIZE`.
+- **Kalshi rounds its fee UP per ORDER, to the ACCOUNT's precision** —
+  $0.01 for an FCM-cleared account, **$0.0001 for a direct member**
+  (Kalshi's "Fee Rounding" page: per-fill fee ceil'd to $0.000001, the
+  balance aligned to the account's precision, overpayment rebated per
+  order). Measured on the trader's direct account 2026-10-14: six
+  one-contract KXBTC15M fills charged exactly ceil($0.0001) of the
+  formula (0.005733 -> 0.0058), where whole-cent rounding charged 1c on
+  every one. `kalshiTakerFee` defaults to $0.0001 (every m15 backtest, the
+  paper bot, the trader's vendored copy); the SITE passes
+  `KALSHI_FCM_FEE_PRECISION` and still prices the cent, as its `/fees`
+  copy says — true for FCM accounts, pessimistic for direct ones.
+  `scripts/kalshi-fee.test.mjs` pins the six fills.
 - **Polymarket quotes one book per market, on outcome 0.** The other
   outcome is its exact complement in a binary CLOB, so it is derived at
   read time (`complementBook`) using the same identifier-based outcome
@@ -2489,8 +2515,11 @@ not decoration — each one exists because its absence misled someone.
   "auto-refreshes every 60s" — true of the page, not of the numbers.
 - **Volume is three different quantities and is never summed.** Kalshi
   reports CONTRACTS (`volume_fp`), polymarket.com reports US DOLLARS
-  (`volumeNum`), and polymarket.us publishes no volume field on a market
-  at all. Adding them produced a "Total volume" that reconciled with
+  (`volumeNum`), and polymarket.us carries no volume on the MARKET object
+  — but its `/v1/markets/<slug>/bbo` does: `sharesTraded` (all-time) and
+  `openInterest`, cached 30s (checked 2026-10-12; no 24h figure, so a
+  recent rate needs our own snapshots). The site has not read it yet, so
+  the card still shows .us volume as null. Adding them produced a "Total volume" that reconciled with
   neither exchange. Kalshi's is also the TOTAL, not `volume_24h_fp`:
   across KXFED's 98 markets the 24h figure sums to 72k against the
   total's 4.29M, so every market read about sixty times too small.

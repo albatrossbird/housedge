@@ -298,12 +298,29 @@ if (VENUES) {
       const onUs = v.startsWith("polymarket") ? s.contracts : s.bought.polyus;
       console.log(`${v.padEnd(20)} ${String(s.traded).padStart(6)} ${pc(s.wins, s.traded).padStart(6)} ${s.contracts.toLocaleString().padStart(9)} ${pc(onUs, s.contracts).padStart(7)} ${("$" + s.fees.toFixed(2)).padStart(9)} ${(s.slip == null ? "—" : "$" + s.slip.toFixed(2)).padStart(9)} ${$(s.pnl).padStart(11)} ${$(s.perDay).padStart(10)} ${(s.tDays == null ? "—" : s.tDays.toFixed(2)).padStart(7)} ${$(s.maxDrawdown).padStart(10)}`);
     }
+    // Both at once: the file run on each venue's own book in two accounts,
+    // added window by window — not best of both. Twice the exposure when
+    // both fire the same way, which on one market they mostly do.
+    {
+      const K = venueResults["kalshi alone"], U = venueResults["polymarket us alone"];
+      const per = K.map((k, i) => ({ close: k.close, pnl: k.pnl + U[i].pnl, traded: k.actions.some(x => x.qty > 0) || U[i].actions.some(x => x.qty > 0) }));
+      const byDay = new Map();
+      for (const w of per) { const d = new Date(w.close).toISOString().slice(0, 10); byDay.set(d, (byDay.get(d) || 0) + w.pnl); }
+      const days = [...byDay.values()], mean = days.reduce((x, y) => x + y, 0) / days.length;
+      const sd = days.length > 1 ? Math.sqrt(days.reduce((x, y) => x + (y - mean) ** 2, 0) / (days.length - 1)) : 0;
+      let cum = 0, peak = 0, dd = 0;
+      for (const w of [...per].sort((x, y) => x.close - y.close)) { cum += w.pnl; peak = Math.max(peak, cum); dd = Math.min(dd, cum - peak); }
+      const k = V["kalshi alone"], u = V["polymarket us alone"], pnl = per.reduce((x, w) => x + w.pnl, 0);
+      console.log(`${"both at once".padEnd(20)} ${String(per.filter(w => w.traded).length).padStart(6)} ${"".padStart(6)} ${(k.contracts + u.contracts).toLocaleString().padStart(9)} ${pc(u.contracts, k.contracts + u.contracts).padStart(7)} ${("$" + (k.fees + u.fees).toFixed(2)).padStart(9)} ${"".padStart(9)} ${$(pnl).padStart(11)} ${$(mean).padStart(10)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(days.length))).toFixed(2) : "—").padStart(7)} ${$(dd).padStart(10)}`);
+    }
     for (const v of ["best of both", "best of both +1s"]) {
       const r = V[v].routing;
       console.log(`${v}: ${r.usedUs} buys took a .us level; against Kalshi alone at the same moment they saved ${$(r.saved)} (${r.compared} comparable)${V[v].unsoldUs ? `; ${V[v].unsoldUs} .us contracts could not be sold for want of a .us book and were held` : ""}`);
     }
     for (const v of ["polymarket us alone", "best of both"]) deep(v, V[v]);
-    console.log(`  Same windows on every row. "spread" is what fills paid beyond each venue's mid. Best of both is decided on
+    console.log(`  "both at once" runs the file on each venue's own book in two accounts and adds them (traded = windows either
+  venue traded): up to twice the contracts and twice the exposure, since both usually fire the same way.
+  Same windows on every row. "spread" is what fills paid beyond each venue's mid. Best of both is decided on
   Kalshi's book and assumes both venues can be hit in the same second; a .us level counts only from a book under 2s old.`);
   }
 }

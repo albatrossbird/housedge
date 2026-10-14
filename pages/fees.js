@@ -16,7 +16,7 @@
 // presented as fact.
 import { useState, useMemo } from "react";
 import Head from "next/head";
-import { kalshiTakerFee, polymarketTakerFee } from "../lib/fees";
+import { kalshiTakerFee, polymarketTakerFee, KALSHI_FCM_FEE_PRECISION } from "../lib/fees";
 import { walkBook } from "../lib/bookWalk";
 
 const T = {
@@ -56,7 +56,7 @@ export default function Fees() {
   const rate = Math.max(num(rateStr, 0.05), 0);
 
   const r = useMemo(() => {
-    const kOrder = kalshiTakerFee(price, size, mult);
+    const kOrder = kalshiTakerFee(price, size, mult, KALSHI_FCM_FEE_PRECISION);
     const kPer = kOrder / size;
     const pOrder = polymarketTakerFee(price, size, { rate, exponent: 1 });
     return {
@@ -77,7 +77,7 @@ export default function Fees() {
 
   const walk = useMemo(() => walkBook(ladder, size, "buy"), [ladder, size]);
   // Fees are charged on what you ACTUALLY paid, not on the touch.
-  const walkFee = walk.avgPrice == null ? 0 : kalshiTakerFee(walk.avgPrice, walk.filled || 1, mult) / (walk.filled || 1);
+  const walkFee = walk.avgPrice == null ? 0 : kalshiTakerFee(walk.avgPrice, walk.filled || 1, mult, KALSHI_FCM_FEE_PRECISION) / (walk.filled || 1);
 
   // The rounding penalty is LUMPY, not monotonic: it is +0.25c at 1-3
   // contracts on one fixture and exactly 0 at 4. A table beats a
@@ -144,7 +144,7 @@ export default function Fees() {
           <Table
             head={["Price", "Kalshi fee/ct", "Breakeven", "Max profit/ct"]}
             rows={curve.map(p => {
-              const f = kalshiTakerFee(p, size, mult) / size;
+              const f = kalshiTakerFee(p, size, mult, KALSHI_FCM_FEE_PRECISION) / size;
               return [
                 p.toFixed(2), c(f), `${(100 * (p + f)).toFixed(2)}%`,
                 { v: c(1 - p - f), tone: 1 - p - f > 0 ? T.yes : T.no },
@@ -159,11 +159,11 @@ export default function Fees() {
           <Table
             head={["Contracts", "Fee, order", "Fee/ct", "vs. 1000-lot"]}
             rows={sizes.map(n => {
-              const per = kalshiTakerFee(price, n, mult) / n;
-              const base = kalshiTakerFee(price, 1000, mult) / 1000;
+              const per = kalshiTakerFee(price, n, mult, KALSHI_FCM_FEE_PRECISION) / n;
+              const base = kalshiTakerFee(price, 1000, mult, KALSHI_FCM_FEE_PRECISION) / 1000;
               const d = per - base;
               return [
-                String(n), `$${kalshiTakerFee(price, n, mult).toFixed(2)}`, c(per),
+                String(n), `$${kalshiTakerFee(price, n, mult, KALSHI_FCM_FEE_PRECISION).toFixed(2)}`, c(per),
                 { v: d > 1e-9 ? `+${c(d)}` : "—", tone: d > 1e-9 ? T.arb : T.muted },
               ];
             })}

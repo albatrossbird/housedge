@@ -45,9 +45,10 @@ import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
 import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, printVenueSection, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
-import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt } from "../lib/m15Maker.js";
-import { kalshiMakerFee } from "../lib/fees.js";
-import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
+import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt, changeRows } from "../lib/m15Maker.js";
+import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
+import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, bestOfBoth, delayedFill, latestAtOrBefore, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
+import { pmusTakerFee } from "../lib/venueCompare.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -56,11 +57,15 @@ if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_RO
 
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 const DAYS = Math.min(Number(opt("days", 7)), 30);
-const SIZE = Number(opt("size", 10));
+// --size=10,30,200: the per-change comparison runs every size; everything
+// else runs at the first.
+const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
+const SIZE = SIZES[0] ?? 10;
 const ASSUME_DEPTH = process.argv.includes("--assume-depth");
 const MAKER = process.argv.includes("--maker");
 const VENUES = process.argv.includes("--venues");
 const PREPLACE = process.argv.includes("--preplace");
+const PER_CHANGE = process.argv.includes("--per-change");
 const LATENCY_MS = Number(opt("latency-ms", 100));
 const CUTOFF_SECS = Number(opt("cutoff-secs", 5));
 const SINCE_MS = Date.now() - DAYS * 86400000;
@@ -101,9 +106,13 @@ const files = await reader.listRange("m15", SINCE_MS - 3600000, Date.now());
 const needles = series.map(s => `"m":"${s}-`);
 const keep = line => line.startsWith('{"k":"b"') && needles.some(n => line.includes(n));
 const paths = new Map();
-let kept = 0, noExchangeTime = 0, bytes = 0;
+let kept = 0, noExchangeTime = 0, oneSided = 0, bytes = 0;
 const t0 = Date.now();
 let next = 0;
+// --path-check: where do each window's snapshot lines fall, by the
+// exchange time the engine uses (x) and by when they were written (t)?
+const PATH_CHECK = process.argv.includes("--path-check");
+const pc = new Map();   // ticker -> counts
 async function worker() {
   while (next < files.length) {
     const f = files[next++];
@@ -111,8 +120,19 @@ async function worker() {
     await reader.eachLine(f.path, o => {
       const m = wanted.get(o.m);
       if (!m) return;
+      if (PATH_CHECK) {
+        const c = pc.get(o.m) || pc.set(o.m, { x45: 0, x120: 0, t45: 0, t120: 0, staleMax: 0, stale45: 0 }).get(o.m);
+        const xs = Number.isFinite(o.x) ? (m.close - o.x) / 1000 : null, ts = (m.close - o.t) / 1000;
+        if (xs != null && xs > 0 && xs <= 45) c.x45++;
+        if (xs != null && xs > 0 && xs <= 120) c.x120++;
+        if (ts > 0 && ts <= 45) { c.t45++; if (xs != null) { c.staleMax = Math.max(c.staleMax, xs - ts); if (xs > 45) c.stale45++; } }
+        if (ts > 0 && ts <= 120) c.t120++;
+      }
       const r = archiveRow(o, m.close);
-      if (!r) { noExchangeTime++; return; }
+      // Two different reasons, counted apart: a line from before the
+      // recorder stamped exchange time, and a one-sided book (a decided
+      // window: a bid at 99c and nothing offered), which has no spread.
+      if (!r) { if (!Number.isFinite(o.x)) noExchangeTime++; else oneSided++; return; }
       if (r.secs > reach || r.secs < -60) return;
       if (!paths.has(o.m)) paths.set(o.m, []);
       paths.get(o.m).push(r);
@@ -122,7 +142,17 @@ async function worker() {
 }
 // Two at a time: four drew HTTP 429 from Storage on the first real run.
 await Promise.all([worker(), worker()]);
-console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t0) / 1000)}s, ${kept.toLocaleString()} book lines within ${reach}s of a close${noExchangeTime ? `, ${noExchangeTime} dropped for having no exchange timestamp` : ""}`);
+if (PATH_CHECK) {
+  for (const s of series) {
+    const rows = [...pc].filter(([t]) => wanted.get(t).series === s).map(([, c]) => c);
+    const n = rows.length, q = (a, p) => a.length ? a.sort((x, y) => x - y)[Math.floor(p * (a.length - 1))] : null;
+    const had = k => rows.filter(c => c[k] > 0).length;
+    console.log(`PATH CHECK ${s}: ${n} windows with lines | any line WRITTEN in the last 45s: ${had("t45")}, last 120s: ${had("t120")} | any line STAMPED (x) in the last 45s: ${had("x45")}, last 120s: ${had("x120")}`);
+    console.log(`  windows whose last-45s lines all carry an x older than 45s: ${rows.filter(c => c.t45 > 0 && c.x45 === 0).length}; how stale x gets (x age minus write age), median/p90/max of each window's worst: ${q(rows.map(c => c.staleMax), 0.5)?.toFixed(1)}s / ${q(rows.map(c => c.staleMax), 0.9)?.toFixed(1)}s / ${q(rows.map(c => c.staleMax), 1)?.toFixed(1)}s`);
+  }
+  process.exit(0);
+}
+console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB compressed) in ${Math.round((Date.now() - t0) / 1000)}s, ${kept.toLocaleString()} book lines within ${reach}s of a close${noExchangeTime ? `, ${noExchangeTime} dropped for having no exchange timestamp` : ""}${oneSided ? `, ${oneSided} one-sided books (nothing to buy on one side) left out` : ""}`);
 
 // 3. Resting orders (--maker): every decision the taker backtest makes,
 //    executed instead as a bid at the touch, against the final two
@@ -159,7 +189,74 @@ const preRows = [];
 const preStats = { windows: 0, excluded: {}, unknownFee: 0 };
 const preStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && st.entry?.side === "favourite");
 if (PREPLACE && !preStrategies.length) { console.error("::error::--preplace needs a hold-to-settlement favourite rule (e.g. --strategy=paper)"); process.exit(2); }
-if (MAKER || VENUES || PREPLACE) {
+// --per-change: the rules whose window sits inside the final-two-minutes
+// record, decided on every book change as well as once a second.
+const PC_MAX_SECS = 110;
+const pcStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && (st.entry?.secsMax ?? 900) + (st.entry?.lookbackSecs ?? 0) <= PC_MAX_SECS);
+if (PER_CHANGE && !pcStrategies.length) { console.error(`::error::--per-change needs a hold-to-settlement rule acting within ${PC_MAX_SECS}s of the close (e.g. --strategy=paper)`); process.exit(2); }
+const pcRows = [];
+const pcStats = { windows: 0, excluded: {}, usWindows: 0, usExcluded: {} };
+// --per-change --venues: each Kalshi change-by-change decision routed
+// across both venues for ONE target size (the same money at risk as Kalshi
+// alone), every leg a limit at the price seen, filled DELAY ms later.
+//   kalshi alone        what the pilot does
+//   best of both        cheapest all-in first, spilling at depth
+//   + rest on Kalshi    then whatever did not fill, at Kalshi's touch
+//   Kalshi + overflow   Kalshi for what its book showed, .us for the rest
+const routeRows = [];
+function routeAcrossVenues(m, ws, usAll) {
+  const mult = fees.get(m.series)?.mult ?? 1;
+  const kFee = (p, n) => kalshiTakerFee(p, n, mult), uFee = (p, n) => pmusTakerFee(p, n), feeBy = { kalshi: kFee, polyus: uFee };
+  for (const r of pcRows) {
+    if (r.venue !== "kalshi" || r.ticker !== m.ticker || !r.pc?.books) continue;
+    const d0 = r.pc, strat = Object.fromEntries(pcStrategies)[r.strategy], priceMax = strat.entry?.priceMax ?? 1;
+    const uBooks = snapshotsAt(ws, VENUE_DELAYS_MS.map(x => d0.t + x), 10);
+    const books = x => ({ kalshi: d0.books[x], polyus: d0.t + x >= m.close ? CLOSED_BOOK : uBooks.get(d0.t + x) });
+    const kLeg = [{ venue: "kalshi", price: d0.price, qty: d0.qty }];
+    const bob = bestOfBoth({ side: d0.side, t: d0.t, size: r.size, priceMax, requireDepth: !ASSUME_DEPTH, kRow: d0.row, uRows: usAll, kFee, uFee }).legs;
+    // Overflow: the rest of the target on .us, at its touch, inside the band.
+    const over = [...kLeg];
+    const uRow = latestAtOrBefore(usAll, d0.t), left = r.size - d0.qty;
+    if (left > 0 && uRow && d0.t - uRow.t <= 2000) {
+      const price = d0.side === "yes" ? uRow.ask : Math.round((1 - uRow.bid) * 10000) / 10000, depth = d0.side === "yes" ? uRow.askD1 : uRow.bidD1;
+      const n = Math.min(left, Math.floor(depth ?? 0));
+      if (price > 0 && price <= priceMax + 1e-9 && n >= 1) over.push({ venue: "polyus", price, qty: n });
+    }
+    const won = d0.side === m.result, out = {};
+    let complete = true;
+    for (const [v, legs, fallback] of [["kalshi alone", kLeg, false], ["best of both", bob, false], ["+ rest on Kalshi", bob, true], ["Kalshi + overflow", over, false]]) {
+      out[v] = {};
+      for (const x of VENUE_DELAYS_MS) {
+        const f = legs.length ? delayedFill({ legs, side: d0.side, won, snaps: books(x), priceMax, fees: feeBy, fallback }) : { qty: 0, wanted: 0, pnl: 0, legFills: {} };
+        if (!f) { complete = false; break; }
+        out[v][x] = { qty: f.qty, wanted: f.wanted, pnl: f.pnl, us: f.legFills?.polyus?.got ?? 0 };
+      }
+    }
+    if (complete) routeRows.push({ series: m.series, strategy: r.strategy, size: r.size, close: m.close, ticker: m.ticker, out });
+  }
+}
+// One venue's window: each rule at each size decided on the once-a-second
+// rows and on every book change, and each decision sent as a limit at the
+// price it saw, filled against that venue's book DELAY ms later.
+function perChangeVenue(venue, m, w, oneRows, changeRowsList) {
+  for (const [name, strat] of pcStrategies) for (const size of SIZES) {
+    const dec = rows => { const h = findEntry(strat, m, rows, { size, requireDepth: !ASSUME_DEPTH }); return h ? { t: h.row.t, secs: h.row.secs, side: h.side, qty: h.qty, price: h.price, row: h.row } : null; };
+    const one = dec(oneRows), pc = dec(changeRowsList);
+    const snaps = snapshotsAt(w, [one, pc].filter(Boolean).flatMap(d => VENUE_DELAYS_MS.map(x => d.t + x)), 10);
+    const fills = d => d && Object.fromEntries(VENUE_DELAYS_MS.map(x => {
+      if (d.t + x >= m.close) return [x, 0];
+      const a = availableAt(snaps.get(d.t + x), d.side, d.price);
+      return [x, a == null ? null : Math.min(d.qty, Math.floor(a + 1e-9))];
+    }));
+    if (one) one.fills = fills(one);
+    if (pc) pc.fills = fills(pc);
+    // The books at each delay, kept for routing the Kalshi decision across
+    // both venues once the .us record has been read (printRouting).
+    if (pc && venue === "kalshi") pc.books = Object.fromEntries(VENUE_DELAYS_MS.map(x => [x, pc.t + x >= m.close ? CLOSED_BOOK : snaps.get(pc.t + x)]));
+    pcRows.push({ venue, size, series: m.series, ticker: m.ticker, strategy: name, close: m.close, result: m.result, one, pc });
+  }
+}
+if (MAKER || VENUES || PREPLACE || PER_CHANGE) {
   for (const m of wanted.values()) {
     const path = (paths.get(m.ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     if (!path.length) continue;
@@ -168,10 +265,10 @@ if (MAKER || VENUES || PREPLACE) {
       const hit = findEntry(strat, m, path, { size: SIZE, requireDepth: !ASSUME_DEPTH });
       if (!hit) continue;
       if (!decisions.has(m.ticker)) decisions.set(m.ticker, []);
-      decisions.get(m.ticker).push({ name, decision: { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, priceMax: strat.entry.priceMax } });
+      decisions.get(m.ticker).push({ name, decision: { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, price: hit.price, priceMax: strat.entry.priceMax } });
     }
   }
-  const want = new Map([...(PREPLACE ? [...wanted.keys()].filter(t => paths.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
+  const want = new Map([...(PREPLACE || PER_CHANGE ? [...wanted.keys()].filter(t => paths.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
   const tape = newTape();
   const done = new Set();
   const finalize = ticker => {
@@ -183,9 +280,11 @@ if (MAKER || VENUES || PREPLACE) {
     if (why) {
       if (decided.length) makerStats.excluded[why] = (makerStats.excluded[why] || 0) + 1;
       if (PREPLACE) preStats.excluded[why] = (preStats.excluded[why] || 0) + 1;
+      if (PER_CHANGE) pcStats.excluded[why] = (pcStats.excluded[why] || 0) + 1;
       return;
     }
     if (PREPLACE) preplaceWindow(ticker, w, decided);
+    if (PER_CHANGE) perChangeWindow(ticker, w);
     if (!decided.length) return;
     makerStats.windows++;
     const c = checkTradeSides(w);
@@ -198,6 +297,15 @@ if (MAKER || VENUES || PREPLACE) {
       maker.set(`${name}|${ticker}`, { decision, sims });
     }
   };
+  // One replayed window: each rule decided on the once-a-second path (as
+  // everywhere else) and on every book change, and each decision sent as
+  // a limit at the price it saw, filled against the book DELAY ms later.
+  function perChangeWindow(ticker, w) {
+    pcStats.windows++;
+    const m = wanted.get(ticker);
+    const oneRows = (paths.get(ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
+    perChangeVenue("kalshi", m, w, oneRows, changeRows(w, { maxSecs: PC_MAX_SECS + 5 }));
+  }
   // One replayed window through every pre-place variant, for every
   // favourite rule. Rows: { series, strategy, variant, close, posted,
   // qty, won, pnl, stale, firstFillSecs, ruleFired }.
@@ -281,6 +389,19 @@ if (VENUES) {
     const why = w ? disrupted(tape, w) : "not in the .us archive";
     // The delay test: the .us book at each delay after each Kalshi decision.
     if (!why) { const ws = resolveUsWindow(w, "long"); for (const { name, decision } of decisions.get(ticker) || []) uSnaps.set(`${name}|${ticker}`, snapsAfter(ws, decision)); }
+    // --per-change: the same rules on the .us book, its every change and its
+    // once-a-second path, filled against the .us record.
+    if (PER_CHANGE && rows.length) {
+      const m = wanted.get(ticker);
+      if (why) pcStats.usExcluded[why] = (pcStats.usExcluded[why] || 0) + 1;
+      else {
+        pcStats.usWindows++;
+        const live = r => r.t < m.close && r.secs > 0;
+        const ws = resolveUsWindow(w, "long");
+        perChangeVenue("polyus", m, ws, rows.filter(live), all.filter(r => live(r) && r.secs <= PC_MAX_SECS + 5));
+        routeAcrossVenues(m, ws, all);
+      }
+    }
     if (!MAKER || !rows.length) return;
     if (why) { usStats.excluded[why] = (usStats.excluded[why] || 0) + 1; return; }
     usStats.windows++;
@@ -343,6 +464,8 @@ for (const s of series) {
 }
 
 if (PREPLACE) printPrePlace();
+if (PER_CHANGE) printPerChange();
+if (PER_CHANGE && VENUES) { printBothVenues(); printRouting(); }
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
 if (MAKER) printMakerFooter();
 
@@ -388,4 +511,173 @@ READING THE PRE-PLACED TABLE
 - "no rule": windows filled where the rule itself never fired, and their P&L — trades the taker version never takes.
 - Makers pay the series' maker fee (none on fee_type quadratic). Fills are inferred from the recorded trade tape; our
   own order is not in the replayed book and nobody reacts to it. An upper bound like every row here.`);
+}
+
+// --per-change report: the same windows, each rule decided once a second
+// and on every book change, filled at each delay.
+function printPerChange() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const c = (pnl, n) => n ? `${pnl / n >= 0 ? "+" : ""}${(100 * pnl / n).toFixed(2)}c` : "—";
+  console.log(`\n${"=".repeat(118)}\nEVERY BOOK CHANGE vs ONCE A SECOND — ${SIZE} contracts, a limit at the price seen, filled against the book DELAY ms later`);
+  console.log(`${pcStats.windows} windows replayed change by change; left out ${JSON.stringify(pcStats.excluded)}`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) for (const [name] of pcStrategies) {
+    const R = pcRows.filter(r => r.venue === "kalshi" && r.size === SIZE && r.series === s && r.strategy === name);
+    if (!R.length) continue;
+    const mult = fees.get(s)?.mult ?? 1;
+    const days = [...new Set(R.map(r => day(r.close)))].sort();
+    const both = R.filter(r => r.one && r.pc), onlyPc = R.filter(r => r.pc && !r.one), onlyOne = R.filter(r => r.one && !r.pc);
+    const earlier = both.map(r => (r.one.t - r.pc.t) / 1000).sort((a, b) => a - b);
+    const q = p => earlier.length ? earlier[Math.floor(p * (earlier.length - 1))].toFixed(2) : "—";
+    const sameSide = both.filter(r => r.one.side === r.pc.side).length;
+    console.log(`\n${s} · ${name} — ${R.length} windows over ${days.length} days`);
+    console.log(`  decided once a second: ${R.filter(r => r.one).length} | on every change: ${R.filter(r => r.pc).length} | both: ${both.length} (same side ${sameSide}) | only on a change: ${onlyPc.length} | only once a second: ${onlyOne.length}`);
+    console.log(`  where both decided, the change-by-change decision came earlier by (s) median ${q(0.5)}, p10 ${q(0.1)}, p90 ${q(0.9)}`);
+    const table = (label, rows, key) => {
+      console.log(`  ${label}`);
+      console.log(`    ${"delay".padEnd(7)} ${"decided".padStart(7)} ${"filled".padStart(14)} ${"won filled / missed".padStart(20)} ${"P&L".padStart(10)} ${"per ctr".padStart(8)} ${"t(days)".padStart(7)}`);
+      for (const d of VENUE_DELAYS_MS) {
+        const D = rows.map(r => r[key]).filter(x => x && x.fills[d] != null);
+        let want = 0, got = 0, pnl = 0;
+        const byDay = new Map(days.map(x => [x, 0]));
+        const F = [], M = [];
+        for (const r of rows) {
+          const x = r[key];
+          if (!x || x.fills[d] == null) continue;
+          const n = x.fills[d], won = x.side === r.result;
+          want += x.qty; got += n;
+          (n > 0 ? F : M).push(won);
+          if (!n) continue;
+          const p = (won ? n : 0) - n * x.price - kalshiTakerFee(x.price, n, mult);
+          pnl += p; byDay.set(day(r.close), byDay.get(day(r.close)) + p);
+        }
+        const v = [...byDay.values()], mean = v.reduce((a, b) => a + b, 0) / v.length;
+        const sd = v.length > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (v.length - 1)) : 0;
+        const wr = A => A.length ? `${(100 * A.filter(Boolean).length / A.length).toFixed(1)}%` : "—";
+        console.log(`    ${`+${d}ms`.padEnd(7)} ${String(D.length).padStart(7)} ${`${got}/${want} ${want ? (100 * got / want).toFixed(1) : "—"}%`.padStart(14)} ${`${wr(F)} / ${wr(M)}`.padStart(20)} ${$(pnl).padStart(10)} ${c(pnl, got).padStart(8)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(v.length))).toFixed(2) : "—").padStart(7)}`);
+      }
+    };
+    table("ONCE A SECOND (the rule as backtested)", R, "one");
+    table("EVERY BOOK CHANGE", R, "pc");
+    if (onlyPc.length) table(`  of which: the ${onlyPc.length} windows ONLY a change-by-change check traded`, onlyPc, "pc");
+  }
+  console.log(`
+READING THE PER-CHANGE TABLE
+- Same windows for both rows: every settled window whose final two minutes were recorded without a gap. "Once a second"
+  decides on the archived one-a-second books, as every other figure here; "every book change" on the book after each
+  change, changes stamped with the same exchange millisecond taken together.
+- Each decision is a limit buy at the price seen, for the contracts it saw within 1c of the touch, filled against the
+  real book DELAY ms after the change it decided on — counted from the exchange's own timestamp, so the delay must
+  cover the socket, deciding and sending. "+0ms" is the book it decided on: an upper bound nobody gets.
+- "won filled / missed": does the market fill you mostly on the ones that lose? "only on a change": windows where a
+  sub-second book met the rule and no once-a-second book did — transient books, the question this table exists for.
+- An upper bound like every row here: our own order is not in the book, and nobody reacts to it.`);
+}
+
+// --per-change --venues: the rule run on Kalshi and on Polymarket US at the
+// same time, each on its own book, each venue's own fees — not best of
+// both — on the windows both venues' records cover cleanly. "both" is the
+// two accounts added together, so it is twice the exposure per window.
+function printBothVenues() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const fee = { kalshi: (p, n, s) => kalshiTakerFee(p, n, fees.get(s)?.mult ?? 1), polyus: (p, n) => pmusTakerFee(p, n) };
+  const SHOW = [0, 50, 100, 250];
+  console.log(`\n${"=".repeat(118)}\nBOTH VENUES AT ONCE — each runs the rule on its own book; "both" is the two added together (not best of both)`);
+  console.log(`Kalshi windows replayed ${pcStats.windows} (left out ${JSON.stringify(pcStats.excluded)}); .us windows ${pcStats.usWindows} (left out ${JSON.stringify(pcStats.usExcluded)})`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) for (const [name] of pcStrategies) for (const size of SIZES) {
+    const k = new Map(pcRows.filter(r => r.venue === "kalshi" && r.series === s && r.strategy === name && r.size === size).map(r => [r.ticker, r]));
+    const u = new Map(pcRows.filter(r => r.venue === "polyus" && r.series === s && r.strategy === name && r.size === size).map(r => [r.ticker, r]));
+    const common = [...k.keys()].filter(t => u.has(t));
+    if (!common.length) continue;
+    const days = [...new Set(common.map(t => day(k.get(t).close)))].sort();
+    console.log(`\n${s} · ${name} · ${size} contracts an entry on each venue — ${common.length} windows both venues covered, over ${days.length} days`);
+    console.log(`  ${"decides on".padEnd(16)} ${"venue".padEnd(7)} ${"decided".padStart(7)} ${SHOW.map(d => `${`+${d}ms P&L (filled)`.padStart(22)}`).join("")} ${"per ctr @100".padStart(13)} ${"t @100".padStart(7)}`);
+    for (const key of ["one", "pc"]) {
+      for (const v of ["kalshi", "polyus", "both"]) {
+        const venues = v === "both" ? ["kalshi", "polyus"] : [v];
+        let decided = 0;
+        const cells = [];
+        let per100 = "—", t100 = "—";
+        for (const d of SHOW) {
+          let got = 0, want = 0, pnl = 0, known = 0;
+          const byDay = new Map(days.map(x => [x, 0]));
+          for (const t of common) {
+            for (const vv of venues) {
+              const x = (vv === "kalshi" ? k : u).get(t)[key];
+              if (!x) continue;
+              if (d === SHOW[0]) decided++;
+              const n = x.fills[d];
+              if (n == null) continue;
+              known++; want += x.qty; got += n;
+              if (!n) continue;
+              const r = k.get(t), won = x.side === r.result;
+              const p = (won ? n : 0) - n * x.price - fee[vv](x.price, n, s);
+              pnl += p; byDay.set(day(r.close), byDay.get(day(r.close)) + p);
+            }
+          }
+          cells.push(`${$(pnl)} (${want ? (100 * got / want).toFixed(0) : "—"}%)`.padStart(22));
+          if (d === 100) {
+            const vals = [...byDay.values()], mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+            const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1)) : 0;
+            per100 = got ? `${pnl / got >= 0 ? "+" : ""}${(100 * pnl / got).toFixed(2)}c` : "—";
+            t100 = sd > 1e-12 ? (mean / (sd / Math.sqrt(vals.length))).toFixed(2) : "—";
+          }
+        }
+        console.log(`  ${(key === "one" ? "once a second" : "every change").padEnd(16)} ${v.padEnd(7)} ${String(decided).padStart(7)} ${cells.join("")} ${per100.padStart(13)} ${t100.padStart(7)}`);
+      }
+    }
+  }
+  console.log(`
+READING THE BOTH-VENUES TABLE
+- Each venue decides on its OWN book (its own price, spread and depth) and is charged its own taker fee: Kalshi's
+  rounded up per order, .us's half-even. A window can trade on one venue and not the other.
+- "both" adds the two accounts: up to twice the contracts per window, and twice the exposure when both fire on the
+  same side — which they usually do, because it is the same market. It is not diversification.
+- Size is the most a decision buys: what sits within 1c of the touch, capped at the size, filled as a limit at the
+  price seen against the book DELAY ms later. An upper bound: our order is not in the replayed book.`);
+}
+
+// --per-change --venues: one target size routed across the two venues.
+function printRouting() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const SHOW = [0, 50, 100, 250, 500];
+  const V = ["kalshi alone", "best of both", "+ rest on Kalshi", "Kalshi + overflow"];
+  console.log(`\n${"=".repeat(118)}\nONE TARGET SIZE ACROSS BOTH VENUES — Kalshi's every-change decision, the same money at risk as Kalshi alone`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) for (const [name] of pcStrategies) for (const size of SIZES) {
+    const R = routeRows.filter(r => r.series === s && r.strategy === name && r.size === size);
+    if (!R.length) continue;
+    const days = [...new Set(R.map(r => day(r.close)))].sort();
+    console.log(`\n${s} · ${name} · target ${size} contracts — ${R.length} decisions both venues' books cover, over ${days.length} days`);
+    console.log(`  ${"routing".padEnd(18)} ${SHOW.map(d => `${`+${d}ms P&L (filled, on .us)`.padStart(30)}`).join("")} ${"per ctr @100".padStart(13)} ${"t @100".padStart(7)}`);
+    for (const v of V) {
+      let per100 = "—", t100 = "—";
+      const cells = SHOW.map(d => {
+        let q = 0, w = 0, pnl = 0, us = 0;
+        const byDay = new Map(days.map(x => [x, 0]));
+        for (const r of R) { const o = r.out[v][d]; q += o.qty; w += o.wanted; pnl += o.pnl; us += o.us; byDay.set(day(r.close), byDay.get(day(r.close)) + o.pnl); }
+        if (d === 100) {
+          const vals = [...byDay.values()], mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+          const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1)) : 0;
+          per100 = q ? `${pnl / q >= 0 ? "+" : ""}${(100 * pnl / q).toFixed(2)}c` : "—";
+          t100 = sd > 1e-12 ? (mean / (sd / Math.sqrt(vals.length))).toFixed(2) : "—";
+        }
+        return `${$(pnl)} (${w ? (100 * q / w).toFixed(0) : "—"}%, ${q ? (100 * us / q).toFixed(0) : 0}%)`.padStart(30);
+      });
+      console.log(`  ${v.padEnd(18)} ${cells.join("")} ${per100.padStart(13)} ${t100.padStart(7)}`);
+    }
+  }
+  console.log(`
+READING THE ROUTING TABLE
+- Every row is the SAME Kalshi decisions at the SAME target size, so the same most-at-risk per window: only where the
+  contracts come from differs. "filled" is contracts filled over the target the book showed; "on .us" is the share
+  of filled contracts bought on Polymarket US.
+- "best of both" takes the cheaper venue all-in first and spills to the other at its depth; "+ rest on Kalshi" then
+  buys what did not fill at Kalshi's touch when the orders land, inside the rule's price cap; "Kalshi + overflow"
+  sends Kalshi what its book showed and only the remainder to .us. A .us book over 2s old is not used.
+- Limits at the prices seen, filled against each venue's book DELAY ms after the decision; upper bounds as everywhere.`);
 }
