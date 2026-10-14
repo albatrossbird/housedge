@@ -828,6 +828,13 @@ change-by-change path rebuilt from the full-depth record, changes stamped
 with one exchange millisecond taken together — and fills each as a limit
 at the price seen, 0-1000ms later on Kalshi's clock. "Only on a change"
 isolates the windows where only a sub-second book met the rule.
+With `--venues` too it runs the rule on Polymarket US's every book change
+as well (its archive records every whole book) and prints **both venues
+at once** — each on its own book and fees, two accounts added, not best
+of both — and `--size=10,30,200` repeats that section per size. The rule
+files' venue table carries the same "both at once" row
+(`strategies/momentum-ladder-small-10.json` is the 10-contract file
+beside the 30 and 200 ones).
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price

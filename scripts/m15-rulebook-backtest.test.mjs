@@ -143,6 +143,7 @@ console.log("with Polymarket US (--venues)");
   ok(/kalshi alone\s+1\s+100\.0%\s+100\s+0\.0%.*\+\$0\.51/.test(vrow("kalshi alone ")), "kalshi alone is the as-written run on the same window: +$0.51", vrow("kalshi alone "));
   ok(/best of both\s+1\s+100\.0%\s+100\s+100\.0%\s+\$3\.47.*\+\$0\.53/.test(vrow("best of both ")), "best of both buys all 100 on .us and sells there: +$0.53", vrow("best of both "));
   ok(/polymarket us alone\s+1\s+100\.0%\s+100\s+100\.0%\s+\$3\.47.*\+\$0\.53/.test(vrow("polymarket us alone")), "polymarket us alone, its fees: +$0.53", vrow("polymarket us alone"));
+  ok(/both at once\s+1\s+200\s+50\.0%.*\+\$1\.04/.test(vrow("both at once")), "both at once: the two accounts added, 200 contracts, +$0.51 + $0.53 = +$1.04", vrow("both at once"));
   // Kalshi alone would have paid 100 x .50 + 1.75 = $51.75 against $50.74.
   ok(/best of both: 1 buys took a \.us level; against Kalshi alone at the same moment they saved \+\$1\.01/.test(v.text), "reports what routing saved: +$1.01", v.text);
   const d = harness("dropped", ["--venues"], usLines(true));

@@ -218,5 +218,37 @@ console.log("every book change (--per-change)");
   ok(/READING THE PER-CHANGE TABLE/.test(r.text), "and says how to read it", r.text);
 }
 
+console.log("both venues at once (--per-change --venues, several sizes)");
+{
+  // Kalshi as in the per-change test above. Polymarket US quotes 0.89/0.90
+  // with 50 offered from 40s out, so both of its paths buy YES at 0.90.
+  //   10:  .us 10 at 0.90, fee 6.255c -> 6c half-even: +$0.94
+  //        Kalshi every change +$1.69 at +0ms, a miss at +50ms -> both +$2.63, then +$0.94
+  //   200: .us min(200, 50 within 1c) = 50 at 0.90, fee 31.275c -> 31c: +$4.69
+  //        Kalshi once a second: 200 wanted, 50 offered at 0.91 -> 50 - 45.50 - 29c = +$4.21
+  //        -> both +$8.90 at +100ms
+  const tape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.80, 100]], [[0.85, 100]]] }),
+    (c, T) => ({ k: "d", t: c - 40000, x: c - 40000, m: T, sd: "a", p: 0.82, q: 20 }),
+    (c, T) => ({ k: "d", t: c - 39950, x: c - 39950, m: T, sd: "a", p: 0.82, q: -20 }),
+    (c, T) => ({ k: "full", t: c - 30000, x: c - 30000, m: T, L: [[[0.90, 100]], [[0.91, 50]]] }),
+  ];
+  const usLines = [
+    (c, s) => ({ k: "pb", t: c - 100000, x: c - 100000, m: s, b: [[0.69, 100]], a: [[0.70, 100]] }),
+    (c, s) => ({ k: "pb", t: c - 40000, x: c - 40000, m: s, b: [[0.89, 300]], a: [[0.90, 50]] }),
+  ];
+  const r = run(["--strategies=fav-final", "--per-change", "--venues", "--size=10,200"], tape, usLines);
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/\.us windows 1/.test(r.text), "replays the .us window too", r.text);
+  const block = n => (r.text.split(`fav-final · ${n} contracts an entry on each venue`)[1] || "").split("\n\n")[0];
+  ok(/every change\s+polyus\s+1\s+\+\$0\.94 \(100%\)/.test(block(10)), ".us at 10: 10 at 0.90 with its own fee = +$0.94", block(10));
+  ok(/every change\s+both\s+2\s+\+\$2\.63 \(100%\)\s+\+\$0\.94 \(50%\)/.test(block(10)), "both at 10: the two accounts added, +$2.63 then +$0.94 when the Kalshi flicker is gone", block(10));
+  ok(/once a second\s+kalshi\s+1\s+\+\$4\.21 \(25%\)/.test(block(200)), "Kalshi at 200 fills the 50 offered: +$4.21", block(200));
+  ok(/once a second\s+polyus\s+1\s+\+\$4\.69 \(100%\)/.test(block(200)), ".us at 200 buys the 50 within 1c: +$4.69", block(200));
+  ok(/once a second\s+both\s+2(\s+\+\$8\.90 \(\d+%\)){4}/.test(block(200)), "both at 200: +$8.90", block(200));
+  ok(/READING THE BOTH-VENUES TABLE/.test(r.text), "and says how to read it", r.text);
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
