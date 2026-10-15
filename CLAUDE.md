@@ -788,7 +788,8 @@ backtest, the `venues` input on its workflow, on in the daily report).
 For the series Polymarket US lists (the Bitcoin 15-minute market; gold
 is Kalshi-only) the same rules run on the .us book — its archive as
 once-a-second rows on the .us exchange's clock, its own fees (taker
-0.0695 x p(1-p) half-even; makers PAID 0.0125 x p(1-p), a negative fee)
+0.0695 x p(1-p) half-even; makers PAID 0.0125 x p(1-p), a negative fee,
+for fills before 2026-10-19 17:00 UTC and NOTHING after — see below)
 — and as **best of both**: decided on Kalshi's book, each contract
 bought where it is cheaper all-in at that second, spilling to the other
 venue at its depth, never on a .us book over 2s old. All three rows use
@@ -1312,8 +1313,16 @@ outcome. Up is YES.
   the key-gated socket.
 - **Fees make small gaps worthless.** Kalshi 0.07 x p(1-p) on this
   series, .us 0.0695 x p(1-p): ~3.5c for the pair near 50c. Paired reads
-  on launch day showed the two touches within 1c nearly every time. .us
-  pays makers 0.0125 x p(1-p).
+  on launch day showed the two touches within 1c nearly every time.
+- **.us stopped paying makers like us on 2026-10-19.** Until 1:00 PM ET
+  that day makers were paid a flat 0.0125 x p(1-p); from then the rebate
+  is tiered on the prior calendar month's maker volume, and "Tier 1 Below
+  $10,000,000 — No maker rebate" (docs.polymarket.us/fees, read
+  2026-10-15). `pmusMakerFee(price, qty, t)` prices the rebate by when
+  the fill happened — the backtests date it by the window's close — so
+  archive days before the change keep the rebate they earned and every
+  day after earns none. Taker rebates are tiered too and start at
+  $250,000 a month; assume none.
 
 **.us does not always list every window.** 2026-10-01 10:00-11:45 UTC
 had no .us market at all (`/v1/markets?slug=` returns `[]` for those
@@ -1999,9 +2008,11 @@ rather than a config one.
   a ladder for the wrong outcome is worse than no ladder, because it is
   confident. `scripts/us-book-side.test.mjs` pins all four cases.
 - **Fees differ per venue.** US prices its taker fee off
-  `feeCoefficient` (0.06 on the MLB game checked) against `.com`'s
-  `feeSchedule.rate` of 0.05. Read it per market; never assume the two
-  charge alike.
+  `feeCoefficient` against `.com`'s `feeSchedule.rate` of 0.05. It was
+  0.06 on the MLB game first checked and **0.0695 on all 200 open .us
+  markets on 2026-10-15** — the published standard rate (Table Tennis is
+  0.10). .us rounds each FILL's fee to the cent, half to even. Read it
+  per market; never assume the two charge alike.
 - `outcomes`/`outcomePrices` are misaligned here too — a market with
   `outcomes ["No","Yes"]` returned `["0.0400","0.97"]` where 0.04 is the
   YES. Read `marketSides`, where each side carries its own price.
@@ -2036,8 +2047,8 @@ suggest. `lib/fees.js` owns the maths; `/api/markets` returns
 `feesIncluded: true`.
 
 **Both venues charge takers on the same quadratic curve** — most
-expensive at 50/50, near zero at the extremes — and neither charges
-makers:
+expensive at 50/50, near zero at the extremes. The site prices taker
+legs only, because an arb is two orders that cross:
 
 ```
 Kalshi      contracts x 0.07 x fee_multiplier x p(1-p)
@@ -2053,6 +2064,16 @@ confident wrong answers. Both are stored per market row.
 
 - **A missing `fee_multiplier` means 1, not 0.** Defaulting it to zero
   prices every Kalshi leg as free and manufactures edges.
+- **Kalshi sports games DO charge makers.** `fee_type` on
+  `/series/<ticker>`, checked 2026-10-15: `quadratic_with_maker_fees`
+  on KXMLBGAME (multiplier 0.5 since 2026-08-07, 1 before), KXNFLGAME,
+  KXNBAGAME, KXNHLGAME, KXNCAAFGAME, KXNCAAMBGAME, KXWNBAGAME and
+  KXEPLGAME; only KXMLSGAME is plain `quadratic`. That maker fee is
+  0.0175 x fee_multiplier x C x p(1-p), rounded like the taker's
+  (`kalshiMakerFee`). The 15-minute series are `quadratic`, so the m15
+  maker backtests' zero fee does not carry over to sports.
+  `/series/fee_changes?series_ticker=X&show_historical=true` lists past
+  and scheduled changes; backtest a period at the fee it had.
 - **Kalshi rounds its fee UP per ORDER, to the ACCOUNT's precision** —
   $0.01 for an FCM-cleared account, **$0.0001 for a direct member**
   (Kalshi's "Fee Rounding" page: per-fill fee ceil'd to $0.000001, the

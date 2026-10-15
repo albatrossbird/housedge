@@ -119,7 +119,8 @@ console.log("across venues (--venues)");
   //   polyus        10 at 0.90, .us fee 0.06255 -> 6c  -> +$0.94
   //   best of both  all 10 on .us (0.906 all-in < 0.91574) -> +$0.94, 0.97c a contract saved
   // With --maker, the .us bid at 0.89 (300 ahead) is sold 310 into: join
-  // fills 10 at 0.89 and is PAID 0.0125 x 10 x 0.89 x 0.11 = 1.2c -> 1c.
+  // fills 10 at 0.89 and is PAID 0.0125 x 10 x 0.89 x 0.11 = 1.2c -> 1c —
+  // before 2026-10-19 17:00 UTC; from then a Tier 1 account is paid nothing.
   const usLines = [
     (c, s) => ({ k: "mkt", t: c - 900000, m: s, kalshi: "x" }),
     (c, s) => ({ k: "pb", t: c - 100000, x: c - 100000, m: s, b: [[0.69, 100]], a: [[0.70, 100]] }),
@@ -137,7 +138,9 @@ console.log("across venues (--venues)");
   const mk = run(["--strategies=fav-final", "--venues", "--maker"], [], usLines);
   ok(mk.code === 0, "with --maker: runs cleanly", mk.text);
   ok(/RESTING ORDERS ON POLYMARKET US/.test(mk.text) && /trade sides agree with the book on 100\.0% of 1 trades/.test(mk.text), "replays the .us tape and checks its trade sides", mk.text);
-  ok(/\s+join\s+1\s+1\s+\$1\.11\s+\+11\.10c/.test(mk.text), "join: 10 at 0.89, paid a 1c rebate = +$1.11", mk.text);
+  const rebated = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS < Date.parse("2026-10-19T17:00:00Z"); // run()'s close
+  const joinRow = rebated ? /\s+join\s+1\s+1\s+\$1\.11\s+\+11\.10c/ : /\s+join\s+1\s+1\s+\$1\.10\s+\+11\.00c/;
+  ok(joinRow.test(mk.text), rebated ? "join: 10 at 0.89, paid a 1c rebate = +$1.11" : "join: 10 at 0.89, no rebate after the change = +$1.10", mk.text);
   // The delay test. Kalshi's final two minutes are on the tape (90/91,
   // unchanged); the .us offer at 0.90 is gone 60ms after the decision.
   //   Kalshi alone   fills at every delay: +$0.84
