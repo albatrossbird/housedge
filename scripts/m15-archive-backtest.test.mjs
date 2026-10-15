@@ -219,6 +219,18 @@ console.log("every book change (--per-change)");
   ok(/EVERY BOOK CHANGE\n[^\n]*\n\s+\+0ms\s+1\s+10\/10 100\.0%\s+100\.0% \/ —\s+\+\$1\.70/.test(r.text), "every change, on the book it decided on: 10 at 0.82 = +$1.6966", r.text);
   ok(/EVERY BOOK CHANGE\n[^\n]*\n[^\n]*\n\s+\+50ms\s+1\s+0\/10 0\.0%\s+— \/ 100\.0%\s+\+\$0\.00/.test(r.text), "50ms later the flicker is gone: a miss, on a window that won", r.text);
   ok(/READING THE PER-CHANGE TABLE/.test(r.text), "and says how to read it", r.text);
+
+  // --chase on the same window, every change: the 0.82 flicker is gone
+  // 100ms later and the ask is back at 0.85, so +1c (0.83) and +2c (0.84)
+  // miss too. Retry re-checks from the reply and fires at 30s on the
+  // 0.90/0.91 book: 10 at 0.91 = 10 - 9.10 - 5.74c = +$0.8426, two tries.
+  const c = run(["--strategies=fav-final", "--chase"], tape);
+  ok(c.code === 0 && /MORE FILLS\?/.test(c.text), "--chase runs and implies --per-change", c.text);
+  const pcBlock = c.text.split("EVERY BOOK CHANGE — ")[1] || "";
+  ok(/\n\s+base\s+\+100ms\s+1\s+0 0\.0%\s+1\.00\s+— \/ 100\.0%/.test(pcBlock), "base: the flicker is gone, a miss on a window that won", pcBlock);
+  ok(/\n\s+chase\+2c\s+\+100ms\s+1\s+0 0\.0%/.test(pcBlock), "+2c does not reach the 0.85 offer", pcBlock);
+  ok(/\n\s+retry\s+\+100ms\s+1\s+1 100\.0%\s+2\.00\s+100\.0% \/ —\s+0\.9100\s+\+\$0\.84\s+\+8\.43c/.test(pcBlock), "retry: fires again at 30s and fills 10 at 0.91 = +$0.84, two tries", pcBlock);
+  ok(/READING THE MORE-FILLS TABLE/.test(c.text), "and says how to read it", c.text);
 }
 
 console.log("both venues at once (--per-change --venues, several sizes)");

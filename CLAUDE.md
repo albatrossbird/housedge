@@ -837,6 +837,20 @@ files' venue table carries the same "both at once" row
 (`strategies/momentum-ladder-small-10.json` is the 10-contract file
 beside the 30 and 200 ones).
 
+**More fills from the same decisions** (`--chase`, workflow `source:
+chase`; `lib/m15Chase.js`). Beside the per-change table, the same first
+decision sent four more ways, at 1 contract by default: a limit 1c or 2c
+above the price seen (never past the rule's price cap — a 97c decision is
+not chased), and RETRY — after a miss, the rule re-checked from the
+moment the reply came back and the next qualifying moment sent the same
+way, until a fill or the window closes. Every row pays the walked price.
+Read "won filled / missed": misses that win more often than fills are
+winners a chase or retry could recover. One `bookCursor` pass serves
+every variant, since each asks only about later instants than its last.
+`changeRows` now counts depth within 1c over EVERY level (above 0.90
+Kalshi ticks in 0.1c); it used to count only the touch and the level a
+cent away, which understated the per-change fills at 10+ contracts.
+
 **The underdog in the last seconds** (`--longshot`, workflow `source:
 longshot`). One contract of the underdog at 5c or less, 15/10/5s before
 the close, off the book standing then — one-sided books INCLUDED, since a

@@ -46,7 +46,8 @@ import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow, findEntry, runMarket } from "../lib/m15Backtest.js";
 import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFooter, printMakerSection, printMakerFooter, printVenueSection, daysPerYearFor, pct } from "../lib/m15BacktestReport.js";
 import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt, changeRows } from "../lib/m15Maker.js";
-import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
+import { kalshiMakerFee, kalshiTakerFee, roundKalshiFee } from "../lib/fees.js";
+import { simulateChase, CHASE_VARIANTS, CHASE_DELAYS_MS } from "../lib/m15Chase.js";
 import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, bestOfBoth, delayedFill, latestAtOrBefore, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { pmusTakerFee } from "../lib/venueCompare.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
@@ -65,7 +66,11 @@ const ASSUME_DEPTH = process.argv.includes("--assume-depth");
 const MAKER = process.argv.includes("--maker");
 const VENUES = process.argv.includes("--venues");
 const PREPLACE = process.argv.includes("--preplace");
-const PER_CHANGE = process.argv.includes("--per-change");
+// --chase: with --per-change (implied), ways to get MORE fills out of the
+// same rule — a limit 1-2c above the price seen, or re-checking the rule
+// after a miss (lib/m15Chase.js) — each priced on the book it would meet.
+const CHASE = process.argv.includes("--chase");
+const PER_CHANGE = process.argv.includes("--per-change") || CHASE;
 // --longshot: buy the UNDERDOG in the last seconds, where it is cheap. The
 // book a few seconds before the close is often one-sided (the favourite's
 // offer gone, its bid at 99c+), which every other mode drops, so these
@@ -210,6 +215,7 @@ const PC_MAX_SECS = 110;
 const pcStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && (st.entry?.secsMax ?? 900) + (st.entry?.lookbackSecs ?? 0) <= PC_MAX_SECS);
 if (PER_CHANGE && !pcStrategies.length) { console.error(`::error::--per-change needs a hold-to-settlement rule acting within ${PC_MAX_SECS}s of the close (e.g. --strategy=paper)`); process.exit(2); }
 const pcRows = [];
+const chaseRows = [];
 const pcStats = { windows: 0, excluded: {}, usWindows: 0, usExcluded: {} };
 // --per-change --venues: each Kalshi change-by-change decision routed
 // across both venues for ONE target size (the same money at risk as Kalshi
@@ -342,7 +348,12 @@ if (MAKER || VENUES || PREPLACE || PER_CHANGE || LONGSHOT) {
     pcStats.windows++;
     const m = wanted.get(ticker);
     const oneRows = (paths.get(ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
-    perChangeVenue("kalshi", m, w, oneRows, changeRows(w, { maxSecs: PC_MAX_SECS + 5 }));
+    const cRows = changeRows(w, { maxSecs: PC_MAX_SECS + 5 });
+    perChangeVenue("kalshi", m, w, oneRows, cRows);
+    if (CHASE) for (const [src, rows] of [["one", oneRows], ["pc", cRows]]) {
+      const res = simulateChase(w, m, rows, pcStrategies, { size: SIZE, requireDepth: !ASSUME_DEPTH });
+      chaseRows.push({ series: m.series, ticker: m.ticker, close: m.close, result: m.result, src, res });
+    }
   }
   // One replayed window through every pre-place variant, for every
   // favourite rule. Rows: { series, strategy, variant, close, posted,
@@ -503,6 +514,7 @@ for (const s of series) {
 
 if (PREPLACE) printPrePlace();
 if (PER_CHANGE) printPerChange();
+if (CHASE) printChase();
 if (PER_CHANGE && VENUES) { printBothVenues(); printRouting(); }
 if (LONGSHOT) printLongshot();
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
@@ -612,6 +624,53 @@ READING THE PER-CHANGE TABLE
 - "won filled / missed": does the market fill you mostly on the ones that lose? "only on a change": windows where a
   sub-second book met the rule and no once-a-second book did — transient books, the question this table exists for.
 - An upper bound like every row here: our own order is not in the book, and nobody reacts to it.`);
+}
+
+// --chase report: per rule, per decision path (once a second / every change),
+// each way of sending the order, at each reply delay — same windows, every
+// fill priced at what the book offered up to the order's limit.
+function printChase() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  console.log(`\n${"=".repeat(118)}\nMORE FILLS? — ${SIZE} contract(s), the same decisions sent differently, filled against the book DELAY ms later`);
+  console.log(`${"=".repeat(118)}`);
+  const label = { one: "ONCE A SECOND", pc: "EVERY BOOK CHANGE" };
+  for (const s of series) for (const [name] of pcStrategies) for (const src of ["pc", "one"]) {
+    const R = chaseRows.filter(r => r.series === s && r.src === src);
+    if (!R.length) continue;
+    const mult = fees.get(s)?.mult ?? 1;
+    const days = [...new Set(R.map(r => day(r.close)))].sort();
+    console.log(`\n${s} · ${name} · ${label[src]} — ${R.length} windows over ${days.length} days`);
+    console.log(`  ${"order".padEnd(10)} ${"delay".padEnd(7)} ${"decided".padStart(7)} ${"filled".padStart(14)} ${"tries".padStart(5)} ${"won filled / missed".padStart(20)} ${"avg paid".padStart(8)} ${"P&L".padStart(10)} ${"per ctr".padStart(8)} ${"t(days)".padStart(7)}`);
+    for (const v of CHASE_VARIANTS) for (const d of CHASE_DELAYS_MS) {
+      let dec = 0, filledW = 0, tries = 0, ctr = 0, paid = 0, pnl = 0;
+      const F = [], M = [], byDay = new Map(days.map(x => [x, 0]));
+      for (const r of R) {
+        const x = r.res[name]?.[v.key]?.[d];
+        if (!x || x.unknown) continue;
+        dec++; tries += x.tries;
+        if (!(x.n > 0)) { M.push(x.side === r.result); continue; }
+        const won = x.side === r.result, fee = roundKalshiFee(0.07 * mult * x.pq);
+        const p = (won ? x.n : 0) - x.cost - fee;
+        filledW++; ctr += x.n; paid += x.cost; pnl += p; F.push(won);
+        byDay.set(day(r.close), byDay.get(day(r.close)) + p);
+      }
+      const vals = [...byDay.values()], mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1)) : 0;
+      const wr = A => A.length ? `${(100 * A.filter(Boolean).length / A.length).toFixed(1)}%` : "—";
+      console.log(`  ${v.key.padEnd(10)} ${`+${d}ms`.padEnd(7)} ${String(dec).padStart(7)} ${`${filledW} ${dec ? (100 * filledW / dec).toFixed(1) : "—"}%`.padStart(14)} ${(dec ? (tries / dec).toFixed(2) : "—").padStart(5)} ${`${wr(F)} / ${wr(M)}`.padStart(20)} ${(ctr ? (paid / ctr).toFixed(4) : "—").padStart(8)} ${$(pnl).padStart(10)} ${(ctr ? `${pnl / ctr >= 0 ? "+" : ""}${(100 * pnl / ctr).toFixed(2)}c` : "—").padStart(8)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(vals.length))).toFixed(2) : "—").padStart(7)}`);
+    }
+  }
+  console.log(`
+READING THE MORE-FILLS TABLE
+- Same windows and the same first decision for every row; only how the order is sent differs. "base" is one limit at the
+  price seen. "chase+Nc" puts the limit N cents above it, never above the rule's price cap, and pays what the book offered
+  up to that limit. "retry" re-checks the rule from the moment a miss came back and sends the next qualifying moment the
+  same way, until a fill or the rule's window closes ("tries" = orders sent per decided window). Every row pays the walked
+  price, so "base" here can read slightly better than the per-change table, which charges the price seen.
+- "won filled / missed": if the missed windows win MORE often than the filled ones, misses are costing winners and a way
+  to fill them may pay; if they win less, the misses were protecting you.
+- Upper bounds like every row here: our order is not in the book and nobody reacts to it.`);
 }
 
 // --per-change --venues: the rule run on Kalshi and on Polymarket US at the
