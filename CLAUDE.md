@@ -851,6 +851,22 @@ every variant, since each asks only about later instants than its last.
 Kalshi ticks in 0.1c); it used to count only the touch and the level a
 cent away, which understated the per-change fills at 10+ contracts.
 
+**Measured 2026-10-15** (run 38772295501, KXBTC15M, 1 contract, 1,019
+windows over 17 days, upper bounds). fav-15-45s decides in ~14 windows a
+day once a second, ~16 on every change. Loosening it buys trades, not
+edge: 15-60s +55% decisions at -0.25c; a 99c cap +40% at +0.6c (the
+97-99c fills priced 96.2% and won 94.8%); a 5c spread cap and a 10s end
+add almost nothing. Only a 75c floor held up (+4.1c, t 2.9, same number
+of windows, entries moved earlier and lower) — the best of six variants
+tried on the same days, so a candidate to shadow, not a finding.
+Misses ARE disproportionately winners (every-change base at +100ms: won
+89.6% filled, 93.5% missed), so sending differently does help: at +100ms
+the once-a-second bot goes 63.8% -> 89.0% filled with +1c, 95.9% with
++2c, P&L +$6.35 -> +$7.74 / +$8.10 while the per-contract edge falls
+4.04c -> 3.54c / 3.43c; retry fills ~95% but adds less, and at +250ms on
+the every-change path it LOWERS P&L (later moments cost more). No
+difference here clears noise (t 1-2).
+
 **The underdog in the last seconds** (`--longshot`, workflow `source:
 longshot`). One contract of the underdog at 5c or less, 15/10/5s before
 the close, off the book standing then — one-sided books INCLUDED, since a
