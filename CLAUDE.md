@@ -836,6 +836,15 @@ files' venue table carries the same "both at once" row
 (`strategies/momentum-ladder-small-10.json` is the 10-contract file
 beside the 30 and 200 ones).
 
+**The underdog in the last seconds** (`--longshot`, workflow `source:
+longshot`). One contract of the underdog at 5c or less, 15/10/5s before
+the close, off the book standing then — one-sided books INCLUDED, since a
+decided window's book is exactly that and every other mode drops it —
+filled as a limit 100ms later, held to settlement, split by whether the
+rule traded the window (the "hedge" reading). KXBTC15M is priced
+`tapered_deci_cent`: 0.1c steps below 10c and above 90c, so 0.1c is the
+floor (checked 2026-10-15 on `/markets`).
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win

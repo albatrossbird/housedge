@@ -66,6 +66,15 @@ const MAKER = process.argv.includes("--maker");
 const VENUES = process.argv.includes("--venues");
 const PREPLACE = process.argv.includes("--preplace");
 const PER_CHANGE = process.argv.includes("--per-change");
+// --longshot: buy the UNDERDOG in the last seconds, where it is cheap. The
+// book a few seconds before the close is often one-sided (the favourite's
+// offer gone, its bid at 99c+), which every other mode drops, so these
+// lines are kept here on their own. Times are seconds before the close.
+const LONGSHOT = process.argv.includes("--longshot");
+const LS_TIMES = [15, 10, 5], LS_MAX_SECS = 30, LS_STALE_SECS = 5, LS_CAP = 0.05;
+const lsLines = new Map();   // ticker -> [{ t, secs, bid, ask, bidD1, askD1 }] within LS_MAX_SECS of the close
+const lsRows = [];
+const lsStats = { windows: 0, excluded: {} };
 const LATENCY_MS = Number(opt("latency-ms", 100));
 const CUTOFF_SECS = Number(opt("cutoff-secs", 5));
 const SINCE_MS = Date.now() - DAYS * 86400000;
@@ -127,6 +136,12 @@ async function worker() {
         if (xs != null && xs > 0 && xs <= 120) c.x120++;
         if (ts > 0 && ts <= 45) { c.t45++; if (xs != null) { c.staleMax = Math.max(c.staleMax, xs - ts); if (xs > 45) c.stale45++; } }
         if (ts > 0 && ts <= 120) c.t120++;
+      }
+      if (LONGSHOT && Number.isFinite(o.x) && m.close - o.x > 0 && m.close - o.x <= LS_MAX_SECS * 1000) {
+        const v = x => (x == null || x === "" || !Number.isFinite(Number(x)) ? null : Number(x));
+        const d = Array.isArray(o.d) ? o.d : [];
+        if (!lsLines.has(o.m)) lsLines.set(o.m, []);
+        lsLines.get(o.m).push({ t: o.x, secs: (m.close - o.x) / 1000, bid: v(o.b), ask: v(o.a), bidD1: v(d[0]), askD1: v(d[3]) });
       }
       const r = archiveRow(o, m.close);
       // Two different reasons, counted apart: a line from before the
@@ -256,7 +271,7 @@ function perChangeVenue(venue, m, w, oneRows, changeRowsList) {
     pcRows.push({ venue, size, series: m.series, ticker: m.ticker, strategy: name, close: m.close, result: m.result, one, pc });
   }
 }
-if (MAKER || VENUES || PREPLACE || PER_CHANGE) {
+if (MAKER || VENUES || PREPLACE || PER_CHANGE || LONGSHOT) {
   for (const m of wanted.values()) {
     const path = (paths.get(m.ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     if (!path.length) continue;
@@ -268,7 +283,7 @@ if (MAKER || VENUES || PREPLACE || PER_CHANGE) {
       decisions.get(m.ticker).push({ name, decision: { t: hit.row.t, secs: hit.row.secs, side: hit.side, qty: hit.qty, price: hit.price, priceMax: strat.entry.priceMax } });
     }
   }
-  const want = new Map([...(PREPLACE || PER_CHANGE ? [...wanted.keys()].filter(t => paths.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
+  const want = new Map([...(PREPLACE || PER_CHANGE || LONGSHOT ? [...wanted.keys()].filter(t => paths.has(t) || lsLines.has(t)) : decisions.keys())].map(t => [t, wanted.get(t).close]));
   const tape = newTape();
   const done = new Set();
   const finalize = ticker => {
@@ -281,8 +296,10 @@ if (MAKER || VENUES || PREPLACE || PER_CHANGE) {
       if (decided.length) makerStats.excluded[why] = (makerStats.excluded[why] || 0) + 1;
       if (PREPLACE) preStats.excluded[why] = (preStats.excluded[why] || 0) + 1;
       if (PER_CHANGE) pcStats.excluded[why] = (pcStats.excluded[why] || 0) + 1;
+      if (LONGSHOT) lsStats.excluded[why] = (lsStats.excluded[why] || 0) + 1;
       return;
     }
+    if (LONGSHOT) longshotWindow(ticker, w, decided);
     if (PREPLACE) preplaceWindow(ticker, w, decided);
     if (PER_CHANGE) perChangeWindow(ticker, w);
     if (!decided.length) return;
@@ -297,6 +314,27 @@ if (MAKER || VENUES || PREPLACE || PER_CHANGE) {
       maker.set(`${name}|${ticker}`, { decision, sims });
     }
   };
+  // --longshot: at each time before the close, the underdog's price on the
+  // book standing then (no older than LS_STALE_SECS), bought for ONE contract
+  // as a limit at that price, filled against the real book 0 and 100ms later.
+  function longshotWindow(ticker, w, decided) {
+    lsStats.windows++;
+    const m = wanted.get(ticker), lines = (lsLines.get(ticker) || []).sort((a, b) => a.t - b.t);
+    for (const T of LS_TIMES) {
+      let line = null;
+      for (const l of lines) if (l.secs >= T) line = l;
+      if (!line || line.secs - T > LS_STALE_SECS) continue;
+      // The favourite, from whichever side the book still shows.
+      const favYes = line.bid != null && line.ask != null ? (line.bid + line.ask) / 2 >= 0.5 : line.bid != null ? line.bid >= 0.5 : line.ask != null ? line.ask > 0.5 : null;
+      if (favYes == null) continue;
+      const side = favYes ? "no" : "yes";
+      const price = favYes ? (line.bid == null ? null : Math.round((1 - line.bid) * 10000) / 10000) : line.ask;
+      if (price == null || !(price > 0) || price > LS_CAP + 1e-9) continue;
+      const snaps = snapshotsAt(w, [line.t, line.t + 100], 10);
+      const fill = x => { const a = availableAt(snaps.get(x), side, price); return a == null ? null : a >= 1; };
+      lsRows.push({ series: m.series, close: m.close, T, pilot: decided.length > 0, side, price, won: side === m.result, f0: fill(line.t), f100: fill(line.t + 100) });
+    }
+  }
   // One replayed window: each rule decided on the once-a-second path (as
   // everywhere else) and on every book change, and each decision sent as
   // a limit at the price it saw, filled against the book DELAY ms later.
@@ -466,6 +504,7 @@ for (const s of series) {
 if (PREPLACE) printPrePlace();
 if (PER_CHANGE) printPerChange();
 if (PER_CHANGE && VENUES) { printBothVenues(); printRouting(); }
+if (LONGSHOT) printLongshot();
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
 if (MAKER) printMakerFooter();
 
@@ -680,4 +719,40 @@ READING THE ROUTING TABLE
   buys what did not fill at Kalshi's touch when the orders land, inside the rule's price cap; "Kalshi + overflow"
   sends Kalshi what its book showed and only the remainder to .us. A .us book over 2s old is not used.
 - Limits at the prices seen, filled against each venue's book DELAY ms after the decision; upper bounds as everywhere.`);
+}
+
+// --longshot report: is the underdog in the last seconds worth what it costs?
+// One contract a window, held to settlement, Kalshi's taker fee at $0.0001.
+function printLongshot() {
+  const BUCKETS = [["0.1-0.9c", 0, 0.0095], ["1c", 0.0095, 0.0105], ["1.1-2c", 0.0105, 0.0205], ["2.1-5c", 0.0205, LS_CAP + 1e-9]];
+  const wilson = (k, n) => { if (!n) return [null, null]; const z = 1.96, p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), r = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)); return [(c - r) / d, (c + r) / d]; };
+  const pc = x => (x == null ? "—" : `${(100 * x).toFixed(2)}%`);
+  console.log(`\n${"=".repeat(118)}\nTHE UNDERDOG IN THE LAST SECONDS — one contract at its ask (${LS_CAP * 100}c or less), held to settlement`);
+  console.log(`${lsStats.windows} windows replayed; left out ${JSON.stringify(lsStats.excluded)}`);
+  console.log(`${"=".repeat(118)}`);
+  for (const s of series) {
+    const mult = fees.get(s)?.mult ?? 1;
+    for (const T of LS_TIMES) for (const [g, f] of [["every window", () => true], ["the pilot did NOT trade", r => !r.pilot], ["the pilot DID trade (a hedge)", r => r.pilot]]) {
+      const R = lsRows.filter(r => r.series === s && r.T === T && f(r));
+      if (!R.length) continue;
+      console.log(`\n${s} · ${T}s before the close · ${g}`);
+      console.log(`  ${"price".padEnd(9)} ${"offered".padStart(7)} ${"filled +100ms".padStart(13)} ${"avg paid".padStart(9)} ${"needs".padStart(7)} ${"won".padStart(7)} ${"won range (95%)".padStart(17)} ${"P&L".padStart(9)} ${"per ctr".padStart(8)}`);
+      for (const [label, lo, hi] of [...BUCKETS, ["all", 0, LS_CAP + 1e-9]]) {
+        const B = R.filter(r => r.price > lo && r.price <= hi), F = B.filter(r => r.f100);
+        if (!B.length) continue;
+        const won = F.filter(r => r.won).length, paid = F.reduce((a, r) => a + r.price, 0), fee = F.reduce((a, r) => a + kalshiTakerFee(r.price, 1, mult), 0);
+        const pnl = won - paid - fee, [lo95, hi95] = wilson(won, F.length);
+        console.log(`  ${label.padEnd(9)} ${String(B.length).padStart(7)} ${String(F.length).padStart(13)} ${(F.length ? `${(100 * paid / F.length).toFixed(2)}c` : "—").padStart(9)} ${(F.length ? pc((paid + fee) / F.length) : "—").padStart(7)} ${(F.length ? pc(won / F.length) : "—").padStart(7)} ${(lo95 == null ? "—" : `[${pc(lo95)}, ${pc(hi95)}]`).padStart(17)} ${`${pnl < 0 ? "-" : "+"}$${Math.abs(pnl).toFixed(2)}`.padStart(9)} ${(F.length ? `${(100 * pnl / F.length).toFixed(2)}c` : "—").padStart(8)}`);
+      }
+    }
+  }
+  console.log(`
+READING THE UNDERDOG TABLE
+- "offered": windows where the underdog could be bought at ${LS_CAP * 100}c or less at that moment (from the book standing
+  then, one-sided books included); "filled": a 1-contract limit at that price still filled 100ms later.
+- "needs" is price + fee: the win rate at which the bet breaks even. The bet pays only if "won" is clearly above it;
+  the won range is a Wilson interval, and at these prices a handful of wins moves it a lot.
+- "the pilot DID trade" is the hedge reading: the underdog wins exactly when the pilot's favourite loses, so a
+  negative row here is what the insurance costs per window, not a separate loss.
+- Kalshi prices this market in 0.1c steps below 10c (tapered_deci_cent), so 0.1c is the lowest price.`);
 }

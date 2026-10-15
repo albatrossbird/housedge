@@ -268,5 +268,26 @@ console.log("both venues at once (--per-change --venues, several sizes)");
   ok(/\+\$3\.39 \(100%, 0%\)\s+\+\$0\.00 \(0%, 0%\)/.test(line(200, "kalshi alone")), "200: Kalshi alone has only the 20", route(200));
 }
 
+console.log("the underdog in the last seconds (--longshot)");
+{
+  // The base archive has YES at .92/.93 20s out (NO at 8c: over the 5c cap)
+  // and a one-sided book 10s out: a .99 YES bid and nothing offered, so NO
+  // costs 1c. The final record agrees. YES settles: the 1c NO loses, paying
+  // 1c + 0.07 x .01 x .99 = 0.0693c -> 0.07c fee = 1.07c. fav-final bought
+  // YES 30s out, so this is the hedge reading.
+  const tape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.90, 100]], [[0.91, 50]]] }),
+    (c, T) => ({ k: "full", t: c - 10000, x: c - 10000, m: T, L: [[[0.99, 200]], []] }),
+  ];
+  const r = run(["--strategies=fav-final", "--longshot"], tape);
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/1 windows replayed/.test(r.text) && /THE UNDERDOG IN THE LAST SECONDS/.test(r.text), "replays the window", r.text);
+  ok(/10s before the close · the pilot DID trade \(a hedge\)\n[^\n]*\n\s+1c\s+1\s+1\s+1\.00c\s+1\.07%\s+0\.00%[^\n]*-\$0\.01\s+-1\.07c/.test(r.text), "10s out: NO at 1c off the one-sided book, filled, lost: -1.07c", r.text);
+  ok(/5s before the close · the pilot DID trade/.test(r.text), "5s out: the same 10s-old book is within 5s, so it counts", r.text);
+  ok(!/15s before the close/.test(r.text), "15s out the underdog cost 8c, over the cap: nothing offered", r.text);
+  ok(!/the pilot did NOT trade/.test(r.text), "the pilot traded this window, so no 'did not trade' row", r.text);
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
