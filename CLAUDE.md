@@ -850,7 +850,13 @@ every variant, since each asks only about later instants than its last.
 With `--venues` the same variants run on Polymarket US — decided and
 filled on the .us book, at .us fees (`pmusOrderFee`: each fill rounded
 half-even, the order capped at the rounded total) — at every `--size`,
-with Kalshi printed again on exactly the windows .us covered.
+with Kalshi printed again on exactly the windows .us covered. **Measured
+2026-10-19** (run 39304246981, 75c floor, once a second, 20 days, 448
+windows both covered): at +100ms with +1c, .us fills ~97% of decisions
+but earns +1.85c / +1.94c / +1.56c a contract at 10 / 30 / 200 (t 1.0-1.4)
+against Kalshi's +4.81c / +4.77c / +4.13c (t 2.6-3.5) on the same windows.
+At the price seen .us is ~0 (+0.70c at 10, +0.03c at 200): its misses won
+97.1% against 89.1% filled, so on .us the +1c is what recovers the edge.
 `changeRows` now counts depth within 1c over EVERY level (above 0.90
 Kalshi ticks in 0.1c); it used to count only the touch and the level a
 cent away, which understated the per-change fills at 10+ contracts.
