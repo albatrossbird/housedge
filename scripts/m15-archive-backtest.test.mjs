@@ -264,6 +264,14 @@ console.log("both venues at once (--per-change --venues, several sizes)");
   ok(/once a second\s+both\s+2(\s+\+\$8\.90 \(\d+%\)){4}/.test(block(200)), "both at 200: +$8.90", block(200));
   ok(/READING THE BOTH-VENUES TABLE/.test(r.text), "and says how to read it", r.text);
 
+  // --us-tune on the same window. Kalshi decides YES at 0.91 from its 30s
+  // once-a-second book; the newest .us book then is the 40s one, 10s old, so
+  // that window is NOT sent to .us. .us's own paths buy YES at 0.90.
+  const ut = run(["--strategies=fav-final", "--us-tune"], tape, usLines);
+  ok(ut.code === 0 && /POLYMARKET US VARIANTS/.test(ut.text), "--us-tune runs and implies --venues", ut.text);
+  ok(/Kalshi-decided windows not sent to \.us: \{"fav-final: stale \.us book":1\}/.test(ut.text), "Kalshi's decision meets a 10s-old .us book: skipped, and said so", ut.text);
+  ok(/TUNE days —\.\.— \(0\) \| TEST days \d{4}-\d\d-\d\d\.\.\d{4}-\d\d-\d\d \(1\)/.test(ut.text) && /no variant has a score on the tune half/.test(ut.text), "one day cannot be split: nothing is chosen rather than choosing on the test day", ut.text);
+
   // --chase --venues: the same rule decided and filled on the .us book.
   // Once a second it buys YES at 0.90, asking min(200, 50 within 1c) = 50;
   // 100ms later the book is unchanged: 50 at 0.90, fee 0.0695 x 50 x 0.09 =

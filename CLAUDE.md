@@ -857,6 +857,18 @@ but earns +1.85c / +1.94c / +1.56c a contract at 10 / 30 / 200 (t 1.0-1.4)
 against Kalshi's +4.81c / +4.77c / +4.13c (t 2.6-3.5) on the same windows.
 At the price seen .us is ~0 (+0.70c at 10, +0.03c at 200): its misses won
 97.1% against 89.1% filled, so on .us the +1c is what recovers the edge.
+**Tuning for .us without fooling ourselves** (`--us-tune`, workflow
+`source: ustune`, `lib/m15UsTune.js`). Each rule on .us twelve ways:
+decided on .us once a second, on every .us book, or on KALSHI's book
+(Kalshi picks the moment and side; the .us book at that instant, none older
+than 2s, sets the price and size, skipped above the cap); at the price seen
+or +1c. The first half of the days chooses ONE variant by a rule fixed
+before the run — the highest of each variant's LOWER t across +100ms and
++250ms — and only that variant's second-half row is the result. Twelve
+variants make a lucky test-half winner likely, so the full test table is
+printed for reference and is not a second chance to choose.
+`scripts/m15-us-tune.test.mjs` pins it (mutation-checked: stale guard,
+cap, .us pricing, limit cap, ties).
 `changeRows` now counts depth within 1c over EVERY level (above 0.90
 Kalshi ticks in 0.1c); it used to count only the touch and the level a
 cent away, which understated the per-change fills at 10+ contracts.

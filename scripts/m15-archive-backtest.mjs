@@ -48,6 +48,7 @@ import { strategiesFromArgs, reachSecs, seriesFees, printSeriesTable, printFoote
 import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, snapshotsAt, changeRows } from "../lib/m15Maker.js";
 import { kalshiMakerFee, kalshiTakerFee, roundKalshiFee } from "../lib/fees.js";
 import { simulateChase, CHASE_VARIANTS, CHASE_DELAYS_MS } from "../lib/m15Chase.js";
+import { kalshiDecidesUs, chooseVariant, splitDays, US_TUNE_LIMITS, US_TUNE_DELAYS_MS } from "../lib/m15UsTune.js";
 import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, bestOfBoth, delayedFill, latestAtOrBefore, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { pmusTakerFee, pmusOrderFee } from "../lib/venueCompare.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
@@ -64,7 +65,12 @@ const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
 const SIZE = SIZES[0] ?? 10;
 const ASSUME_DEPTH = process.argv.includes("--assume-depth");
 const MAKER = process.argv.includes("--maker");
-const VENUES = process.argv.includes("--venues");
+// --us-tune: twelve Polymarket US variants of each rule (decided on .us
+// once a second, on every .us book, or on KALSHI's book; at the price seen
+// or +1c), tuned on the first half of the days and judged on the second
+// (lib/m15UsTune.js). Implies --venues.
+const US_TUNE = process.argv.includes("--us-tune");
+const VENUES = process.argv.includes("--venues") || US_TUNE;
 const PREPLACE = process.argv.includes("--preplace");
 // --chase: with --per-change (implied), ways to get MORE fills out of the
 // same rule — a limit 1-2c above the price seen, or re-checking the rule
@@ -216,6 +222,9 @@ const pcStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && (
 if (PER_CHANGE && !pcStrategies.length) { console.error(`::error::--per-change needs a hold-to-settlement rule acting within ${PC_MAX_SECS}s of the close (e.g. --strategy=paper)`); process.exit(2); }
 const pcRows = [];
 const chaseRows = [];
+const usTuneRows = [];
+const usTuneStats = { windows: 0, excluded: {} };
+const tuneStrategies = Object.entries(strategies).filter(([, st]) => !st.exit);
 // --chase: the same decisions sent differently, at every --size, on the
 // venue's own book (Kalshi's final-two-minutes record, or every .us book).
 function chaseWindow(venue, m, w, oneRows, cRows) {
@@ -458,6 +467,20 @@ if (VENUES) {
         routeAcrossVenues(m, ws, all);
       }
     }
+    // --us-tune: the twelve .us variants on this window.
+    if (US_TUNE && rows.length) {
+      if (why) usTuneStats.excluded[why] = (usTuneStats.excluded[why] || 0) + 1;
+      else {
+        usTuneStats.windows++;
+        const m = wanted.get(ticker), live = r => r.t < m.close && r.secs > 0, ws = resolveUsWindow(w, "long");
+        const kRows = (paths.get(ticker) || []).filter(live).sort((a, b) => a.t - b.t);
+        const opts = { size: SIZE, requireDepth: !ASSUME_DEPTH, variants: US_TUNE_LIMITS.map(l => ({ ...l, retry: false })), delays: US_TUNE_DELAYS_MS };
+        const base = { ticker, close: m.close, result: m.result, series: m.series };
+        usTuneRows.push({ ...base, src: "us-once", res: simulateChase(ws, m, rows.filter(live), tuneStrategies, opts) });
+        usTuneRows.push({ ...base, src: "us-change", res: simulateChase(ws, m, all.filter(live), tuneStrategies, opts) });
+        usTuneRows.push({ ...base, src: "kalshi", res: kalshiDecidesUs({ market: m, kRows, usRows: all, ws, strategies: tuneStrategies, size: SIZE, requireDepth: !ASSUME_DEPTH }) });
+      }
+    }
     if (!MAKER || !rows.length) return;
     if (why) { usStats.excluded[why] = (usStats.excluded[why] || 0) + 1; return; }
     usStats.windows++;
@@ -522,6 +545,7 @@ for (const s of series) {
 if (PREPLACE) printPrePlace();
 if (PER_CHANGE) printPerChange();
 if (CHASE) printChase();
+if (US_TUNE) printUsTune();
 if (PER_CHANGE && VENUES) { printBothVenues(); printRouting(); }
 if (LONGSHOT) printLongshot();
 printFooter({ size: SIZE, fills: "filled at the archived once-a-second book" });
@@ -631,6 +655,73 @@ READING THE PER-CHANGE TABLE
 - "won filled / missed": does the market fill you mostly on the ones that lose? "only on a change": windows where a
   sub-second book met the rule and no once-a-second book did — transient books, the question this table exists for.
 - An upper bound like every row here: our own order is not in the book, and nobody reacts to it.`);
+}
+
+// --us-tune report. The choice is made on the TUNE days only, by a rule
+// fixed before looking (the lower of a variant's t at the two delays), and
+// that one variant is then read on the TEST days. Every variant's test row is
+// printed too, for reference — choosing again from those would be tuning on
+// the test half.
+function printUsTune() {
+  const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
+  const day = ms => new Date(ms).toISOString().slice(0, 10);
+  const src = { "us-once": ".us once a second", "us-change": ".us every change", kalshi: "Kalshi decides, .us fills" };
+  const { tune, test } = splitDays(usTuneRows.map(r => day(r.close)), opt("split", null));
+  const variants = [];
+  for (const s of Object.keys(src)) for (const [name] of tuneStrategies) for (const l of US_TUNE_LIMITS) variants.push({ s, name, l: l.key, label: `${src[s]} · ${name} · ${l.key === "seen" ? "at price seen" : "limit +1c"}` });
+  const stats = (v, days, d) => {
+    const keep = new Set(days);
+    let dec = 0, filled = 0, ctr = 0, pnl = 0;
+    const byDay = new Map(days.map(x => [x, 0]));
+    for (const r of usTuneRows) {
+      if (r.src !== v.s || !keep.has(day(r.close))) continue;
+      const node = r.res[v.name];
+      if (!node || node.skip) continue;
+      const x = node[v.l]?.[d];
+      if (!x || x.unknown) continue;
+      dec++;
+      if (!(x.n > 0)) continue;
+      const p = (x.side === r.result ? x.n : 0) - x.cost - pmusOrderFee(x.fills || []);
+      filled++; ctr += x.n; pnl += p; byDay.set(day(r.close), byDay.get(day(r.close)) + p);
+    }
+    const vals = [...byDay.values()], mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+    const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1)) : 0;
+    return { dec, filled, ctr, pnl, t: sd > 1e-12 ? mean / (sd / Math.sqrt(vals.length)) : (dec ? 0 : NaN) };
+  };
+  const cell = x => `${String(x.dec).padStart(4)} ${`${x.dec ? (100 * x.filled / x.dec).toFixed(0) : "—"}%`.padStart(4)} ${$(x.pnl).padStart(9)} ${(x.ctr ? `${x.pnl / x.ctr >= 0 ? "+" : ""}${(100 * x.pnl / x.ctr).toFixed(2)}c` : "—").padStart(7)} ${(Number.isFinite(x.t) ? x.t.toFixed(2) : "—").padStart(5)}`;
+  const head = `  ${"variant".padEnd(62)} ${US_TUNE_DELAYS_MS.map(d => `|  +${d}ms: dec fill       P&L per ctr     t`).join(" ")}`;
+  const table = (days, title, extra = () => "") => {
+    console.log(`\n${title}`);
+    console.log(head);
+    for (const v of variants) console.log(`  ${v.label.padEnd(62)} ${US_TUNE_DELAYS_MS.map(d => `| ${cell(stats(v, days, d))}`).join(" ")}${extra(v)}`);
+  };
+  console.log(`\n${"=".repeat(118)}\nPOLYMARKET US VARIANTS — tuned on the first half of the days, judged on the second (${SIZE} contracts, .us fees)`);
+  console.log(`${usTuneStats.windows} .us windows replayed; left out ${JSON.stringify(usTuneStats.excluded)}`);
+  console.log(`TUNE days ${tune[0] ?? "—"}..${tune[tune.length - 1] ?? "—"} (${tune.length}) | TEST days ${test[0] ?? "—"}..${test[test.length - 1] ?? "—"} (${test.length})`);
+  console.log(`${"=".repeat(118)}`);
+  const skips = {};
+  for (const r of usTuneRows) if (r.src === "kalshi") for (const [name, node] of Object.entries(r.res)) if (node?.skip) skips[`${name}: ${node.skip}`] = (skips[`${name}: ${node.skip}`] || 0) + 1;
+  console.log(`Kalshi-decided windows not sent to .us: ${JSON.stringify(skips)}`);
+  for (const v of variants) v.score = Math.min(...US_TUNE_DELAYS_MS.map(d => stats(v, tune, d).t));
+  table(tune, "TUNE HALF — the choice is made here: score = the lower of the two delays' t", v => `  score ${Number.isFinite(v.score) ? v.score.toFixed(2) : "—"}`);
+  const chosen = chooseVariant(variants);
+  if (!chosen) { console.log("\nno variant has a score on the tune half — nothing chosen"); return; }
+  console.log(`\nCHOSEN ON THE TUNE HALF: ${chosen.label} (score ${chosen.score.toFixed(2)})`);
+  console.log(`TEST HALF, CHOSEN VARIANT ONLY:`);
+  console.log(head);
+  console.log(`  ${chosen.label.padEnd(62)} ${US_TUNE_DELAYS_MS.map(d => `| ${cell(stats(chosen, test, d))}`).join(" ")}`);
+  table(test, "TEST HALF, EVERY VARIANT — for reference only; picking from this table again is tuning on the test half");
+  console.log(`
+READING THE .US VARIANTS TABLE
+- Every variant buys on Polymarket US and is filled against the .us book DELAY ms after its decision, paying the walked
+  .us price and the .us fee (each fill half-even, capped at the rounded total). "dec" = decisions sent; "fill" = share
+  that got at least one contract; t = mean daily P&L over its standard error across that half's days.
+- "Kalshi decides" chooses the moment and the side on Kalshi's once-a-second book, then prices the order off the .us book
+  at that instant (none older than 2s), for the .us contracts within 1c, skipped where .us offers above the cap.
+- The rule for choosing was fixed before the run: the highest tune-half score, where score is the LOWER of the two
+  delays' t. Only the chosen variant's test-half row is the result; with twelve variants, one doing well on the test half
+  by luck is likely, so the reference table is not a second chance to choose.
+- Upper bounds as everywhere: our order is not in the replayed book and nobody reacts to it.`);
 }
 
 // --chase report: per rule, per decision path (once a second / every change),
