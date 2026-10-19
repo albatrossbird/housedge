@@ -7,6 +7,12 @@ name: Backtest 15-minute strategies
 # source=perchange: the archive backtest with --per-change — each rule
 # acting in the final two minutes decided once a second AND on every
 # book change, both filled at +0..1000ms against the real book.
+# source=longshot: the archive backtest with --longshot — the underdog
+# bought for one contract 15/10/5s before the close at 5c or less,
+# split by whether the rule traded the window.
+# source=chase: perchange plus ways to get MORE fills from the same
+# decisions — a limit 1-2c above the price seen (never past the rule's
+# cap), and re-checking the rule after a miss — each on the real book.
 # source=rulebook: scripts/m15-rulebook-backtest.mjs runs a rule file
 # (strategies/*.json) tick by tick over the same archive, with Coinbase
 # candles for the Bitcoin signals; every action goes up as an artifact.
@@ -19,9 +25,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
+        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
         type: choice
-        options: [poller, archive, perchange, rulebook, bigprint]
+        options: [poller, archive, perchange, longshot, chase, rulebook, bigprint]
         default: poller
       series:
         description: "Space-separated series"
@@ -104,6 +110,8 @@ jobs:
           SCRIPT=scripts/m15-backtest.mjs
           EXTRA=""
           if [ "$SOURCE" = "perchange" ]; then SOURCE=archive; EXTRA="--per-change"; fi
+          if [ "$SOURCE" = "longshot" ]; then SOURCE=archive; EXTRA="--longshot"; fi
+          if [ "$SOURCE" = "chase" ]; then SOURCE=archive; EXTRA="--chase"; fi
           if [ "$SOURCE" = "archive" ]; then
             SCRIPT=scripts/m15-archive-backtest.mjs
             if [ "$MAKER" = "true" ]; then EXTRA="$EXTRA --maker"; fi

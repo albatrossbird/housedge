@@ -18,7 +18,7 @@
 //      fills only what is still offered at or better; an unknown book is
 //      null, not a miss; the fallback buys the rest at Kalshi's touch
 //      inside the price cap; an order after the close fills nothing.
-import { pmusRow, secondly, usTakerSide, pmusFee, pmusMakerFee, bestOfBoth, legsTrade, newUsTape, feedUsTape, resolveUsWindow,
+import { pmusRow, secondly, usTakerSide, pmusFee, pmusMakerFee, PMUS_MAKER_TIERS_FROM, bestOfBoth, legsTrade, newUsTape, feedUsTape, resolveUsWindow,
   availableAt, touchToBuy, delayedFill, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { pmusTakerFee } from "../lib/venueCompare.js";
 import { kalshiTakerFee } from "../lib/fees.js";
@@ -44,8 +44,12 @@ console.log(".us books as rows");
 console.log("fees and sides");
 {
   ok(pmusFee(0.85, 10) === pmusTakerFee(0.85, 10) && pmusFee(0.5, 100) === 1.74, ".us taker fee: 0.0695 x 100 x 0.25 = 1.7375 -> 1.74");
-  ok(pmusMakerFee(0.5, 100) === -0.31, ".us maker REBATE: 0.0125 x 100 x 0.25 = 0.3125 -> paid 0.31", String(pmusMakerFee(0.5, 100)));
-  ok(pmusMakerFee(0.5, 0) === 0 && pmusMakerFee(1, 10) === 0, "no rebate on nothing");
+  ok(pmusMakerFee(0.5, 100, C) === -0.31, ".us maker REBATE before 2026-10-19: 0.0125 x 100 x 0.25 = 0.3125 -> paid 0.31", String(pmusMakerFee(0.5, 100, C)));
+  ok(pmusMakerFee(0.5, 0, C) === 0 && pmusMakerFee(1, 10, C) === 0, "no rebate on nothing");
+  const change = Date.parse("2026-10-19T17:00:00Z");
+  ok(PMUS_MAKER_TIERS_FROM === change, "the tiers start 1:00 PM ET (EDT) on 2026-10-19", new Date(PMUS_MAKER_TIERS_FROM).toISOString());
+  ok(pmusMakerFee(0.5, 100, change - 1) === -0.31 && pmusMakerFee(0.5, 100, change) === 0, "from the change, a Tier 1 account (< $10M a month) is paid nothing", String(pmusMakerFee(0.5, 100, change)));
+  ok(pmusMakerFee(0.5, 100, Date.parse("2026-12-01T00:00:00Z")) === 0, "and stays unpaid after it");
   ok(usTakerSide("ORDER_INTENT_BUY_LONG") === "yes" && usTakerSide("ORDER_INTENT_SELL_SHORT") === "yes", "buying Up or selling Down takes Up offers");
   ok(usTakerSide("ORDER_INTENT_SELL_LONG") === "no" && usTakerSide("ORDER_INTENT_BUY_SHORT") === "no", "selling Up or buying Down hits Up bids");
   ok(usTakerSide("ORDER_INTENT_UNKNOWN") === null && usTakerSide(null) === null, "anything else is not read as a side");
@@ -94,7 +98,9 @@ console.log("resting orders on the .us tape");
   const sim = simulateMaker(asShort, dec, { mode: "join" });
   ok(sim.status === "ok" && sim.queueAhead === 100 && sim.filled === 10, "join behind 100: 60 + 60 sold into the bid fills 10", JSON.stringify(sim));
   const t = makerTrade({ ticker: "KXBTC15M-W", close: C, result: "yes" }, dec, sim, { makerFee: pmusMakerFee, takerFee: pmusFee });
-  ok(near(t.pnl, 10 - 8.4 - pmusMakerFee(0.84, 10)) && t.pnl > 1.6, "and the .us rebate is added to the P&L", JSON.stringify(t));
+  ok(near(t.pnl, 10 - 8.4 - pmusMakerFee(0.84, 10, C)) && t.pnl > 1.6 && t.entryFee < 0, "and the .us rebate is added to the P&L", JSON.stringify(t));
+  const late = makerTrade({ ticker: "KXBTC15M-W", close: PMUS_MAKER_TIERS_FROM + 900000, result: "yes" }, dec, sim, { makerFee: pmusMakerFee, takerFee: pmusFee });
+  ok(late.entryFee === 0 && near(late.pnl, 10 - 8.4), "a window closing after the change earns no rebate: makerTrade dates the fill by the close", JSON.stringify(late));
   T.conn.push(C - 50000);
   ok(disrupted(T, w) === "socket event", "a .us socket event in the final two minutes excludes the window");
 }

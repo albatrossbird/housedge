@@ -119,7 +119,8 @@ console.log("across venues (--venues)");
   //   polyus        10 at 0.90, .us fee 0.06255 -> 6c  -> +$0.94
   //   best of both  all 10 on .us (0.906 all-in < 0.91574) -> +$0.94, 0.97c a contract saved
   // With --maker, the .us bid at 0.89 (300 ahead) is sold 310 into: join
-  // fills 10 at 0.89 and is PAID 0.0125 x 10 x 0.89 x 0.11 = 1.2c -> 1c.
+  // fills 10 at 0.89 and is PAID 0.0125 x 10 x 0.89 x 0.11 = 1.2c -> 1c —
+  // before 2026-10-19 17:00 UTC; from then a Tier 1 account is paid nothing.
   const usLines = [
     (c, s) => ({ k: "mkt", t: c - 900000, m: s, kalshi: "x" }),
     (c, s) => ({ k: "pb", t: c - 100000, x: c - 100000, m: s, b: [[0.69, 100]], a: [[0.70, 100]] }),
@@ -137,7 +138,9 @@ console.log("across venues (--venues)");
   const mk = run(["--strategies=fav-final", "--venues", "--maker"], [], usLines);
   ok(mk.code === 0, "with --maker: runs cleanly", mk.text);
   ok(/RESTING ORDERS ON POLYMARKET US/.test(mk.text) && /trade sides agree with the book on 100\.0% of 1 trades/.test(mk.text), "replays the .us tape and checks its trade sides", mk.text);
-  ok(/\s+join\s+1\s+1\s+\$1\.11\s+\+11\.10c/.test(mk.text), "join: 10 at 0.89, paid a 1c rebate = +$1.11", mk.text);
+  const rebated = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS < Date.parse("2026-10-19T17:00:00Z"); // run()'s close
+  const joinRow = rebated ? /\s+join\s+1\s+1\s+\$1\.11\s+\+11\.10c/ : /\s+join\s+1\s+1\s+\$1\.10\s+\+11\.00c/;
+  ok(joinRow.test(mk.text), rebated ? "join: 10 at 0.89, paid a 1c rebate = +$1.11" : "join: 10 at 0.89, no rebate after the change = +$1.10", mk.text);
   // The delay test. Kalshi's final two minutes are on the tape (90/91,
   // unchanged); the .us offer at 0.90 is gone 60ms after the decision.
   //   Kalshi alone   fills at every delay: +$0.84
@@ -216,6 +219,18 @@ console.log("every book change (--per-change)");
   ok(/EVERY BOOK CHANGE\n[^\n]*\n\s+\+0ms\s+1\s+10\/10 100\.0%\s+100\.0% \/ —\s+\+\$1\.70/.test(r.text), "every change, on the book it decided on: 10 at 0.82 = +$1.6966", r.text);
   ok(/EVERY BOOK CHANGE\n[^\n]*\n[^\n]*\n\s+\+50ms\s+1\s+0\/10 0\.0%\s+— \/ 100\.0%\s+\+\$0\.00/.test(r.text), "50ms later the flicker is gone: a miss, on a window that won", r.text);
   ok(/READING THE PER-CHANGE TABLE/.test(r.text), "and says how to read it", r.text);
+
+  // --chase on the same window, every change: the 0.82 flicker is gone
+  // 100ms later and the ask is back at 0.85, so +1c (0.83) and +2c (0.84)
+  // miss too. Retry re-checks from the reply and fires at 30s on the
+  // 0.90/0.91 book: 10 at 0.91 = 10 - 9.10 - 5.74c = +$0.8426, two tries.
+  const c = run(["--strategies=fav-final", "--chase"], tape);
+  ok(c.code === 0 && /MORE FILLS\?/.test(c.text), "--chase runs and implies --per-change", c.text);
+  const pcBlock = (c.text.split("KALSHI · EVERY BOOK CHANGE · 10 contracts — ")[1] || "").split("\n\n")[0];
+  ok(/\n\s+base\s+\+100ms\s+1\s+0 0\.0%\s+0\/0\s+1\.00\s+— \/ 100\.0%/.test(pcBlock), "base: the flicker is gone, a miss on a window that won", pcBlock);
+  ok(/\n\s+chase\+2c\s+\+100ms\s+1\s+0 0\.0%/.test(pcBlock), "+2c does not reach the 0.85 offer", pcBlock);
+  ok(/\n\s+retry\s+\+100ms\s+1\s+1 100\.0%\s+10\/10\s+2\.00\s+100\.0% \/ —\s+0\.9100\s+\+\$0\.84\s+\+8\.43c/.test(pcBlock), "retry: fires again at 30s and fills 10 at 0.91 = +$0.84, two tries", pcBlock);
+  ok(/READING THE MORE-FILLS TABLE/.test(c.text), "and says how to read it", c.text);
 }
 
 console.log("both venues at once (--per-change --venues, several sizes)");
@@ -249,6 +264,17 @@ console.log("both venues at once (--per-change --venues, several sizes)");
   ok(/once a second\s+both\s+2(\s+\+\$8\.90 \(\d+%\)){4}/.test(block(200)), "both at 200: +$8.90", block(200));
   ok(/READING THE BOTH-VENUES TABLE/.test(r.text), "and says how to read it", r.text);
 
+  // --chase --venues: the same rule decided and filled on the .us book.
+  // Once a second it buys YES at 0.90, asking min(200, 50 within 1c) = 50;
+  // 100ms later the book is unchanged: 50 at 0.90, fee 0.0695 x 50 x 0.09 =
+  // 31.275c -> 31c: 50 - 45 - 0.31 = +$4.69. +1c (limit 0.91) finds nothing
+  // more, so the same. Kalshi on the same windows is printed beside it.
+  const ch = run(["--strategies=fav-final", "--chase", "--venues", "--size=10,200"], tape, usLines);
+  const us200 = (ch.text.split("POLYMARKET US · ONCE A SECOND · 200 contracts — ")[1] || "").split("\n\n")[0];
+  ok(/\n\s+base\s+\+100ms\s+1\s+1 100\.0%\s+50\/50\s+1\.00\s+100\.0% \/ —\s+0\.9000\s+\+\$4\.69/.test(us200), ".us at 200: 50 at 0.90 with its per-fill fee = +$4.69", us200);
+  ok(/\n\s+chase\+1c\s+\+100ms\s+1\s+1 100\.0%\s+50\/50[^\n]+\+\$4\.69/.test(us200), "+1c finds nothing more on offer: the same 50", us200);
+  ok(/KALSHI \(ONLY the windows \.us covered\) · ONCE A SECOND · 200 contracts/.test(ch.text), "and Kalshi on exactly the windows .us covered", ch.text);
+
   // One target routed across both venues, on Kalshi's every-change decision
   // (YES at 0.82, the 20-lot flicker that is gone 50ms later; .us 0.90 x 50).
   //   10:  Kalshi's 0.82 is cheaper all-in (.831 vs .906): best of both = Kalshi alone.
@@ -266,6 +292,27 @@ console.log("both venues at once (--per-change --venues, several sizes)");
   ok(/\+\$8\.08 \(100%, 71%\)\s+\+\$7\.51 \(100%, 71%\)/.test(line(200, "+ rest on Kalshi")), "200: with the rest on Kalshi's touch: +$7.51", route(200));
   ok(/\+\$8\.08 \(100%, 71%\)\s+\+\$4\.69 \(71%, 100%\)/.test(line(200, "Kalshi + overflow")), "200: overflow sends .us only what Kalshi's book did not show", route(200));
   ok(/\+\$3\.39 \(100%, 0%\)\s+\+\$0\.00 \(0%, 0%\)/.test(line(200, "kalshi alone")), "200: Kalshi alone has only the 20", route(200));
+}
+
+console.log("the underdog in the last seconds (--longshot)");
+{
+  // The base archive has YES at .92/.93 20s out (NO at 8c: over the 5c cap)
+  // and a one-sided book 10s out: a .99 YES bid and nothing offered, so NO
+  // costs 1c. The final record agrees. YES settles: the 1c NO loses, paying
+  // 1c + 0.07 x .01 x .99 = 0.0693c -> 0.07c fee = 1.07c. fav-final bought
+  // YES 30s out, so this is the hedge reading.
+  const tape = [
+    (c, T) => ({ k: "final", t: c - 120000, x: c - 120000, m: T, close: new Date(c).toISOString() }),
+    (c, T) => ({ k: "full", t: c - 120000, x: c - 120000, m: T, why: "final-window", L: [[[0.90, 100]], [[0.91, 50]]] }),
+    (c, T) => ({ k: "full", t: c - 10000, x: c - 10000, m: T, L: [[[0.99, 200]], []] }),
+  ];
+  const r = run(["--strategies=fav-final", "--longshot"], tape);
+  ok(r.code === 0, "runs cleanly", r.text);
+  ok(/1 windows replayed/.test(r.text) && /THE UNDERDOG IN THE LAST SECONDS/.test(r.text), "replays the window", r.text);
+  ok(/10s before the close · the pilot DID trade \(a hedge\)\n[^\n]*\n\s+1c\s+1\s+1\s+1\.00c\s+1\.07%\s+0\.00%[^\n]*-\$0\.01\s+-1\.07c/.test(r.text), "10s out: NO at 1c off the one-sided book, filled, lost: -1.07c", r.text);
+  ok(/5s before the close · the pilot DID trade/.test(r.text), "5s out: the same 10s-old book is within 5s, so it counts", r.text);
+  ok(!/15s before the close/.test(r.text), "15s out the underdog cost 8c, over the cap: nothing offered", r.text);
+  ok(!/the pilot did NOT trade/.test(r.text), "the pilot traded this window, so no 'did not trade' row", r.text);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }

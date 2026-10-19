@@ -15,7 +15,7 @@
 //   6. A window with a socket event or sequence gap is not replayed.
 //   7. The trade-side check agrees with a correct mapping and flags an
 //      inverted one.
-import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, selection, makeBook } from "../lib/m15Maker.js";
+import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTrade, checkTradeSides, selection, makeBook, changeRows, bookCursor } from "../lib/m15Maker.js";
 import { kalshiMakerFee, kalshiTakerFee } from "../lib/fees.js";
 
 let failed = 0;
@@ -227,6 +227,25 @@ console.log("the book's touch, kept incrementally");
     if (t.bid !== want.bid || t.ask !== want.ask) bad++;
   }
   ok(bad === 0 && checked === 20000 && emptiedBest > 1000, `the incremental touch matches a full scan after all ${checked} changes (best level emptied ${emptiedBest} times)`, `${bad} mismatches`);
+}
+
+console.log("depth within 1c on every-change rows, every 0.1c level counted");
+{
+  // Above 0.90 Kalshi ticks in 0.1c: bids 0.950 / 0.947 / 0.941 / 0.940 /
+  // 0.939, asks 0.953 / 0.957 / 0.963 / 0.964. Within 1c of the bid is
+  // 0.940..0.950 = 5 + 4 + 3 + 2 = 14 (0.939 is out); of the ask
+  // 0.953..0.963 = 6 + 7 + 8 = 21 (0.964 is out). The old count — the
+  // touch plus the level exactly a cent away — said 5 + 2 = 7 and 6 + 8 = 14.
+  const ev = [F(C - 60000, [[0.95, 5], [0.947, 4], [0.941, 3], [0.94, 2], [0.939, 50]], [[0.953, 6], [0.957, 7], [0.963, 8], [0.964, 50]])];
+  const rows = changeRows(win(ev), { maxSecs: 120 });
+  ok(rows.length === 1 && rows[0].bid === 0.95 && rows[0].ask === 0.953, "one row at the snapshot", JSON.stringify(rows));
+  ok(rows[0].bidD1 === 14 && rows[0].askD1 === 21, "every level within 1c counted, touch included, nothing beyond", JSON.stringify(rows[0]));
+  const b = makeBook(); b.apply(ev[0]);
+  ok(b.bidDepth(0.003) === 9 && b.askDepth(0) === 6, "narrower windows: within 0.3c of the bid is 5 + 4; within 0 of the ask is the touch", `${b.bidDepth(0.003)} ${b.askDepth(0)}`);
+  const cur = bookCursor(win([F(C - 60000, [[0.5, 1]], [[0.51, 1]]), D(C - 50000, "a", 0.51, -1), D(C - 50000, "a", 0.52, 3)]));
+  ok(cur.at(C - 55000).asks[0][0] === 0.51 && cur.at(C - 50000).asks[0][0] === 0.52, "the cursor applies every change up to and including the instant asked");
+  let threw = false; try { cur.at(C - 55000); } catch { threw = true; }
+  ok(threw, "and refuses to go back in time");
 }
 
 console.log("\nall passed");
