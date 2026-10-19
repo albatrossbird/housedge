@@ -13,7 +13,7 @@
 //      are its best moment, not a sum of samples.
 //   5. The mirror check and the lead/lag both point the right way on a
 //      book known to follow Kalshi by one sample.
-import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, delayStats, bestFill, pmusTakerFee } from "../lib/venueCompare.js";
+import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, delayStats, bestFill, pmusTakerFee, pmusOrderFee } from "../lib/venueCompare.js";
 import { pmusSlug, kalshiM15Ticker, WINDOW_MS } from "../lib/pmus15.js";
 
 let failed = 0;
@@ -23,6 +23,11 @@ const near = (a, b, e = 1e-9) => Math.abs(a - b) <= e;
 console.log("fees");
 ok(pmusTakerFee(0.5, 100) === 1.74, ".us at 50c on 100: 0.0695 x 25 = 1.7375 -> 1.74", pmusTakerFee(0.5, 100));
 ok(pmusTakerFee(0.5, 0) === 0 && pmusTakerFee(1, 10) === 0, "no fee on nothing, or at a certain price");
+// One order, two fills of 1 at 0.50: each 0.017375 -> 2c half-even, 4c in
+// all, but the order may never collect more than the rounding of the exact
+// total, 0.03475 -> 3c. One fill is just its own fee.
+ok(pmusOrderFee([[0.5, 1], [0.5, 1]]) === 0.03, ".us order fee: per-fill rounding capped at the rounded total", pmusOrderFee([[0.5, 1], [0.5, 1]]));
+ok(pmusOrderFee([[0.9, 50]]) === pmusTakerFee(0.9, 50) && pmusOrderFee([]) === 0, "a single fill is its own fee; nothing costs nothing");
 
 console.log("the walk");
 {

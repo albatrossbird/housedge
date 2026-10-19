@@ -226,10 +226,10 @@ console.log("every book change (--per-change)");
   // 0.90/0.91 book: 10 at 0.91 = 10 - 9.10 - 5.74c = +$0.8426, two tries.
   const c = run(["--strategies=fav-final", "--chase"], tape);
   ok(c.code === 0 && /MORE FILLS\?/.test(c.text), "--chase runs and implies --per-change", c.text);
-  const pcBlock = c.text.split("EVERY BOOK CHANGE — ")[1] || "";
-  ok(/\n\s+base\s+\+100ms\s+1\s+0 0\.0%\s+1\.00\s+— \/ 100\.0%/.test(pcBlock), "base: the flicker is gone, a miss on a window that won", pcBlock);
+  const pcBlock = (c.text.split("KALSHI · EVERY BOOK CHANGE · 10 contracts — ")[1] || "").split("\n\n")[0];
+  ok(/\n\s+base\s+\+100ms\s+1\s+0 0\.0%\s+0\/0\s+1\.00\s+— \/ 100\.0%/.test(pcBlock), "base: the flicker is gone, a miss on a window that won", pcBlock);
   ok(/\n\s+chase\+2c\s+\+100ms\s+1\s+0 0\.0%/.test(pcBlock), "+2c does not reach the 0.85 offer", pcBlock);
-  ok(/\n\s+retry\s+\+100ms\s+1\s+1 100\.0%\s+2\.00\s+100\.0% \/ —\s+0\.9100\s+\+\$0\.84\s+\+8\.43c/.test(pcBlock), "retry: fires again at 30s and fills 10 at 0.91 = +$0.84, two tries", pcBlock);
+  ok(/\n\s+retry\s+\+100ms\s+1\s+1 100\.0%\s+10\/10\s+2\.00\s+100\.0% \/ —\s+0\.9100\s+\+\$0\.84\s+\+8\.43c/.test(pcBlock), "retry: fires again at 30s and fills 10 at 0.91 = +$0.84, two tries", pcBlock);
   ok(/READING THE MORE-FILLS TABLE/.test(c.text), "and says how to read it", c.text);
 }
 
@@ -263,6 +263,17 @@ console.log("both venues at once (--per-change --venues, several sizes)");
   ok(/once a second\s+polyus\s+1\s+\+\$4\.69 \(100%\)/.test(block(200)), ".us at 200 buys the 50 within 1c: +$4.69", block(200));
   ok(/once a second\s+both\s+2(\s+\+\$8\.90 \(\d+%\)){4}/.test(block(200)), "both at 200: +$8.90", block(200));
   ok(/READING THE BOTH-VENUES TABLE/.test(r.text), "and says how to read it", r.text);
+
+  // --chase --venues: the same rule decided and filled on the .us book.
+  // Once a second it buys YES at 0.90, asking min(200, 50 within 1c) = 50;
+  // 100ms later the book is unchanged: 50 at 0.90, fee 0.0695 x 50 x 0.09 =
+  // 31.275c -> 31c: 50 - 45 - 0.31 = +$4.69. +1c (limit 0.91) finds nothing
+  // more, so the same. Kalshi on the same windows is printed beside it.
+  const ch = run(["--strategies=fav-final", "--chase", "--venues", "--size=10,200"], tape, usLines);
+  const us200 = (ch.text.split("POLYMARKET US · ONCE A SECOND · 200 contracts — ")[1] || "").split("\n\n")[0];
+  ok(/\n\s+base\s+\+100ms\s+1\s+1 100\.0%\s+50\/50\s+1\.00\s+100\.0% \/ —\s+0\.9000\s+\+\$4\.69/.test(us200), ".us at 200: 50 at 0.90 with its per-fill fee = +$4.69", us200);
+  ok(/\n\s+chase\+1c\s+\+100ms\s+1\s+1 100\.0%\s+50\/50[^\n]+\+\$4\.69/.test(us200), "+1c finds nothing more on offer: the same 50", us200);
+  ok(/KALSHI \(ONLY the windows \.us covered\) · ONCE A SECOND · 200 contracts/.test(ch.text), "and Kalshi on exactly the windows .us covered", ch.text);
 
   // One target routed across both venues, on Kalshi's every-change decision
   // (YES at 0.82, the 20-lot flicker that is gone 50ms later; .us 0.90 x 50).

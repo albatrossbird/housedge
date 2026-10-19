@@ -49,7 +49,7 @@ import { newTape, feedTape, disrupted, simulateMaker, simulatePrePlace, makerTra
 import { kalshiMakerFee, kalshiTakerFee, roundKalshiFee } from "../lib/fees.js";
 import { simulateChase, CHASE_VARIANTS, CHASE_DELAYS_MS } from "../lib/m15Chase.js";
 import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, bestOfBoth, delayedFill, latestAtOrBefore, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
-import { pmusTakerFee } from "../lib/venueCompare.js";
+import { pmusTakerFee, pmusOrderFee } from "../lib/venueCompare.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -216,6 +216,14 @@ const pcStrategies = Object.entries(strategies).filter(([, st]) => !st.exit && (
 if (PER_CHANGE && !pcStrategies.length) { console.error(`::error::--per-change needs a hold-to-settlement rule acting within ${PC_MAX_SECS}s of the close (e.g. --strategy=paper)`); process.exit(2); }
 const pcRows = [];
 const chaseRows = [];
+// --chase: the same decisions sent differently, at every --size, on the
+// venue's own book (Kalshi's final-two-minutes record, or every .us book).
+function chaseWindow(venue, m, w, oneRows, cRows) {
+  for (const size of SIZES) for (const [src, rows] of [["one", oneRows], ["pc", cRows]]) {
+    const res = simulateChase(w, m, rows, pcStrategies, { size, requireDepth: !ASSUME_DEPTH });
+    chaseRows.push({ venue, size, series: m.series, ticker: m.ticker, close: m.close, result: m.result, src, res });
+  }
+}
 const pcStats = { windows: 0, excluded: {}, usWindows: 0, usExcluded: {} };
 // --per-change --venues: each Kalshi change-by-change decision routed
 // across both venues for ONE target size (the same money at risk as Kalshi
@@ -350,10 +358,7 @@ if (MAKER || VENUES || PREPLACE || PER_CHANGE || LONGSHOT) {
     const oneRows = (paths.get(ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     const cRows = changeRows(w, { maxSecs: PC_MAX_SECS + 5 });
     perChangeVenue("kalshi", m, w, oneRows, cRows);
-    if (CHASE) for (const [src, rows] of [["one", oneRows], ["pc", cRows]]) {
-      const res = simulateChase(w, m, rows, pcStrategies, { size: SIZE, requireDepth: !ASSUME_DEPTH });
-      chaseRows.push({ series: m.series, ticker: m.ticker, close: m.close, result: m.result, src, res });
-    }
+    if (CHASE) chaseWindow("kalshi", m, w, oneRows, cRows);
   }
   // One replayed window through every pre-place variant, for every
   // favourite rule. Rows: { series, strategy, variant, close, posted,
@@ -447,7 +452,9 @@ if (VENUES) {
         pcStats.usWindows++;
         const live = r => r.t < m.close && r.secs > 0;
         const ws = resolveUsWindow(w, "long");
-        perChangeVenue("polyus", m, ws, rows.filter(live), all.filter(r => live(r) && r.secs <= PC_MAX_SECS + 5));
+        const usChange = all.filter(r => live(r) && r.secs <= PC_MAX_SECS + 5);
+        perChangeVenue("polyus", m, ws, rows.filter(live), usChange);
+        if (CHASE) chaseWindow("polyus", m, ws, rows.filter(live), usChange);
         routeAcrossVenues(m, ws, all);
       }
     }
@@ -632,42 +639,52 @@ READING THE PER-CHANGE TABLE
 function printChase() {
   const $ = x => `${x < 0 ? "-" : "+"}$${Math.abs(x).toFixed(2)}`;
   const day = ms => new Date(ms).toISOString().slice(0, 10);
-  console.log(`\n${"=".repeat(118)}\nMORE FILLS? — ${SIZE} contract(s), the same decisions sent differently, filled against the book DELAY ms later`);
+  console.log(`\n${"=".repeat(118)}\nMORE FILLS? — the same decisions sent differently, filled against the venue's own book DELAY ms later`);
   console.log(`${"=".repeat(118)}`);
-  const label = { one: "ONCE A SECOND", pc: "EVERY BOOK CHANGE" };
-  for (const s of series) for (const [name] of pcStrategies) for (const src of ["pc", "one"]) {
-    const R = chaseRows.filter(r => r.series === s && r.src === src);
+  const label = { one: "ONCE A SECOND", pc: "EVERY BOOK CHANGE" }, venueName = { kalshi: "KALSHI", polyus: "POLYMARKET US" };
+  // Each venue's taker fee on one order: Kalshi rounds the order up to
+  // $0.0001; .us rounds each fill half-even, capped at the rounded total.
+  const feeOf = (venue, mult, x) => venue === "polyus" ? pmusOrderFee(x.fills || []) : roundKalshiFee(0.07 * mult * x.pq);
+  const usTickers = new Set(chaseRows.filter(r => r.venue === "polyus").map(r => r.ticker));
+  const blocks = [["kalshi", "", () => true], ["polyus", "", () => true]];
+  if (usTickers.size) blocks.push(["kalshi", "ONLY the windows .us covered", r => usTickers.has(r.ticker)]);
+  for (const s of series) for (const [name] of pcStrategies) for (const [venue, note, keep] of blocks) for (const size of SIZES) for (const src of ["one", "pc"]) {
+    const R = chaseRows.filter(r => r.venue === venue && r.size === size && r.series === s && r.src === src && keep(r));
     if (!R.length) continue;
     const mult = fees.get(s)?.mult ?? 1;
     const days = [...new Set(R.map(r => day(r.close)))].sort();
-    console.log(`\n${s} · ${name} · ${label[src]} — ${R.length} windows over ${days.length} days`);
-    console.log(`  ${"order".padEnd(10)} ${"delay".padEnd(7)} ${"decided".padStart(7)} ${"filled".padStart(14)} ${"tries".padStart(5)} ${"won filled / missed".padStart(20)} ${"avg paid".padStart(8)} ${"P&L".padStart(10)} ${"per ctr".padStart(8)} ${"t(days)".padStart(7)}`);
+    console.log(`\n${s} · ${name} · ${venueName[venue]}${note ? ` (${note})` : ""} · ${label[src]} · ${size} contract${size === 1 ? "" : "s"} — ${R.length} windows over ${days.length} days`);
+    console.log(`  ${"order".padEnd(10)} ${"delay".padEnd(7)} ${"decided".padStart(7)} ${"filled".padStart(14)} ${"ctrs/asked".padStart(14)} ${"tries".padStart(5)} ${"won filled / missed".padStart(20)} ${"avg paid".padStart(8)} ${"P&L".padStart(10)} ${"per ctr".padStart(8)} ${"t(days)".padStart(7)}`);
     for (const v of CHASE_VARIANTS) for (const d of CHASE_DELAYS_MS) {
-      let dec = 0, filledW = 0, tries = 0, ctr = 0, paid = 0, pnl = 0;
+      let dec = 0, filledW = 0, tries = 0, ctr = 0, asked = 0, paid = 0, pnl = 0;
       const F = [], M = [], byDay = new Map(days.map(x => [x, 0]));
       for (const r of R) {
         const x = r.res[name]?.[v.key]?.[d];
         if (!x || x.unknown) continue;
         dec++; tries += x.tries;
         if (!(x.n > 0)) { M.push(x.side === r.result); continue; }
-        const won = x.side === r.result, fee = roundKalshiFee(0.07 * mult * x.pq);
-        const p = (won ? x.n : 0) - x.cost - fee;
-        filledW++; ctr += x.n; paid += x.cost; pnl += p; F.push(won);
+        const won = x.side === r.result;
+        const p = (won ? x.n : 0) - x.cost - feeOf(venue, mult, x);
+        filledW++; ctr += x.n; asked += x.qty ?? x.n; paid += x.cost; pnl += p; F.push(won);
         byDay.set(day(r.close), byDay.get(day(r.close)) + p);
       }
       const vals = [...byDay.values()], mean = vals.reduce((a, b) => a + b, 0) / vals.length;
       const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1)) : 0;
       const wr = A => A.length ? `${(100 * A.filter(Boolean).length / A.length).toFixed(1)}%` : "—";
-      console.log(`  ${v.key.padEnd(10)} ${`+${d}ms`.padEnd(7)} ${String(dec).padStart(7)} ${`${filledW} ${dec ? (100 * filledW / dec).toFixed(1) : "—"}%`.padStart(14)} ${(dec ? (tries / dec).toFixed(2) : "—").padStart(5)} ${`${wr(F)} / ${wr(M)}`.padStart(20)} ${(ctr ? (paid / ctr).toFixed(4) : "—").padStart(8)} ${$(pnl).padStart(10)} ${(ctr ? `${pnl / ctr >= 0 ? "+" : ""}${(100 * pnl / ctr).toFixed(2)}c` : "—").padStart(8)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(vals.length))).toFixed(2) : "—").padStart(7)}`);
+      console.log(`  ${v.key.padEnd(10)} ${`+${d}ms`.padEnd(7)} ${String(dec).padStart(7)} ${`${filledW} ${dec ? (100 * filledW / dec).toFixed(1) : "—"}%`.padStart(14)} ${`${ctr}/${asked}`.padStart(14)} ${(dec ? (tries / dec).toFixed(2) : "—").padStart(5)} ${`${wr(F)} / ${wr(M)}`.padStart(20)} ${(ctr ? (paid / ctr).toFixed(4) : "—").padStart(8)} ${$(pnl).padStart(10)} ${(ctr ? `${pnl / ctr >= 0 ? "+" : ""}${(100 * pnl / ctr).toFixed(2)}c` : "—").padStart(8)} ${(sd > 1e-12 ? (mean / (sd / Math.sqrt(vals.length))).toFixed(2) : "—").padStart(7)}`);
     }
   }
   console.log(`
 READING THE MORE-FILLS TABLE
-- Same windows and the same first decision for every row; only how the order is sent differs. "base" is one limit at the
+- Same windows and the same first decision for every row of a block; only how the order is sent differs. "base" is one limit at the
   price seen. "chase+Nc" puts the limit N cents above it, never above the rule's price cap, and pays what the book offered
   up to that limit. "retry" re-checks the rule from the moment a miss came back and sends the next qualifying moment the
   same way, until a fill or the rule's window closes ("tries" = orders sent per decided window). Every row pays the walked
   price, so "base" here can read slightly better than the per-change table, which charges the price seen.
+- Each order asks for the contracts the decision saw within 1c of the touch, up to the size ("ctrs/asked": filled of
+  asked, on filled windows). Polymarket US blocks decide and fill on the .us book (every whole book it published, timed by
+  its own clock) at .us fees: 0.0695 x p(1-p) per fill, half-even, capped at the rounded total. "ONLY the windows .us
+  covered" is Kalshi on exactly those windows, for a like-for-like comparison.
 - "won filled / missed": if the missed windows win MORE often than the filled ones, misses are costing winners and a way
   to fill them may pay; if they win less, the misses were protecting you.
 - Upper bounds like every row here: our order is not in the book and nobody reacts to it.`);

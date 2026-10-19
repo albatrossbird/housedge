@@ -847,6 +847,10 @@ way, until a fill or the window closes. Every row pays the walked price.
 Read "won filled / missed": misses that win more often than fills are
 winners a chase or retry could recover. One `bookCursor` pass serves
 every variant, since each asks only about later instants than its last.
+With `--venues` the same variants run on Polymarket US — decided and
+filled on the .us book, at .us fees (`pmusOrderFee`: each fill rounded
+half-even, the order capped at the rounded total) — at every `--size`,
+with Kalshi printed again on exactly the windows .us covered.
 `changeRows` now counts depth within 1c over EVERY level (above 0.90
 Kalshi ticks in 0.1c); it used to count only the touch and the level a
 cent away, which understated the per-change fills at 10+ contracts.
