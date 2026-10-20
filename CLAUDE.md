@@ -869,6 +869,13 @@ variants make a lucky test-half winner likely, so the full test table is
 printed for reference and is not a second chance to choose.
 `scripts/m15-us-tune.test.mjs` pins it (mutation-checked: stale guard,
 cap, .us pricing, limit cap, ties).
+**Measured 2026-10-20** (run 39361539665, 10 contracts, tune 09-29..10-08,
+test 10-09..10-19): the tune half chose ".us every change, 75c, +1c"
+(t 2.45 / 2.54), and on the test half it made +1.03c / +0.69c a contract,
+t 0.66 / 0.39. The once-a-second 75c +1c bot went +3.31c t 1.56 -> +0.27c
+t 0.15 at +100ms. Nearly every .us variant fell in the second half while
+Kalshi's own 75c rule held (+4.74c earlier, +4.22c later), so no .us
+variant has shown an edge that survives a held-out half.
 `changeRows` now counts depth within 1c over EVERY level (above 0.90
 Kalshi ticks in 0.1c); it used to count only the touch and the level a
 cent away, which understated the per-change fills at 10+ contracts.
