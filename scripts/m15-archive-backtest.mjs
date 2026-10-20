@@ -70,7 +70,11 @@ const MAKER = process.argv.includes("--maker");
 // or +1c), tuned on the first half of the days and judged on the second
 // (lib/m15UsTune.js). Implies --venues.
 const US_TUNE = process.argv.includes("--us-tune");
-const VENUES = process.argv.includes("--venues") || US_TUNE;
+// The across-venues SECTION is asked for by --venues; --us-tune needs only
+// the .us archive read, not that section or Kalshi's final-two-minutes
+// replay (the replay alone took 16 minutes of a 45-minute job).
+const VENUE_SECTION = process.argv.includes("--venues");
+const VENUES = VENUE_SECTION || US_TUNE;
 const PREPLACE = process.argv.includes("--preplace");
 // --chase: with --per-change (implied), ways to get MORE fills out of the
 // same rule — a limit 1-2c above the price seen, or re-checking the rule
@@ -294,7 +298,7 @@ function perChangeVenue(venue, m, w, oneRows, changeRowsList) {
     pcRows.push({ venue, size, series: m.series, ticker: m.ticker, strategy: name, close: m.close, result: m.result, one, pc });
   }
 }
-if (MAKER || VENUES || PREPLACE || PER_CHANGE || LONGSHOT) {
+if (MAKER || VENUE_SECTION || PREPLACE || PER_CHANGE || LONGSHOT) {
   for (const m of wanted.values()) {
     const path = (paths.get(m.ticker) || []).filter(r => r.t < m.close && r.secs > 0).sort((a, b) => a.t - b.t);
     if (!path.length) continue;
@@ -537,7 +541,7 @@ for (const s of series) {
   printSeriesTable({ strategies, covered, paths, size: SIZE, mult, requireDepth: !ASSUME_DEPTH, daysPerYear: daysPerYearFor(fees.get(s)?.category) });
   if (MAKER) printMakerSection({ strategies, covered, paths, size: SIZE, mult, feeType: fees.get(s)?.feeType ?? null,
     requireDepth: !ASSUME_DEPTH, maker, variants: Object.keys(MAKER_VARIANTS), stats: makerStats, latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS });
-  if (VENUES) printVenueSection({ strategies, covered, kPaths: paths, uPaths: usPaths, uFull: usFull, size: SIZE, mult, requireDepth: !ASSUME_DEPTH,
+  if (VENUE_SECTION) printVenueSection({ strategies, covered, kPaths: paths, uPaths: usPaths, uFull: usFull, size: SIZE, mult, requireDepth: !ASSUME_DEPTH,
     daysPerYear: daysPerYearFor(fees.get(s)?.category), usMaker: MAKER ? usMaker : null, usStats, variants: Object.keys(MAKER_VARIANTS), latencyMs: LATENCY_MS, cutoffSecs: CUTOFF_SECS,
     delaySnaps: { kalshi: kSnaps, polyus: uSnaps } });
 }
