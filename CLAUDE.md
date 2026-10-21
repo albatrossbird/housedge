@@ -970,6 +970,14 @@ $0.21 from Kalshi's strike (p90 $0.68).
   finding: re-test on days after 2026-10-21 before any money. It trades
   near 50c (average paid 0.46) where the fee is largest, and it is a
   different trade from the 75c favourite rule.
+  **By size** (run 39536113616, `--size=10,30,200`, the same decisions
+  at each size, 1bp, +1c, +250ms):
+  - 10 contracts: 76.6% of contracts asked filled, +7.37c, t 2.96.
+  - 30 contracts: 76.6% filled, +7.32c, t 2.92.
+  - 200 contracts: 74.1% filled, +6.33c, t 2.52.
+  The book holds 200 near 50c; walking it costs about 1c a contract.
+  Every size is an upper bound, and 200 the most so, because nobody in
+  the replay reacts to our order.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
