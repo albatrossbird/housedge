@@ -30,7 +30,7 @@ on:
       source:
         description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), ustune (twelve Polymarket US variants, tuned on the first half of the days and judged on the second), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
         type: choice
-        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint]
+        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint, brtilag]
         default: poller
       series:
         description: "Space-separated series"
@@ -100,6 +100,10 @@ jobs:
           PREPLACE: ${{ github.event.inputs.preplace }}
           RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
+          if [ "$SOURCE" = "brtilag" ]; then
+            node scripts/brti-lag.mjs "--days=$DAYS"
+            exit $?
+          fi
           if [ "$SOURCE" = "bigprint" ]; then
             node scripts/m15-bigprint.mjs "--days=$DAYS" $SERIES
             exit $?
