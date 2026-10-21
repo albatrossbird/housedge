@@ -2177,6 +2177,16 @@ confident wrong answers. Both are stored per market row.
   `KALSHI_FCM_FEE_PRECISION` and still prices the cent, as its `/fees`
   copy says — true for FCM accounts, pessimistic for direct ones.
   `scripts/kalshi-fee.test.mjs` pins the six fills.
+  **The order reply's `average_fee_paid` is not the charge.** It is per
+  contract, truncated to 4 decimals (0.00527 -> 0.0052), so multiplied by
+  the count it reads up to C x $0.0001 LOW and never high. On the trader's
+  first 10-contract fill (2026-10-19) a fee stop checking it wrote a false
+  KILL and held live trading for ~7 hours. Six 10-contract fills
+  (2026-10-19..20) matched the formula exactly on the fill channel's fee
+  total. The fee is concave in price, so the per-level sum is at or below
+  the formula at the average price. Kalshi's per-fill rounding to
+  $0.000001 adds at most a tick, so a $0.0001 overcharge tolerance is
+  enough.
 - **Polymarket quotes one book per market, on outcome 0.** The other
   outcome is its exact complement in a binary CLOB, so it is derived at
   read time (`complementBook`) using the same identifier-based outcome
