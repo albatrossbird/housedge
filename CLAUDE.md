@@ -857,6 +857,25 @@ but earns +1.85c / +1.94c / +1.56c a contract at 10 / 30 / 200 (t 1.0-1.4)
 against Kalshi's +4.81c / +4.77c / +4.13c (t 2.6-3.5) on the same windows.
 At the price seen .us is ~0 (+0.70c at 10, +0.03c at 200): its misses won
 97.1% against 89.1% filled, so on .us the +1c is what recovers the edge.
+**Tuning for .us without fooling ourselves** (`--us-tune`, workflow
+`source: ustune`, `lib/m15UsTune.js`). Each rule on .us twelve ways:
+decided on .us once a second, on every .us book, or on KALSHI's book
+(Kalshi picks the moment and side; the .us book at that instant, none older
+than 2s, sets the price and size, skipped above the cap); at the price seen
+or +1c. The first half of the days chooses ONE variant by a rule fixed
+before the run — the highest of each variant's LOWER t across +100ms and
++250ms — and only that variant's second-half row is the result. Twelve
+variants make a lucky test-half winner likely, so the full test table is
+printed for reference and is not a second chance to choose.
+`scripts/m15-us-tune.test.mjs` pins it (mutation-checked: stale guard,
+cap, .us pricing, limit cap, ties).
+**Measured 2026-10-20** (run 39361539665, 10 contracts, tune 09-29..10-08,
+test 10-09..10-19): the tune half chose ".us every change, 75c, +1c"
+(t 2.45 / 2.54), and on the test half it made +1.03c / +0.69c a contract,
+t 0.66 / 0.39. The once-a-second 75c +1c bot went +3.31c t 1.56 -> +0.27c
+t 0.15 at +100ms. Nearly every .us variant fell in the second half while
+Kalshi's own 75c rule held (+4.74c earlier, +4.22c later), so no .us
+variant has shown an edge that survives a held-out half.
 `changeRows` now counts depth within 1c over EVERY level (above 0.90
 Kalshi ticks in 0.1c); it used to count only the touch and the level a
 cent away, which understated the per-change fills at 10+ contracts.
@@ -885,6 +904,80 @@ filled as a limit 100ms later, held to settlement, split by whether the
 rule traded the window (the "hedge" reading). KXBTC15M is priced
 `tapered_deci_cent`: 0.1c steps below 10c and above 90c, so 0.1c is the
 floor (checked 2026-10-15 on `/markets`).
+
+**Buying the underdog earlier does not help either. Measured 2026-10-21**
+(run 39520162777, KXBTC15M, 23 days, 2,127 windows, settled YES 49.8%, 10
+contracts, held to settlement). The underdog was tested in 12 cells: four
+time windows (5-10m, 2-5m, 45-120s, 15-45s) by three price bands (5-20c,
+20-35c, 35-49c). None won more often than its price plus fee. 5-10 minutes
+out it is overpriced, losing 1.7-3.6c a contract at t -1.8 to -3.7. 45s to
+5 minutes out it is about fair, so it loses roughly the fee (-0.3c to
+-1.1c, t within ±0.7). The one positive cell, 45-120s at 35-49c (+0.75c,
+t 0.3), lost in the later half and when filled 1c worse. In the last 15-45s
+the underdog is badly overpriced: at 20-35c it won 17.4% against 27.9%
+priced.
+
+**Does the book lag BRTI? Barely. Measured 2026-10-21** (run 39525582130,
+`scripts/brti-lag.mjs`, workflow `source: brtilag`, KXBTC15M, 14 days,
+1,283 windows, final two minutes). BRTI reaches the box about 38ms after
+CF Benchmarks stamps it (p99 98ms). Kalshi's book changes arrive about
+12ms after Kalshi stamps them (p99 26ms). The test looked at every 2bp
+BRTI move inside one second on a 15-85c book, 276 of them, and measured
+the book on the box's own clock:
+- **82% of the book's +5s repricing was already done** when the BRTI tick
+  arrived (+16.9c of +20.7c).
+- Another 0.5c came in by +250ms and 1.0c by +500ms; the rest drifted in
+  over the following seconds.
+- 1bp moves look the same (82%, 1,089 events). On the sources' own clocks
+  the result is nearly identical, so the relay adds no meaningful delay.
+
+What a taker could still catch after +250ms is about 3c by +5s, before a
+~1.75c fee near 50c and the exit. Part of that may be the index
+continuing to move rather than the book lagging. The value is read as a
+string: `Number(o.v)`. A first run that compared it as a number read zero
+ticks and printed empty tables under a green tick.
+
+**Against the index itself. Measured 2026-10-21** (run 39533518216,
+`scripts/m15-index.mjs`, workflow `source: index`, KXBTC15M, 21 days,
+1,941 windows, upper bounds).
+
+The settlement average rebuilt from the 5Hz BRTI landed on Kalshi's
+settled side in **1,900 of 1,900** windows. A second's price is the last
+tick before the second ends. The rebuilt opening average sits a median
+$0.21 from Kalshi's strike (p90 $0.68).
+
+- **Distance to the strike is priced, not missed.** Buying the side BRTI
+  is ahead on lost about 2c a contract at 5 and 2 minutes out (t -2.7 and
+  -4.3). Kalshi charges slightly more than that side's win rate. At 1
+  minute out it was fair (+0.1c).
+- **The near-certain buckets are not an edge.** Won 100% at 99.6-99.9c
+  makes 0.1-0.4c a contract, and one loss erases hundreds of those wins.
+- **The settlement average can be estimated well inside the final
+  minute.** Take the seconds already in the average plus the latest
+  price for the rest. Median error is $1.65 at 30s and $0.74 at 20s, and
+  the estimate's side won 95.4% and 98.1%. Kalshi already priced that
+  side at 95.8% and 96.9%, so every edge was within ±1pt (noise). The
+  estimate disagreed with Kalshi's favourite in 8-15 windows over 21
+  days, with mixed results.
+- **Buying the side a sharp BRTI move favours DID hold up on its first
+  test.** The rule: the first 1bp-in-a-second move in the final two
+  minutes, on a 15-85c book, held to settlement. As a limit at the price
+  seen +1c, filled 250ms later, it made **+7.37c a contract, t 2.96**,
+  with both halves positive (+6.62c and +8.16c), from 445 decisions over
+  21 days. At +100ms and the price seen it made +6.67c, t 2.64. 2bp moves
+  made +5-7c (t 1.6-1.8); 4bp had too few cases (26). The parameters were
+  fixed before the run. It is still one 21-day sample and not yet a
+  finding: re-test on days after 2026-10-21 before any money. It trades
+  near 50c (average paid 0.46) where the fee is largest, and it is a
+  different trade from the 75c favourite rule.
+  **By size** (run 39536113616, `--size=10,30,200`, the same decisions
+  at each size, 1bp, +1c, +250ms):
+  - 10 contracts: 76.6% of contracts asked filled, +7.37c, t 2.96.
+  - 30 contracts: 76.6% filled, +7.32c, t 2.92.
+  - 200 contracts: 74.1% filled, +6.33c, t 2.52.
+  The book holds 200 near 50c; walking it costs about 1c a contract.
+  Every size is an upper bound, and 200 the most so, because nobody in
+  the replay reacts to our order.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
@@ -2126,6 +2219,16 @@ confident wrong answers. Both are stored per market row.
   `KALSHI_FCM_FEE_PRECISION` and still prices the cent, as its `/fees`
   copy says — true for FCM accounts, pessimistic for direct ones.
   `scripts/kalshi-fee.test.mjs` pins the six fills.
+  **The order reply's `average_fee_paid` is not the charge.** It is per
+  contract, truncated to 4 decimals (0.00527 -> 0.0052), so multiplied by
+  the count it reads up to C x $0.0001 LOW and never high. On the trader's
+  first 10-contract fill (2026-10-19) a fee stop checking it wrote a false
+  KILL and held live trading for ~7 hours. Six 10-contract fills
+  (2026-10-19..20) matched the formula exactly on the fill channel's fee
+  total. The fee is concave in price, so the per-level sum is at or below
+  the formula at the average price. Kalshi's per-fill rounding to
+  $0.000001 adds at most a tick, so a $0.0001 overcharge tolerance is
+  enough.
 - **Polymarket quotes one book per market, on outcome 0.** The other
   outcome is its exact complement in a binary CLOB, so it is derived at
   read time (`complementBook`) using the same identifier-based outcome

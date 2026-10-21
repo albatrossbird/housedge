@@ -13,6 +13,9 @@ name: Backtest 15-minute strategies
 # source=chase: perchange plus ways to get MORE fills from the same
 # decisions — a limit 1-2c above the price seen (never past the rule's
 # cap), and re-checking the rule after a miss — each on the real book.
+# source=ustune: each rule on Polymarket US twelve ways (decided on .us
+# once a second, on every .us book, or on Kalshi's book; at the price seen
+# or +1c), chosen on the first half of the days, judged on the second.
 # source=rulebook: scripts/m15-rulebook-backtest.mjs runs a rule file
 # (strategies/*.json) tick by tick over the same archive, with Coinbase
 # candles for the Bitcoin signals; every action goes up as an artifact.
@@ -25,9 +28,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
+        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), ustune (twelve Polymarket US variants, tuned on the first half of the days and judged on the second), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
         type: choice
-        options: [poller, archive, perchange, longshot, chase, rulebook, bigprint]
+        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint, brtilag, index]
         default: poller
       series:
         description: "Space-separated series"
@@ -97,6 +100,14 @@ jobs:
           PREPLACE: ${{ github.event.inputs.preplace }}
           RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
+          if [ "$SOURCE" = "index" ]; then
+            node scripts/m15-index.mjs "--days=$DAYS" "--size=$SIZE"
+            exit $?
+          fi
+          if [ "$SOURCE" = "brtilag" ]; then
+            node scripts/brti-lag.mjs "--days=$DAYS"
+            exit $?
+          fi
           if [ "$SOURCE" = "bigprint" ]; then
             node scripts/m15-bigprint.mjs "--days=$DAYS" $SERIES
             exit $?
@@ -112,6 +123,7 @@ jobs:
           if [ "$SOURCE" = "perchange" ]; then SOURCE=archive; EXTRA="--per-change"; fi
           if [ "$SOURCE" = "longshot" ]; then SOURCE=archive; EXTRA="--longshot"; fi
           if [ "$SOURCE" = "chase" ]; then SOURCE=archive; EXTRA="--chase"; fi
+          if [ "$SOURCE" = "ustune" ]; then SOURCE=archive; EXTRA="--us-tune"; fi
           if [ "$SOURCE" = "archive" ]; then
             SCRIPT=scripts/m15-archive-backtest.mjs
             if [ "$MAKER" = "true" ]; then EXTRA="$EXTRA --maker"; fi
