@@ -978,6 +978,17 @@ $0.21 from Kalshi's strike (p90 $0.68).
   The book holds 200 near 50c; walking it costs about 1c a contract.
   Every size is an upper bound, and 200 the most so, because nobody in
   the replay reacts to our order.
+  **The decision is `lib/sharpMove.js`**: one streaming decider, fed BRTI
+  ticks one at a time, used by section D and copied line for line by the
+  trader's bot. It reports what it passed over and why (`stale baseline`,
+  `book out of band`, `no two-sided book`, `out of order`).
+  `scripts/sharp-move.test.mjs` checks it against the batch logic the
+  2026-10-21 numbers came from, on 9,000 random windows, and replays
+  `scripts/fixtures/sharp-move-vector.json`: recorded windows with every
+  tick, the book touch at each tick and every decision (workflow `source:
+  vector`). The fixture is recorded Kalshi data, so it stays in private
+  repositories and is for this project's own use. Re-test out of sample
+  with the `index` source and `days` set to a start day (`--since`).
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
