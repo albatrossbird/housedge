@@ -63,7 +63,7 @@ console.log("brti-lag.mjs end to end");
   const lines = [{ k: "final", t: close - 120000, x: close - 120000, m: T },
     { k: "full", t: close - 119850, x: close - 120000, m: T, L: [[[0.49, 100]], [[0.51, 100]]] },
     { k: "full", t: close - 59350, x: close - 59500, m: T, L: [[[0.52, 100]], [[0.54, 100]]] }];
-  for (let x = close - 126000; x <= close; x += 200) lines.push({ k: "i5", t: x + 300, id: "BRTI", v: x < close - 60000 ? 100000 : 100030, x });
+  for (let x = close - 126000; x <= close; x += 200) lines.push({ k: "i5", t: x + 300, id: "BRTI", v: x < close - 60000 ? "100000.00" : "100030.00", x });   // a string, as recorded
   lines.sort((a, b) => a.t - b.t);
   const gz = gzipSync(Buffer.from(lines.map(o => JSON.stringify(o)).join("\n") + "\n")).toString("base64");
   const dir = mkdtempSync(join(tmpdir(), "brtilag-")), h = join(dir, "h.mjs");

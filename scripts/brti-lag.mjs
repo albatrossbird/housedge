@@ -103,11 +103,13 @@ for (const f of files) {
   await reader.eachLine(f.path, o => {
     if (Number.isFinite(o.t) && o.t > watermark) watermark = o.t;
     if (o.k === "i5") {
-      if (!Number.isFinite(o.x) || !Number.isFinite(o.v)) return;
+      // value_usd arrives as a string ("108234.56"), as Kalshi sends it.
+      const v = Number(o.v);
+      if (!Number.isFinite(o.x) || !Number.isFinite(v) || o.v === null || o.v === "") return;
       sample(delay.brti, o.t - o.x);
       if (spacing.prevX != null && o.x > spacing.prevX) { spacing.n++; const g = o.x - spacing.prevX; if (g > 1000) spacing.over1s++; if (g > 5000) spacing.over5s++; }
       if (spacing.prevX == null || o.x > spacing.prevX) spacing.prevX = o.x;
-      ticks.push({ x: o.x, t: o.t, v: o.v });
+      ticks.push({ x: o.x, t: o.t, v });
       return;
     }
     if (o.k === "d" && Number.isFinite(o.x)) sample(delay.book, o.t - o.x);
@@ -119,6 +121,7 @@ for (const f of files) {
   ticks = ticks.filter(k => k.t >= watermark - 1800000);
 }
 for (const ticker of want.keys()) if (!done.has(ticker)) finalize(ticker);
+if (!delay.brti.n) { console.error("::error::no BRTI ticks read from the archive: nothing below would mean anything"); process.exit(1); }
 console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB) in ${Math.round((Date.now() - t0) / 1000)}s; ${windowsUsed} windows replayed; left out ${JSON.stringify(excluded)}`);
 
 const q = (arr, p) => { if (!arr.length) return null; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
