@@ -937,6 +937,40 @@ continuing to move rather than the book lagging. The value is read as a
 string: `Number(o.v)`. A first run that compared it as a number read zero
 ticks and printed empty tables under a green tick.
 
+**Against the index itself. Measured 2026-10-21** (run 39533518216,
+`scripts/m15-index.mjs`, workflow `source: index`, KXBTC15M, 21 days,
+1,941 windows, upper bounds).
+
+The settlement average rebuilt from the 5Hz BRTI landed on Kalshi's
+settled side in **1,900 of 1,900** windows. A second's price is the last
+tick before the second ends. The rebuilt opening average sits a median
+$0.21 from Kalshi's strike (p90 $0.68).
+
+- **Distance to the strike is priced, not missed.** Buying the side BRTI
+  is ahead on lost about 2c a contract at 5 and 2 minutes out (t -2.7 and
+  -4.3). Kalshi charges slightly more than that side's win rate. At 1
+  minute out it was fair (+0.1c).
+- **The near-certain buckets are not an edge.** Won 100% at 99.6-99.9c
+  makes 0.1-0.4c a contract, and one loss erases hundreds of those wins.
+- **The settlement average can be estimated well inside the final
+  minute.** Take the seconds already in the average plus the latest
+  price for the rest. Median error is $1.65 at 30s and $0.74 at 20s, and
+  the estimate's side won 95.4% and 98.1%. Kalshi already priced that
+  side at 95.8% and 96.9%, so every edge was within ±1pt (noise). The
+  estimate disagreed with Kalshi's favourite in 8-15 windows over 21
+  days, with mixed results.
+- **Buying the side a sharp BRTI move favours DID hold up on its first
+  test.** The rule: the first 1bp-in-a-second move in the final two
+  minutes, on a 15-85c book, held to settlement. As a limit at the price
+  seen +1c, filled 250ms later, it made **+7.37c a contract, t 2.96**,
+  with both halves positive (+6.62c and +8.16c), from 445 decisions over
+  21 days. At +100ms and the price seen it made +6.67c, t 2.64. 2bp moves
+  made +5-7c (t 1.6-1.8); 4bp had too few cases (26). The parameters were
+  fixed before the run. It is still one 21-day sample and not yet a
+  finding: re-test on days after 2026-10-21 before any money. It trades
+  near 50c (average paid 0.46) where the fee is largest, and it is a
+  different trade from the 75c favourite rule.
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win
