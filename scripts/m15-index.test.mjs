@@ -78,7 +78,7 @@ console.log("m15-index.mjs end to end");
     };
     process.env.SUPABASE_URL = "https://fake.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-    process.argv.push("--days=1");
+    process.argv.push("--days=1", "--size=10,30,200");
     await import(${JSON.stringify(join(new URL(".", import.meta.url).pathname, "m15-index.mjs"))});
   `);
   let text, code = 0;
@@ -99,8 +99,12 @@ console.log("m15-index.mjs end to end");
   ok(/1 windows, \|err\| median \$0\.00/.test(c30) && /\$25-50\s+1\s+100\.0%\s+87\.0%/.test(c30), "C 30s: estimate exact, $30 from the strike, YES priced 87%", c30);
   // D: the 3bp move fires 1bp and 2bp, not 4bp. +100ms: the 49/51 book is
   // still there: 10 at 0.51 at either limit. +250ms: 60/62, so neither fills.
-  const d = text.split("D. BUY THE SIDE")[1];
-  ok(/1bp\s+\+100ms\s+seen\s+1\s+100\.0%\s+10\s+100\.0%\s+0\.510\s+\+\$\s*4\.73\s+\+47\.25c/.test(d), "D 1bp +100ms: 10 at 0.51, won, +$4.73 after a $0.1750 fee", d);
+  const d = text.split("D. BUY THE SIDE")[1].split("30 contracts")[0];
+  // 30 and 200: the same decision. 100 offered at 0.51, so 30 fills in full and 200 takes the 100 there.
+  const d30 = text.split("   30 contracts")[1].split("200 contracts")[0], d200 = text.split("   200 contracts")[1];
+  ok(/1bp\s+\+100ms\s+seen\s+1\s+100\.0%\s+30\s+100\.0%/.test(d30), "D at 30: all 30 at 0.51", d30);
+  ok(/1bp\s+\+100ms\s+seen\s+1\s+100\.0%\s+100\s+50\.0%/.test(d200), "D at 200: only the 100 offered within the limit, half the size asked", d200);
+  ok(/1bp\s+\+100ms\s+seen\s+1\s+100\.0%\s+10\s+100\.0%\s+100\.0%\s+0\.510\s+\+\$\s*4\.73\s+\+47\.25c/.test(d), "D 1bp +100ms: 10 at 0.51, won, +$4.73 after a $0.1750 fee", d);
   ok(/1bp\s+\+250ms\s+seen\s+1\s+0\.0%\s+0/.test(d) && /1bp\s+\+250ms\s+\+1c\s+1\s+0\.0%\s+0/.test(d), "D +250ms: the book moved to 60/62, so no fill at 0.51 or 0.52", d);
   ok(/2bp\s+\+100ms\s+seen\s+1\s+100\.0%/.test(d) && /4bp\s+\+100ms\s+seen\s+0\s/.test(d), "D: a 3bp move is a 2bp event and not a 4bp one", d);
 }

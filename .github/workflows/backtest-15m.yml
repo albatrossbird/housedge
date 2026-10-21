@@ -101,7 +101,7 @@ jobs:
           RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
           if [ "$SOURCE" = "index" ]; then
-            node scripts/m15-index.mjs "--days=$DAYS"
+            node scripts/m15-index.mjs "--days=$DAYS" "--size=$SIZE"
             exit $?
           fi
           if [ "$SOURCE" = "brtilag" ]; then

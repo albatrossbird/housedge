@@ -42,7 +42,8 @@ const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--$
 const DAYS = Math.min(Number(opt("days", 14)), 30);
 const SINCE_MS = Date.now() - DAYS * 86400000;
 const SERIES = "KXBTC15M";
-const SIZE = 10;
+const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
+const SIZE = 10;   // B and C price one 10-contract order at the touch
 const B_TIMES = [300, 120, 60], B_EDGES = [0, 10, 25, 50, 100];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
 const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }];
@@ -130,9 +131,11 @@ function finalize(ticker) {
       for (const delay of D_DELAYS) {
         const s2 = cursor.at(ev.t + delay);
         for (const l of D_LIMITS) {
-          const f = s2 ? walkFill(s2, side, Math.min(seen + l.c / 100, 0.99), SIZE) : { n: 0, cost: 0, pq: 0 };
-          const fee = f.n ? roundKalshiFee(0.07 * MULT * f.pq) : 0;
-          Ds.push({ thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen });
+          for (const size of SIZES) {
+            const f = s2 ? walkFill(s2, side, Math.min(seen + l.c / 100, 0.99), size) : { n: 0, cost: 0, pq: 0 };
+            const fee = f.n ? roundKalshiFee(0.07 * MULT * f.pq) : 0;
+            Ds.push({ size, thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen });
+          }
         }
       }
       break;   // first qualifying move per window
@@ -227,14 +230,18 @@ console.log("   \"disagrees\" = windows where the estimate picks the side Kalshi
 console.log("   estimate the market does not already share could pay.");
 
 console.log("\nD. BUY THE SIDE A SHARP BRTI MOVE FAVOURS (final two minutes, first move per window, held to settlement)");
-console.log(`   ${SIZE} contracts a decision, limit at the price seen or 1c above, filled against the recorded book after the delay.`);
+console.log(`   Up to ${SIZES.join(" / ")} contracts a decision (the same decisions at each size), limit at the price seen or 1c above,`);
+console.log("   filled against the recorded book after the delay as far as the book held within the limit.");
 console.log(`   windows left out of D: ${JSON.stringify(excludedD)}`);
-console.log("   move   delay  limit    decided  filled  ctrs   won(f)   avg paid      P&L   per ctr  t(day)   earlier    later");
+for (const size of SIZES) {
+console.log(`\n   ${size} contracts`);
+console.log("   move   delay  limit    decided  filled  ctrs  ctrs/asked  won(f)   avg paid      P&L   per ctr  t(day)   earlier    later");
 for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_LIMITS) {
-  const xs = Ds.filter(x => x.thr === thr && x.delay === delay && x.limit === l.key), f = xs.filter(x => x.n > 0);
+  const xs = Ds.filter(x => x.size === size && x.thr === thr && x.delay === delay && x.limit === l.key), f = xs.filter(x => x.n > 0);
   const ctrs = f.reduce((s, x) => s + x.n, 0), S = dayStats(xs.map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl })));
   const won = f.length ? f.filter(x => x.won).length / f.length : null, paid = ctrs ? f.reduce((s, x) => s + x.cost, 0) / ctrs : null;
-  console.log(`   ${`${thr}bp`.padEnd(5)} ${`+${delay}ms`.padStart(6)}  ${l.key.padEnd(5)} ${String(xs.length).padStart(8)} ${pct(xs.length ? f.length / xs.length : null).padStart(7)} ${String(ctrs).padStart(5)}  ${pct(won).padStart(7)}  ${(paid == null ? "—" : paid.toFixed(3)).padStart(9)}  ${(S.pnl >= 0 ? "+$" : "-$") + Math.abs(S.pnl).toFixed(2).padStart(6)}  ${cents(S.perCtr).padStart(8)} ${tt(S.t).padStart(6)}  ${cents(S.earlyPerCtr).padStart(8)} ${cents(S.latePerCtr).padStart(8)}`);
+  console.log(`   ${`${thr}bp`.padEnd(5)} ${`+${delay}ms`.padStart(6)}  ${l.key.padEnd(5)} ${String(xs.length).padStart(8)} ${pct(xs.length ? f.length / xs.length : null).padStart(7)} ${String(ctrs).padStart(5)}  ${pct(xs.length ? ctrs / (xs.length * size) : null).padStart(9)}  ${pct(won).padStart(7)}  ${(paid == null ? "—" : paid.toFixed(3)).padStart(9)}  ${(S.pnl >= 0 ? "+$" : "-$") + Math.abs(S.pnl).toFixed(2).padStart(6)}  ${cents(S.perCtr).padStart(8)} ${tt(S.t).padStart(6)}  ${cents(S.earlyPerCtr).padStart(8)} ${cents(S.latePerCtr).padStart(8)}`);
+}
 }
 
 console.log(`
