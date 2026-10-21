@@ -905,6 +905,18 @@ rule traded the window (the "hedge" reading). KXBTC15M is priced
 `tapered_deci_cent`: 0.1c steps below 10c and above 90c, so 0.1c is the
 floor (checked 2026-10-15 on `/markets`).
 
+**Buying the underdog earlier does not help either. Measured 2026-10-21**
+(run 39520162777, KXBTC15M, 23 days, 2,127 windows, settled YES 49.8%, 10
+contracts, held to settlement). The underdog was tested in 12 cells: four
+time windows (5-10m, 2-5m, 45-120s, 15-45s) by three price bands (5-20c,
+20-35c, 35-49c). None won more often than its price plus fee. 5-10 minutes
+out it is overpriced, losing 1.7-3.6c a contract at t -1.8 to -3.7. 45s to
+5 minutes out it is about fair, so it loses roughly the fee (-0.3c to
+-1.1c, t within ±0.7). The one positive cell, 45-120s at 35-49c (+0.75c,
+t 0.3), lost in the later half and when filled 1c worse. In the last 15-45s
+the underdog is badly overpriced: at 20-35c it won 17.4% against 27.9%
+priced.
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win
