@@ -21,7 +21,7 @@
 // Upper bounds as everywhere: our orders are not in the replayed book.
 // B and C price at the touch with no depth check; D walks the real book.
 // Reads only. Needs SUPABASE_SERVICE_ROLE_KEY (the archive is private).
-// Usage: node scripts/m15-index.mjs [--days=14]
+// Usage: node scripts/m15-index.mjs [--days=14 | --since=YYYY-MM-DD] [--size=10,30,200]
 
 import { authHeaders } from "../lib/supabaseHeaders.js";
 import { pageAll } from "../lib/restPage.js";
@@ -31,7 +31,8 @@ import { seriesFees } from "../lib/m15BacktestReport.js";
 import { newTape, feedTape, disrupted, bookCursor } from "../lib/m15Maker.js";
 import { walkFill } from "../lib/m15Chase.js";
 import { kalshiTakerFee, roundKalshiFee } from "../lib/fees.js";
-import { atOrBefore, findMoves } from "../lib/brtiLag.js";
+import { atOrBefore } from "../lib/brtiLag.js";
+import { createSharpMove } from "../lib/sharpMove.js";
 import { settleAvg, estimateAvg, bucketOf, bucketLabel, buyPrice, dayStats } from "../lib/m15Index.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -39,8 +40,12 @@ const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required — the archive bucket is private (migration 0029)"); process.exit(2); }
 
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
+// --since=YYYY-MM-DD reads from that UTC day on (an out-of-sample re-test);
+// otherwise the last --days. Either way no more than 30 days.
+const SINCE = opt("since", null);
+if (SINCE != null && !/^\d{4}-\d{2}-\d{2}$/.test(SINCE)) { console.error(`::error::--since takes YYYY-MM-DD, not ${SINCE}`); process.exit(2); }
 const DAYS = Math.min(Number(opt("days", 14)), 30);
-const SINCE_MS = Date.now() - DAYS * 86400000;
+const SINCE_MS = Math.max(SINCE != null ? Date.parse(`${SINCE}T00:00:00Z`) : Date.now() - DAYS * 86400000, Date.now() - 30 * 86400000);
 const SERIES = "KXBTC15M";
 const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
 const SIZE = 10;   // B and C price one 10-contract order at the touch
@@ -69,7 +74,7 @@ const tape = newTape();
 const paths = new Map();   // ticker -> once-a-second rows within 305s of the close
 let ticks = [];            // BRTI on CF Benchmarks' clock: { t, v }
 const A = { windows: 0, end: 0, agree: 0, ties: 0, start: 0, startDiffs: [] };
-const Bs = [], Cs = [], Ds = [];
+const Bs = [], Cs = [], Ds = [], Dlimits = [];
 const excludedD = {};
 let watermark = 0;
 const done = new Set();
@@ -120,25 +125,27 @@ function finalize(ticker) {
   const why = w ? disrupted(tape, w) : "no final-window record";
   if (why) { excludedD[why] = (excludedD[why] || 0) + 1; return; }
   for (const thr of D_THRESHOLDS) {
+    // The decision is lib/sharpMove.js's, tick by tick, exactly as a live
+    // bot would make it; only the fill below is the backtest's.
     const cursor = bookCursor(w, 20);
-    for (const ev of findMoves(tk, { thrBp: thr, from: close - 118000, to: close - 6000 })) {
-      const snap = cursor.at(ev.t);
-      const bid = snap?.bids[0]?.[0], ask = snap?.asks[0]?.[0];
-      if (bid == null || ask == null) continue;
-      const mid = (bid + ask) / 2;
-      if (mid < 0.15 || mid > 0.85) continue;
-      const side = ev.dir > 0 ? "yes" : "no", seen = side === "yes" ? ask : Math.round((1 - bid) * 10000) / 10000;
+    const bookAt = t => { const s = cursor.at(t); return s ? { bid: s.bids[0]?.[0], ask: s.asks[0]?.[0] } : null; };
+    const dec = createSharpMove(close, { thrBp: thr });
+    for (const k of tk) {
+      const r = dec.onTick(k.t, k.v, bookAt);
+      if (!r?.order) continue;
+      const { side, seen, limit } = r.order;
+      if (thr === 1) Dlimits.push({ limit, day });
       for (const delay of D_DELAYS) {
-        const s2 = cursor.at(ev.t + delay);
+        const s2 = cursor.at(r.t + delay);
         for (const l of D_LIMITS) {
           for (const size of SIZES) {
             const f = s2 ? walkFill(s2, side, Math.min(seen + l.c / 100, 0.99), size) : { n: 0, cost: 0, pq: 0 };
             const fee = f.n ? roundKalshiFee(0.07 * MULT * f.pq) : 0;
-            Ds.push({ size, thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen });
+            Ds.push({ size, thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen, cap: limit });
           }
         }
       }
-      break;   // first qualifying move per window
+      break;   // one order per window
     }
   }
 }
@@ -150,7 +157,7 @@ const keep = line => (line.startsWith('{"k":"i5"') && line.includes('"id":"BRTI"
   || ((line.startsWith('{"k":"b"') || line.startsWith('{"k":"d"') || line.startsWith('{"k":"full"') || line.startsWith('{"k":"final"')) && line.includes(needle))
   || line.startsWith('{"k":"conn"') || line.startsWith('{"k":"gap"');
 const t0 = Date.now();
-let bytes = 0, brtiTicks = 0;
+let bytes = 0, brtiTicks = 0, brtiBackwards = 0, brtiMaxX = -Infinity;
 for (const f of files) {
   bytes += f.size || 0;
   await reader.eachLine(f.path, o => {
@@ -159,6 +166,9 @@ for (const f of files) {
       // value_usd is recorded as a string ("108234.56").
       const v = Number(o.v);
       if (!Number.isFinite(o.x) || o.v == null || o.v === "" || !Number.isFinite(v)) return;
+      // Recorded in arrival order: a stamp behind the latest already seen is
+      // what a live decider would have to refuse.
+      if (o.x < brtiMaxX) brtiBackwards++; else brtiMaxX = o.x;
       ticks.push({ t: o.x, v }); brtiTicks++;
       return;
     }
@@ -178,7 +188,7 @@ for (const f of files) {
 }
 for (const ticker of want.keys()) if (!done.has(ticker)) finalize(ticker);
 if (!brtiTicks) { console.error("::error::no BRTI ticks read from the archive: nothing below would mean anything"); process.exit(1); }
-console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB) in ${Math.round((Date.now() - t0) / 1000)}s, ${brtiTicks.toLocaleString()} BRTI ticks`);
+console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB) in ${Math.round((Date.now() - t0) / 1000)}s, ${brtiTicks.toLocaleString()} BRTI ticks, ${brtiBackwards} arriving behind an earlier stamp`);
 
 const pct = v => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 const cents = v => (v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(2)}c`);
@@ -242,6 +252,16 @@ for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_
   const won = f.length ? f.filter(x => x.won).length / f.length : null, paid = ctrs ? f.reduce((s, x) => s + x.cost, 0) / ctrs : null;
   console.log(`   ${`${thr}bp`.padEnd(5)} ${`+${delay}ms`.padStart(6)}  ${l.key.padEnd(5)} ${String(xs.length).padStart(8)} ${pct(xs.length ? f.length / xs.length : null).padStart(7)} ${String(ctrs).padStart(5)}  ${pct(xs.length ? ctrs / (xs.length * size) : null).padStart(9)}  ${pct(won).padStart(7)}  ${(paid == null ? "—" : paid.toFixed(3)).padStart(9)}  ${(S.pnl >= 0 ? "+$" : "-$") + Math.abs(S.pnl).toFixed(2).padStart(6)}  ${cents(S.perCtr).padStart(8)} ${tt(S.t).padStart(6)}  ${cents(S.earlyPerCtr).padStart(8)} ${cents(S.latePerCtr).padStart(8)}`);
 }
+}
+
+{
+  // A risk check refusing limits above 0.97: how many 1bp orders it meets,
+  // and what the 10-contract, +250ms, +1c row is without them.
+  const over = Dlimits.filter(x => x.limit > 0.97 + 1e-9), lims = Dlimits.map(x => x.limit);
+  const xs = Ds.filter(x => x.size === (SIZES.includes(10) ? 10 : SIZES[0]) && x.thr === 1 && x.delay === 250 && x.limit === "+1c");
+  const kept = dayStats(xs.filter(x => x.cap <= 0.97 + 1e-9).map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl })));
+  console.log(`\n   1bp orders: ${Dlimits.length}; limit (seen +1c, cap 0.99) median ${q(lims, 0.5)?.toFixed(3) ?? "—"}, p99 ${q(lims, 0.99)?.toFixed(3) ?? "—"}, max ${q(lims, 1)?.toFixed(3) ?? "—"}; above 0.97: ${over.length}`);
+  console.log(`   without them (${xs[0]?.size ?? "—"} contracts, +250ms, +1c): ${kept.ctrs} ctrs, ${cents(kept.perCtr)} a contract, t ${tt(kept.t)}`);
 }
 
 console.log(`

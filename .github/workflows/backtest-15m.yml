@@ -28,9 +28,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), ustune (twelve Polymarket US variants, tuned on the first half of the days and judged on the second), rulebook (a strategies/*.json file over the archive), or bigprint (big trades vs outcomes)"
+        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), ustune (twelve Polymarket US variants, tuned on the first half of the days and judged on the second), rulebook (a strategies/*.json file over the archive), bigprint (big trades vs outcomes), brtilag, index (KXBTC15M against BRTI, incl. the sharp-move trade), or vector (recorded windows for the sharp-move decider)"
         type: choice
-        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint, brtilag, index]
+        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint, brtilag, index, vector]
         default: poller
       series:
         description: "Space-separated series"
@@ -49,7 +49,7 @@ on:
         default: "10"
         required: false
       days:
-        description: "How far back (poller: live book from 2026-09-26; archive: capped at 30)"
+        description: "How far back (poller: live book from 2026-09-26; archive: capped at 30). index also takes a YYYY-MM-DD start day, for an out-of-sample re-test"
         default: "21"
         required: false
       maker:
@@ -101,7 +101,15 @@ jobs:
           RULEFILE: ${{ github.event.inputs.file || 'strategies/momentum-ladder.json' }}
         run: |
           if [ "$SOURCE" = "index" ]; then
-            node scripts/m15-index.mjs "--days=$DAYS" "--size=$SIZE"
+            if [[ "$DAYS" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              node scripts/m15-index.mjs "--since=$DAYS" "--size=$SIZE"
+            else
+              node scripts/m15-index.mjs "--days=$DAYS" "--size=$SIZE"
+            fi
+            exit $?
+          fi
+          if [ "$SOURCE" = "vector" ]; then
+            node scripts/sharp-move-vector.mjs --days=2 --out=sharp-move-vector.json
             exit $?
           fi
           if [ "$SOURCE" = "brtilag" ]; then
@@ -143,5 +151,13 @@ jobs:
         with:
           name: rulebook-actions
           path: rulebook-actions.tsv
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload the sharp-move vector
+        if: ${{ always() && github.event.inputs.source == 'vector' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharp-move-vector
+          path: sharp-move-vector.json
           if-no-files-found: ignore
           retention-days: 14
