@@ -917,6 +917,26 @@ t 0.3), lost in the later half and when filled 1c worse. In the last 15-45s
 the underdog is badly overpriced: at 20-35c it won 17.4% against 27.9%
 priced.
 
+**Does the book lag BRTI? Barely. Measured 2026-10-21** (run 39525582130,
+`scripts/brti-lag.mjs`, workflow `source: brtilag`, KXBTC15M, 14 days,
+1,283 windows, final two minutes). BRTI reaches the box about 38ms after
+CF Benchmarks stamps it (p99 98ms). Kalshi's book changes arrive about
+12ms after Kalshi stamps them (p99 26ms). The test looked at every 2bp
+BRTI move inside one second on a 15-85c book, 276 of them, and measured
+the book on the box's own clock:
+- **82% of the book's +5s repricing was already done** when the BRTI tick
+  arrived (+16.9c of +20.7c).
+- Another 0.5c came in by +250ms and 1.0c by +500ms; the rest drifted in
+  over the following seconds.
+- 1bp moves look the same (82%, 1,089 events). On the sources' own clocks
+  the result is nearly identical, so the relay adds no meaningful delay.
+
+What a taker could still catch after +250ms is about 3c by +5s, before a
+~1.75c fee near 50c and the exit. Part of that may be the index
+continuing to move rather than the book lagging. The value is read as a
+string: `Number(o.v)`. A first run that compared it as a number read zero
+ticks and printed empty tables under a green tick.
+
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
 is the market's probability; "needs" adds Kalshi's fee and is the win
