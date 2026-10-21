@@ -989,6 +989,10 @@ $0.21 from Kalshi's strike (p90 $0.68).
   vector`). The fixture is recorded Kalshi data, so it stays in private
   repositories and is for this project's own use. Re-test out of sample
   with the `index` source and `days` set to a start day (`--since`).
+  Run 39542848930 decided through the shared decider and reproduced run
+  39536113616's section D exactly (445 decisions, +7.37c, t 2.96). No 1bp
+  limit (seen +1c) exceeded 0.86, so a 0.97 cap in the bot refuses
+  nothing. None of 8,969,169 BRTI ticks arrived behind an earlier stamp.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
