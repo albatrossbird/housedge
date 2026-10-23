@@ -102,7 +102,7 @@ jobs:
         run: |
           if [ "$SOURCE" = "index" ]; then
             if [[ "$DAYS" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-              node scripts/m15-index.mjs "--since=$DAYS" "--size=$SIZE"
+              node scripts/m15-index.mjs "--since=$DAYS" "--size=$SIZE" --list
             else
               node scripts/m15-index.mjs "--days=$DAYS" "--size=$SIZE"
             fi
