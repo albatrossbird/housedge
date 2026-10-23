@@ -993,6 +993,14 @@ $0.21 from Kalshi's strike (p90 $0.68).
   39536113616's section D exactly (445 decisions, +7.37c, t 2.96). No 1bp
   limit (seen +1c) exceeded 0.86, so a 0.97 cap in the bot refuses
   nothing. None of 8,969,169 BRTI ticks arrived behind an earlier stamp.
+  **First live days (from 2026-10-21 13:32 UTC) lost, and so did the
+  backtest on the same days.** The live bot won 10 of 28 fills at
+  -7.11c a contract. Run 39955395288 (`--list`, which prints every
+  decision) made 25 decisions over the overlap, filled 20, and won 6 at
+  -9.2c. The trader matched 19 windows on ticker, side and settlement;
+  the other 6 fell while the bot was down. Execution reproduces the rule,
+  so live fills count as out-of-sample evidence. Two days decide nothing;
+  the 10-28 re-test and the 150-fill review do.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
