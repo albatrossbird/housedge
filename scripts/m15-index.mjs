@@ -48,6 +48,9 @@ const DAYS = Math.min(Number(opt("days", 14)), 30);
 const SINCE_MS = Math.max(SINCE != null ? Date.parse(`${SINCE}T00:00:00Z`) : Date.now() - DAYS * 86400000, Date.now() - 30 * 86400000);
 const SERIES = "KXBTC15M";
 const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
+// --list prints every 1bp decision (+250ms, +1c, the first size), to match
+// against a live bot's own log trade by trade.
+const LIST = process.argv.includes("--list");
 const SIZE = 10;   // B and C price one 10-contract order at the touch
 const B_TIMES = [300, 120, 60], B_EDGES = [0, 10, 25, 50, 100];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
@@ -74,7 +77,7 @@ const tape = newTape();
 const paths = new Map();   // ticker -> once-a-second rows within 305s of the close
 let ticks = [];            // BRTI on CF Benchmarks' clock: { t, v }
 const A = { windows: 0, end: 0, agree: 0, ties: 0, start: 0, startDiffs: [] };
-const Bs = [], Cs = [], Ds = [], Dlimits = [];
+const Bs = [], Cs = [], Ds = [], Dlimits = [], Dlist = [];
 const excludedD = {};
 let watermark = 0;
 const done = new Set();
@@ -142,6 +145,8 @@ function finalize(ticker) {
             const f = s2 ? walkFill(s2, side, Math.min(seen + l.c / 100, 0.99), size) : { n: 0, cost: 0, pq: 0 };
             const fee = f.n ? roundKalshiFee(0.07 * MULT * f.pq) : 0;
             Ds.push({ size, thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen, cap: limit });
+            if (LIST && thr === 1 && delay === 250 && l.key === "+1c" && size === SIZES[0])
+              Dlist.push({ ticker, t: r.t, secs: (close - r.t) / 1000, bp: r.bp, bid: r.bid, ask: r.ask, side, seen, n: f.n, avg: f.n ? f.cost / f.n : null, result, pnl: (side === result ? f.n : 0) - f.cost - fee });
           }
         }
       }
@@ -262,6 +267,13 @@ for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_
   const kept = dayStats(xs.filter(x => x.cap <= 0.97 + 1e-9).map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl })));
   console.log(`\n   1bp orders: ${Dlimits.length}; limit (seen +1c, cap 0.99) median ${q(lims, 0.5)?.toFixed(3) ?? "—"}, p99 ${q(lims, 0.99)?.toFixed(3) ?? "—"}, max ${q(lims, 1)?.toFixed(3) ?? "—"}; above 0.97: ${over.length}`);
   console.log(`   without them (${xs[0]?.size ?? "—"} contracts, +250ms, +1c): ${kept.ctrs} ctrs, ${cents(kept.perCtr)} a contract, t ${tt(kept.t)}`);
+}
+
+if (LIST) {
+  console.log(`\n   EVERY 1bp DECISION (${SIZES[0]} contracts, +250ms, +1c), CF stamp of the deciding tick`);
+  console.log("   ticker                       decided (UTC)             out(s)     bp  book         side  seen  filled  avg     result  P&L");
+  for (const x of Dlist.sort((a, b) => a.t - b.t))
+    console.log(`   ${x.ticker.padEnd(28)} ${new Date(x.t).toISOString().padEnd(25)} ${x.secs.toFixed(1).padStart(6)} ${x.bp.toFixed(2).padStart(6)}  ${`${x.bid}/${x.ask}`.padEnd(11)}  ${x.side.padEnd(4)}  ${x.seen.toFixed(3)}  ${String(x.n).padStart(6)}  ${x.avg == null ? "  —  " : x.avg.toFixed(3)}  ${x.result.padEnd(6)}  ${(x.pnl >= 0 ? "+" : "") + x.pnl.toFixed(2)}`);
 }
 
 console.log(`

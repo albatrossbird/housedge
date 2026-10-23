@@ -78,7 +78,7 @@ console.log("m15-index.mjs end to end");
     };
     process.env.SUPABASE_URL = "https://fake.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-    process.argv.push("--days=1", "--size=10,30,200");
+    process.argv.push("--days=1", "--size=10,30,200", "--list");
     await import(${JSON.stringify(join(new URL(".", import.meta.url).pathname, "m15-index.mjs"))});
   `);
   let text, code = 0;
@@ -107,6 +107,9 @@ console.log("m15-index.mjs end to end");
   ok(/1bp\s+\+100ms\s+seen\s+1\s+100\.0%\s+10\s+100\.0%\s+100\.0%\s+0\.510\s+\+\$\s*4\.73\s+\+47\.25c/.test(d), "D 1bp +100ms: 10 at 0.51, won, +$4.73 after a $0.1750 fee", d);
   ok(/1bp\s+\+250ms\s+seen\s+1\s+0\.0%\s+0/.test(d) && /1bp\s+\+250ms\s+\+1c\s+1\s+0\.0%\s+0/.test(d), "D +250ms: the book moved to 60/62, so no fill at 0.51 or 0.52", d);
   ok(/2bp\s+\+100ms\s+seen\s+1\s+100\.0%/.test(d) && /4bp\s+\+100ms\s+seen\s+0\s/.test(d), "D: a 3bp move is a 2bp event and not a 4bp one", d);
+  // --list: the one 1bp decision, 90s out, YES seen 0.51; at +250ms the book is 60/62, so nothing filled.
+  const list = text.split("EVERY 1bp DECISION")[1] || "";
+  ok(new RegExp(`${T}\\s+${new Date(close - 90000).toISOString().replace(/\./g, "\\.")}\\s+90\\.0\\s+3\\.00\\s+0\\.49/0\\.51\\s+yes\\s+0\\.510\\s+0\\s+—\\s+yes\\s+\\+0\\.00`).test(list), "--list: the decision, its tick time, book, side and fill", list);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
