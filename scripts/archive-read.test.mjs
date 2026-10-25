@@ -2,6 +2,9 @@
 // with backoff (honouring Retry-After); answers are returned at once.
 import { fetchRetrying, archiveReader } from "../lib/archiveRead.js";
 import { gzipSync } from "node:zlib";
+import { mkdtempSync, existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -82,6 +85,53 @@ console.log("a download cut off part way");
   let err = null;
   try { await reader.eachLine("m15/z.ndjson.gz", () => {}); } catch (e) { err = e; }
   ok(err && /cut off 3 times/.test(err.message) && calls === 3, "a download that never completes fails loudly after its tries", err?.message);
+}
+
+console.log("the local cache");
+{
+  // One hour, one file. The listing reports its size and updated time;
+  // a run reads it through listRange + eachLine as every script does.
+  const T = Date.UTC(2026, 9, 24, 5);
+  const gz = gzipSync(Buffer.from(Array.from({ length: 300 }, (_, i) => JSON.stringify({ a: i })).join("\n") + "\n"));
+  let updated = "2026-10-24T06:00:01Z", body = gz, listedSize = gz.length, downloads = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/object/list/")) return new Response(JSON.stringify([{ id: "1", name: "a_box.ndjson.gz", updated_at: updated, metadata: { size: listedSize } }]));
+    if (u.includes("/object/authenticated/")) { downloads++; return new Response(body); }
+    return new Response("{}", { status: 404 });
+  };
+  const dir = mkdtempSync(join(tmpdir(), "archcache-"));
+  const run = async (opts = {}) => {
+    const logs = [], got = [];
+    const r = archiveReader({ url: "https://fake", key: "k", log: m => logs.push(m), cacheDir: dir, ...opts });
+    for (const f of await r.listRange("m15", T, T)) await r.eachLine(f.path, o => got.push(o.a));
+    return { got, logs };
+  };
+  let x = await run();
+  ok(downloads === 1 && x.got.length === 300, "first run downloads the file", downloads);
+  ok(existsSync(join(dir, "stream-archive", "m15", "2026-10-24", "05", "a_box.ndjson.gz")), "and keeps a copy");
+  x = await run();
+  ok(downloads === 1 && x.got.length === 300 && x.got[299] === 299, "second run reads the copy: no download, every line", downloads);
+  updated = "2026-10-24T07:10:00Z";
+  x = await run();
+  ok(downloads === 2 && x.got.length === 300, "a file replaced in Storage (new updated time) is downloaded again", downloads);
+  x = await run();
+  ok(downloads === 2, "and the new copy is used after that", downloads);
+  // A download shorter than the listed size is read but never kept.
+  updated = "2026-10-24T08:00:00Z"; listedSize = gz.length + 10;
+  await run(); await run();
+  ok(downloads === 4, "a download that does not match the listed size is never cached", downloads);
+  // Read without a listing (a path from elsewhere): always downloaded, never cached.
+  listedSize = gz.length;
+  const before = downloads;
+  const r = archiveReader({ url: "https://fake", key: "k", log: () => {}, cacheDir: dir });
+  await r.eachLine("m15/2026-10-24/05/other.ndjson.gz", () => {});
+  await r.eachLine("m15/2026-10-24/05/other.ndjson.gz", () => {});
+  ok(downloads === before + 2 && !readdirSync(join(dir, "stream-archive", "m15", "2026-10-24", "05")).some(n => n.startsWith("other")), "an unlisted path is downloaded each time and not cached", downloads - before);
+  // No cache directory: every run downloads.
+  const d0 = downloads;
+  await run({ cacheDir: null }); await run({ cacheDir: null });
+  ok(downloads === d0 + 2, "without a cache directory every run downloads", downloads - d0);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
