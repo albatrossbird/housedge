@@ -14,7 +14,16 @@ name: Daily 15-minute report
 #
 # Costs, measured 2026-10-02: ~5 Actions minutes a run, and ~2GB of
 # Storage egress (the Kalshi archive is ~260MB/day; Pro includes 250GB a
-# month). Reads only — it writes nothing.
+# month). Reads only — it writes nothing to Supabase.
+#
+# EGRESS: it re-reads the same 7 days every morning, which was ~60GB a
+# month and the bulk of a cached-egress overage (Supabase, 2026-10-23).
+# The archive files it downloads are now kept in this repository's Actions
+# cache (lib/archiveRead.js, ARCHIVE_CACHE_DIR), so each run downloads
+# only the files new since the last one; the log ends each script with
+# "archive cache: N files from disk, M downloaded". The cache holds copies
+# of the private archive inside this private repository and nothing else;
+# losing it costs one full download, never data.
 #
 # Every figure in it is an upper bound: takers at the touch, both legs
 # at once for the spread, no latency. It is evidence to accumulate, not
@@ -45,11 +54,20 @@ jobs:
       # The archive bucket and recorded tables are private (0028, 0029).
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       DAYS: ${{ github.event.inputs.days || '7' }}
+      ARCHIVE_CACHE_DIR: ${{ github.workspace }}/.archive-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Every run saves under its own key (caches are immutable) and
+      # restores the newest earlier one by prefix.
+      - name: Restore archive cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .archive-cache
+          key: m15-archive-${{ github.run_id }}
+          restore-keys: m15-archive-
       # shell: bash is what turns on pipefail, so a failed script fails
       # its step instead of hiding behind tee's exit status.
       - name: Spread, Kalshi vs Polymarket US, last 24h
@@ -63,6 +81,16 @@ jobs:
         if: always()
         shell: bash
         run: node scripts/paper-report.mjs "--days=$DAYS" 2>&1 | tee paper.txt
+      # Copies no run has read for 2 days (older than the window) go, so the
+      # cache stays at about the window's size (~2-3GB) under GitHub's 10GB.
+      - name: Save archive cache
+        if: always()
+        run: find .archive-cache -type f -mtime +2 -delete 2>/dev/null; du -sh .archive-cache 2>/dev/null || true
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .archive-cache
+          key: m15-archive-${{ github.run_id }}
       - name: Summary
         if: always()
         run: |

@@ -1067,8 +1067,16 @@ which passed "> $5" a tick early. `scripts/m15-rulebook.test.mjs` and
 **The daily report** (`daily-15m-report.yml`, 04:23 UTC, in the
 `m15-analysis` queue) writes three things to its run summary: the 24h
 Kalshi vs Polymarket US spread, what the paper bot did, and the same
-rules backtested on the archive. ~5 Actions minutes and ~2GB of Storage
-egress a run (Pro includes 250GB a month). Read the paper section beside
+rules backtested on the archive. ~5 Actions minutes a run. It used to
+download **~4.1GB of Storage a run** (the backtest reads each Kalshi file
+twice), ~125GB a month, and that is what pushed the project past Pro's
+250GB of cached egress (Supabase notice, 2026-10-23). Downloaded files now
+persist in the repository's Actions cache (`ARCHIVE_CACHE_DIR`,
+`lib/archiveRead.js`): a copy is used only when it matches the size and
+updated time the listing reports, a short download is never kept, and
+nothing in Storage changes. Measured 2026-10-25: a cold run downloaded
+2.2GB and read the rest from disk; the next read 1,006 files (4.1GB) from
+disk and downloaded 0. Steady state is about one new day a run. Read the paper section beside
 the backtest: a rule that wins on the archive but keeps MISSING live is
 an edge that is gone before an order can land.
 
