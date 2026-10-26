@@ -3,15 +3,16 @@
 // those markets settle on. lib/dukascopy.js has the why and the format.
 //
 // Runs on the box from marketslap-dukascopy.timer, daily. The first run
-// fills from DUKA_FROM (the 15-minute series launched around 2026-06-30)
-// and takes many hours at one paced request at a time; every later run
+// fills from DUKA_FROM — 2026-08-18, because Kalshi lists settled markets
+// only back to 2026-08-19 (measured 2026-10-26) and earlier hours would
+// have nothing to compare with — and takes hours at one paced request; every later run
 // fetches only the hours since, then reprints the comparison. Files stay
 // in the unit's StateDirectory, ~1GB in all. Nothing is uploaded.
 //
 // HOLDS NO KEY. Dukascopy's files and Kalshi's settled markets are both
 // public, so the unit loads no EnvironmentFile.
 //
-//   node scripts/dukascopy-fetch.mjs [--compare-only] [--from=2026-06-29]
+//   node scripts/dukascopy-fetch.mjs [--compare-only] [--from=2026-08-18]
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ import { kalshiGet } from "../lib/m15.js";
 const env = process.env;
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 const DIR = env.DUKA_DIR || env.STATE_DIRECTORY || "/var/lib/marketslap-dukascopy";
-const FROM_MS = Date.parse(`${opt("from", env.DUKA_FROM || "2026-06-29")}T00:00:00Z`);
+const FROM_MS = Date.parse(`${opt("from", env.DUKA_FROM || "2026-08-18")}T00:00:00Z`);
 const PACE_MS = Number(env.DUKA_PACE_MS || 1500);
 // Dukascopy publishes an hour's file after it ends; three hours' margin.
 const TO_MS = Math.floor(Date.now() / 3600000) * 3600000 - Number(env.DUKA_LAG_HOURS ?? 3) * 3600000;

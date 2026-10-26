@@ -366,8 +366,8 @@ no `EnvironmentFile`. Files stay in `/var/lib/marketslap-dukascopy`
     sudo systemctl enable --now marketslap-dukascopy.timer
     sudo systemctl start --no-block marketslap-dukascopy.service
 
-The first run fills from 2026-06-29 at one paced request at a time and
-takes many hours (Dukascopy throttles servers); it stops fetching at 18
+The first run fills from 2026-08-18 (as far back as Kalshi lists settled
+markets) at one paced request at a time and takes several hours (Dukascopy throttles servers); it stops fetching at 18
 hours and the next daily run resumes. The comparison prints at the end
 of every run:
 

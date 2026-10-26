@@ -2,7 +2,7 @@
 -- reports it: `expiration_value` on a settled market, beside its
 -- `floor_strike` (the price to beat, which is the previous window's
 -- settlement). For the commodity and FX series that is the Pyth price
--- itself, at every window close back to each series' launch, for free.
+-- itself, at every window close, for free.
 --
 -- WHY. It is the yardstick for any cheaper feed that stands in for Pyth
 -- (scripts/dukascopy-fetch.mjs compares one): a proxy is worth what it
@@ -15,8 +15,11 @@
 -- denominator — so adding nine more series there would move their
 -- numbers without anything having changed.
 --
--- Small: ~130,000 rows for every in-scope series back to launch, ~1,000
--- a day after that. Written by scripts/m15-backfill.mjs.
+-- KALSHI LISTS ONLY THE LAST ~10 WEEKS of settled markets (measured
+-- 2026-10-26: KXBTC15M's oldest is 2026-08-19, 6,461 windows), so this
+-- table is what keeps them once they roll off: each day it is not run is
+-- a day lost at the far end. ~45,000 rows on the first run, ~1,000 a
+-- day after. Written by scripts/m15-backfill.mjs.
 --
 -- PRIVATE, like every recorded table here (migration 0028): RLS on, no
 -- policies, SELECT revoked from anon and authenticated, in the same

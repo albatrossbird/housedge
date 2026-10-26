@@ -728,8 +728,11 @@ several readers count every window in `m15_markets`.
 
 - **Settlement prices, free** (`m15_settlements`, migration `0032`,
   written by the backfill): Kalshi's `expiration_value` on a settled
-  market IS Pyth's price at that close, beside `floor_strike`, back to
-  each series' launch. Pyth's own API needs a paid key since 2026-08-26
+  market IS Pyth's price at that close, beside `floor_strike`. **Kalshi
+  lists settled markets for only ~10 weeks** (measured 2026-10-26:
+  KXBTC15M's oldest is 2026-08-19, and its 6,461 matched the "6,458 back
+  to 2026-06-30" of September because the window rolls), so this table
+  is what keeps them. Pyth's own API needs a paid key since 2026-08-26
   (Hermes answers `401`; Starter $500 is crypto-only, metals from
   $2,500) and Kalshi's `pyth_value` channel is $1,000/month (7 days
   free). Median volume per window, 7 days to 2026-10-26: BTC 3.1M,
