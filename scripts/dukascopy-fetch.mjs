@@ -23,7 +23,7 @@ const env = process.env;
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 const DIR = env.DUKA_DIR || env.STATE_DIRECTORY || "/var/lib/marketslap-dukascopy";
 const FROM_MS = Date.parse(`${opt("from", env.DUKA_FROM || "2026-08-18")}T00:00:00Z`);
-const PACE_MS = Number(env.DUKA_PACE_MS || 1500);
+const PACE_MS = Number(env.DUKA_PACE_MS || 10000);
 // Dukascopy publishes an hour's file after it ends; three hours' margin.
 const TO_MS = Math.floor(Date.now() / 3600000) * 3600000 - Number(env.DUKA_LAG_HOURS ?? 3) * 3600000;
 // Stop fetching in time to compare before systemd's RuntimeMaxSec.
@@ -41,6 +41,7 @@ if (!process.argv.includes("--compare-only")) {
   const t0 = Date.now();
   const S = await fetchHistory({ dir: DIR, symbols: series.map(s => DUKA_SYMBOLS[s]), fromMs: FROM_MS, toMs: TO_MS, paceMs: PACE_MS, deadlineMs: DEADLINE, log });
   unavailable = S.unavailable;
+  if (S.refused) log(`::warning::Dukascopy is refusing this machine (HTTP 429 for an hour). The comparison below covers only the hours already downloaded.`);
   log(`fetched ${S.fetched} hours (${(S.bytes / 1e6).toFixed(1)} MB, ${S.empty} with no quotes), ${S.skipped} already here, throttled ${S.throttled} times, ${S.failed} failed, in ${((Date.now() - t0) / 60000).toFixed(0)} min${S.unavailable.length ? `; not on Dukascopy: ${S.unavailable.join(" ")}` : ""}`);
 }
 

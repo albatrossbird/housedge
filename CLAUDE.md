@@ -747,6 +747,11 @@ several readers count every window in `m15_markets`.
   check 2026-10-26: oil within 0-1.5c of Pyth at four closes. These are
   the bank's quotes, not Pyth's; read "near" before trusting one.
   `scripts/dukascopy.test.mjs` pins it (mutation-checked).
+  **Dukascopy shut the box out on its first run** (2026-10-26): ~100
+  files at a 1.5s pace, then HTTP 429 on every request for 6+ hours,
+  retried every 10 minutes because the fetcher never gave up. It now
+  stops a run's fetch after an hour of refusals (`refused`) and paces at
+  10s. If the box stays refused, Dukascopy is not a source for it.
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which
