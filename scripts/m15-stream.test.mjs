@@ -80,12 +80,14 @@ function run({ fake = {}, storage = "ok", rest = "ok", seconds = 4, envx = {}, l
   catch (e) { code = e.status; text = String(e.stdout) + String(e.stderr); }
   const r = JSON.parse(readFileSync(res, "utf8"));
   const local = readdirSync(arch);
-  // Every archive line, uploaded files then whatever is still local, in name order.
-  const files = [
-    ...r.uploads.filter(u => u.path.endsWith(".gz")).map(u => ({ name: u.path, buf: Buffer.from(u.body, "base64") })),
-    ...local.filter(n => n.endsWith(".ndjson.gz")).map(n => ({ name: n, buf: readFileSync(join(arch, n)), local: true })),
+  const archX = join(arch, "m15x"), localX = (() => { try { return readdirSync(archX); } catch { return []; } })();
+  // Every archive line, uploaded files then whatever is still local, in
+  // name order: m15/ in `files`, m15x/ (the commodity and FX series) in `filesX`.
+  const pick = (prefix, dir, names) => [
+    ...r.uploads.filter(u => u.path.startsWith(`stream-archive/${prefix}/`) && u.path.endsWith(".gz")).map(u => ({ name: u.path, buf: Buffer.from(u.body, "base64") })),
+    ...names.filter(n => n.endsWith(".ndjson.gz")).map(n => ({ name: n, buf: readFileSync(join(dir, n)), local: true })),
   ];
-  return { code, text, ...r, local, files };
+  return { code, text, ...r, local, localX, files: pick("m15", arch, local), filesX: pick("m15x", archX, localX) };
 }
 
 const linesOf = f => gunzipSync(f.buf).toString().trim().split("\n").map(l => JSON.parse(l));
@@ -103,7 +105,8 @@ console.log("a normal run");
   ok(r.code === 0, "exits cleanly at the end of its run", r);
   ok(r.uploads.some(u => u.path === "stream-archive/m15/_probe/box.txt"), "proves the bucket before recording", r);
   const gz = r.uploads.filter(u => u.path.endsWith(".gz"));
-  ok(gz.length >= 1 && gz.every(u => /^stream-archive\/m15\/\d{4}-\d\d-\d\d\/\d\d\/\d{8}T\d{9}Z_box\.ndjson\.gz$/.test(u.path)), "rotated files are uploaded to m15/<day>/<hour>/", r);
+  ok(gz.length >= 1 && gz.every(u => /^stream-archive\/m15x?\/\d{4}-\d\d-\d\d\/\d\d\/\d{8}T\d{9}Z_box\.ndjson\.gz$/.test(u.path))
+     && gz.some(u => u.path.startsWith("stream-archive/m15/")), "rotated files are uploaded to m15/<day>/<hour>/ (and m15x/)", r);
   let clean = true; for (const f of r.files) { try { const L = linesOf(f); if (L[0].k !== "meta") clean = false; } catch { clean = false; } }
   ok(clean, "every file is a complete gzip that opens with a meta line", r);
   ok(r.local.filter(n => n.endsWith(".gz")).length <= 1 && !r.local.some(n => n.endsWith(".part")), "only the last file is left locally, closed (the next run uploads it)", r);
@@ -219,6 +222,26 @@ console.log("\na file left by a crashed run");
 {
   const r = run({ leftover: true });
   ok(r.uploads.some(u => /20260926T140000Z_box-truncated\.ndjson\.gz$/.test(u.path)), "is uploaded, labelled truncated", r);
+}
+
+console.log("\nthe commodity and FX series go to their own folder, m15x/");
+{
+  // Bitcoin in scope, ETH not, silver one of the extra series; silver
+  // closes inside the run so its final window is recorded too.
+  const r = run({ envx: { M15_SERIES: "KXBTC15M" }, later: `fake.addMarket("KXSILVER15M-S", { close: iso(30000) });` });
+  ok(r.code === 0, "exits cleanly", r);
+  const L = byTime(r.files), X = byTime(r.filesX);
+  const has = (A, k, m) => A.some(l => l.k === k && (m == null || l.m === m));
+  ok(r.uploads.some(u => u.path === "stream-archive/m15x/_probe/box.txt"), "proves the m15x/ folder before recording", r);
+  ok(r.filesX.length >= 1 && r.filesX.every(f => { try { return linesOf(f)[0].k === "meta"; } catch { return false; } }), "m15x/ files are complete gzips opening with a meta line", r);
+  ok(has(X, "b", "KXSILVER15M-S") && has(X, "mkt", "KXSILVER15M-S") && has(X, "final", "KXSILVER15M-S") && has(X, "d", "KXSILVER15M-S"),
+     "silver's books, listing and final-window changes are in m15x/", r);
+  ok(!L.some(l => String(l.m).startsWith("KXSILVER15M")), "and none of them in m15/ — its readers download nothing more", r);
+  ok(has(L, "b", "KXBTC15M-A") && !X.some(l => String(l.m).startsWith("KXBTC15M")), "Bitcoin stays in m15/ only", r);
+  ok(!L.concat(X).some(l => String(l.m).startsWith("KXETH15M")), "a series in neither list is not recorded", r);
+  ok(has(L, "conn") && has(X, "conn") && has(L, "health") && has(X, "health"), "socket events and health go to BOTH folders", r);
+  ok(has(L, "i5") && !has(X, "i5"), "the indices stay in m15/", r);
+  ok(!r.local.some(n => n.endsWith(".part")) && !r.localX.some(n => n.endsWith(".part")), "both archives close their files", r);
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");

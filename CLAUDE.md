@@ -712,6 +712,39 @@ on the box. Clearing what was already stored is
 `m15_scope_prune.sql` (delete, direct connection, quiet hour). The
 stream archive's past hours still hold every series; new hours do not.
 
+**The commodity and FX series are recorded APART (decided 2026-10-26).**
+Every commodity and FX 15-minute series settles on a Pyth price (Kalshi's
+`/series/<ticker>` settlement sources, checked 2026-10-26: gold is
+`Metal.Index.1OZGOLD/USD`, oil `Commodities.Index.PYTHOIL/USD`, silver
+`Metal.Index.SILVER/USD`, natgas, copper `CU`, platinum `XPT`, palladium
+`XPD`, EUR/GBP/JPY). S&P and Nasdaq settle on the index and are not
+listed. `M15_EXTRA_SERIES` in `lib/m15.js` (the nine besides gold) are
+recorded by the WebSocket recorder into their own archive folder,
+**`m15x/`**, so nothing reading `m15/` downloads a byte more — Storage
+egress is what went over quota in October. Socket events (`conn`, `err`,
+`health`) go to both folders; a `gap` line is split by market; the
+indices stay in `m15/`. The poller and `m15_markets` do NOT carry them:
+several readers count every window in `m15_markets`.
+
+- **Settlement prices, free** (`m15_settlements`, migration `0032`,
+  written by the backfill): Kalshi's `expiration_value` on a settled
+  market IS Pyth's price at that close, beside `floor_strike`, back to
+  each series' launch. Pyth's own API needs a paid key since 2026-08-26
+  (Hermes answers `401`; Starter $500 is crypto-only, metals from
+  $2,500) and Kalshi's `pyth_value` channel is $1,000/month (7 days
+  free). Median volume per window, 7 days to 2026-10-26: BTC 3.1M,
+  gold 392k, WTI 106k, silver 49k, natgas 23k, copper 14k, Pt/Pd ~6.5k,
+  FX 4-6k contracts.
+- **Dukascopy as a free stand-in** (`lib/dukascopy.js`,
+  `scripts/dukascopy-fetch.mjs`, `marketslap-dukascopy.timer`). The
+  bank's quote history, hourly LZMA files, fetched slowly on the box
+  with no key and compared with the settlement prices: level gap in bp,
+  and how often Dukascopy's OWN move over a window points the way Kalshi
+  settled, overall and on the fifth of windows nearest the strike. Spot
+  check 2026-10-26: oil within 0-1.5c of Pyth at four closes. These are
+  the bank's quotes, not Pyth's; read "near" before trusting one.
+  `scripts/dukascopy.test.mjs` pins it (mutation-checked).
+
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which
 side (yes/no/favourite/underdog/momentum/fade), a time-to-close window, a

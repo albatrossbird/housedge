@@ -19,7 +19,7 @@ on:
     inputs:
       maxPages:
         description: "Cursor pages per series (1000 markets each)"
-        default: "12"
+        default: "30"
         required: false
 
 concurrency:
@@ -39,5 +39,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          M15_MAX_PAGES: ${{ github.event.inputs.maxPages || '12' }}
+          M15_MAX_PAGES: ${{ github.event.inputs.maxPages || '30' }}
         run: node scripts/m15-backfill.mjs

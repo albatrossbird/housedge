@@ -21,6 +21,9 @@ name: Backtest 15-minute strategies
 # candles for the Bitcoin signals; every action goes up as an artifact.
 # source=bigprint: scripts/m15-bigprint.mjs — do big trades on Kalshi and
 # Polymarket US predict the outcome, and would following them have paid?
+# source=sizes: scripts/archive-size.mjs — the stream archives' size per
+# hour and day from the Storage listing (m15/, m15x/, pmus15/), and which
+# series the newest m15x/ file holds. Downloads one file.
 # Manual only, and run one at a time — not 15:45-16:45 UTC, while
 # discovery and matching load the database.
 
@@ -28,9 +31,9 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), ustune (twelve Polymarket US variants, tuned on the first half of the days and judged on the second), rulebook (a strategies/*.json file over the archive), bigprint (big trades vs outcomes), brtilag, index (KXBTC15M against BRTI, incl. the sharp-move trade), or vector (recorded windows for the sharp-move decider)"
+        description: "poller (15-second path, Postgres), archive (1-second book, Storage), perchange (archive, each rule also decided on every book change), longshot (archive, the underdog bought in the last seconds), chase (perchange plus ways to get more fills: a limit 1-2c above, retry after a miss), ustune (twelve Polymarket US variants, tuned on the first half of the days and judged on the second), rulebook (a strategies/*.json file over the archive), bigprint (big trades vs outcomes), brtilag, index (KXBTC15M against BRTI, incl. the sharp-move trade), vector (recorded windows for the sharp-move decider), or sizes (the stream archives' size, from the listing)"
         type: choice
-        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint, brtilag, index, vector]
+        options: [poller, archive, perchange, longshot, chase, ustune, rulebook, bigprint, brtilag, index, vector, sizes]
         default: poller
       series:
         description: "Space-separated series"
@@ -106,6 +109,10 @@ jobs:
             else
               node scripts/m15-index.mjs "--days=$DAYS" "--size=$SIZE"
             fi
+            exit $?
+          fi
+          if [ "$SOURCE" = "sizes" ]; then
+            node scripts/archive-size.mjs --hours=24
             exit $?
           fi
           if [ "$SOURCE" = "vector" ]; then

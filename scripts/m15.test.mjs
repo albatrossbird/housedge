@@ -4,7 +4,7 @@
 // Worth pinning because the recorder is the one job whose input cannot
 // be re-fetched: a window mis-shaped today is a window lost, not a
 // window to re-read.
-import { m15InScope, toM15Row, toM15Quote, quoteChanged, M15_SUFFIX } from "../lib/m15.js";
+import { m15InScope, m15InExtra, toM15Row, toM15Settlement, toM15Quote, quoteChanged, M15_SUFFIX } from "../lib/m15.js";
 
 let bad = 0;
 const eq = (got, want, what) => {
@@ -148,6 +148,22 @@ const SETTLED = { ...LIVE, ticker: "KXBTC15M-26SEP060015-15", result: "no", last
      "depth alone changing -> no row");
   eq(quoteChanged(base, { ...base, book_bid: null, book_ask: null, observed_at: t1 }), true,
      "a book that became unknown is a change in what we know");
+}
+
+// The commodity and FX series recorded apart (m15x/), and their
+// settlement prices. A settled market from the live API, 2026-10-26.
+{
+  const x = m15InExtra({});
+  eq(x("KXSILVER15M") && x("KXWTI15M-26OCT252245-45") && x("kxusdjpy15m"), true, "the nine extra series, by series or market ticker");
+  eq(x("KXGOLD15M") || x("KXBTC15M-26OCT252245-45") || x("KXETH15M"), false, "gold and Bitcoin stay in m15/, ETH is not recorded");
+  eq(m15InExtra({ M15_EXTRA_SERIES: "none" })("KXSILVER15M"), false, "M15_EXTRA_SERIES=none turns it off");
+  eq(m15InExtra({ M15_EXTRA_SERIES: "kxcopper15m" })("KXCOPPER15M-X") && !m15InExtra({ M15_EXTRA_SERIES: "kxcopper15m" })("KXSILVER15M"), true, "a list narrows it");
+  const live = { ticker: "KXGOLD15M-26OCT252245-45", floor_strike: 3991.36, expiration_value: "3994.77", result: "yes", close_time: "2026-10-26T02:45:00Z" };
+  const st = toM15Settlement(live, "KXGOLD15M");
+  eq(st?.value === 3994.77 && st.strike === 3991.36 && st.result === "yes" && st.series === "KXGOLD15M", true, "the settlement price is read from expiration_value, a STRING on the wire");
+  eq(toM15Settlement({ ...live, result: "" }), null, "a live market (result \"\") has no settlement");
+  eq(toM15Settlement({ ...live, expiration_value: "" }), null, "a settled market without its value is not a row");
+  eq(toM15Settlement({ ...live, expiration_value: null }), null, "nor with a null one (Number(null) would be 0)");
 }
 
 console.log(bad ? `${bad} failing` : "m15: all cases pass");
