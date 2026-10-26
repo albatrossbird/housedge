@@ -82,6 +82,21 @@ console.log("\nfetching:");
   ok(asked.length === n && S2.fetched === 0 && S2.skipped === goldHours.length - 1, "a second run asks for nothing it has", JSON.stringify(S2));
 }
 
+{
+  // Refused for good (the box, 2026-10-26: a 429 on every request for
+  // hours): the run gives up after an hour of waiting instead of retrying
+  // the same hour forever, and says so.
+  const dir = mkdtempSync(join(tmpdir(), "duka-"));
+  let asked = 0, waited = 0;
+  const fetchImpl = async () => { asked++; return { status: 429, headers: { get: () => null } }; };
+  const S = await fetchHistory({ dir, symbols: ["GOLD"], fromMs: H, toMs: H + 3 * 3600000, fetchImpl, sleep: async ms => { waited += ms; }, paceMs: 1, log: () => {} });
+  ok(S.refused === true && waited <= 3600000 && asked < 12 && S.fetched === 0, "a refusal lasting an hour ends the run's fetch, flagged refused", JSON.stringify({ S, waited, asked }));
+  let n = 0;
+  const flaky = async () => (++n % 2 ? { status: 429, headers: { get: () => null } } : { status: 200, headers: { get: () => null }, arrayBuffer: async () => Buffer.alloc(0) });
+  const F = await fetchHistory({ dir: mkdtempSync(join(tmpdir(), "duka-")), symbols: ["GOLD"], fromMs: H, toMs: H + 200 * 3600000, fetchImpl: flaky, sleep: async () => {}, paceMs: 1, log: () => {} });
+  ok(!F.refused && F.fetched > 100, "brief refusals between answers do not add up to a stop", JSON.stringify(F));
+}
+
 console.log("\ncomparing with Kalshi's settlement prices:");
 {
   ok(scaleFor([[101664, 101.66], [101300, 101.31]]) === 1000 && scaleFor([[117512, 1.1751]]) === 100000, "the scale is found from the data (oil 1e3, EUR/USD 1e5)");
