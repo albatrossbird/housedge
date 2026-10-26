@@ -1534,6 +1534,16 @@ consecutive profitable samples are one EPISODE whose dollars are its
 best moment, never a sum. Every figure is an upper bound: both legs at
 the same instant, as a taker, with no latency.
 
+**It reads hour by hour and lets each window go** (`lib/venueStream.js`).
+Holding the whole day (every .us book, every Kalshi 1-second book, ~11M
+final-window changes) passed Node's 4GB heap, and the daily report's
+Spread step died with `Reached heap limit` every day from at least
+2026-10-21. A window is reduced once the hours read are 10 minutes past
+its close, by the same per-window code `summarize()`/`finalReplay()`
+run; `scripts/venue-stream.test.mjs` requires identical results to the
+batch path. A line for an already-reduced window stamped before its
+close + 2s is counted and warned as late.
+
 ### Going private: what breaks, measured before the switch
 
 **Done 2026-09-29.** The box pulls with its deploy key (`DONE`, and

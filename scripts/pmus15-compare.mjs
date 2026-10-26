@@ -9,8 +9,9 @@
 //
 //   node scripts/pmus15-compare.mjs --hours=24
 import { archiveReader } from "../lib/archiveRead.js";
-import { newCompare, feedKalshi, feedPmus, summarize, episodeStats, delayStats, KALSHI_SERIES } from "../lib/venueCompare.js";
-import { newFinal, feedKalshiFinal, finalReplay, finalDelayStats, finalEpisodeStats } from "../lib/venueFinal.js";
+import { episodeStats, delayStats, KALSHI_SERIES } from "../lib/venueCompare.js";
+import { finalDelayStats, finalEpisodeStats } from "../lib/venueFinal.js";
+import { newCompareRun, feedRunPmus, feedRunKalshi, settleRun, finishRun, SETTLE_MS } from "../lib/venueStream.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -31,20 +32,28 @@ if (!kFiles.length) { console.log("::error::no Kalshi archive files in the windo
 console.log(`VENUE COMPARE — ${KALSHI_SERIES} vs Polymarket US, last ${HOURS}h`);
 console.log(`archives: .us ${pFiles.length} files (${mb(pFiles)} MB), Kalshi ${kFiles.length} files (${mb(kFiles)} MB)`);
 
-const C = newCompare();
-let bad = 0;
-for (const f of pFiles) bad += await reader.eachLine(f.path, o => feedPmus(C, o));
 // The Kalshi archive carries other series too; only this one's lines are
 // parsed: its 1-second books, its final-window record (every change, for
 // the replay in 3c), and the recorder's gap and socket events, which say
 // where that record cannot be trusted.
 const needle = `"m":"${KALSHI_SERIES}-`, anyTicker = `"${KALSHI_SERIES}-`;
-const F = newFinal();
 const keepK = line =>
   ((line.startsWith('{"k":"b"') || line.startsWith('{"k":"d"') || line.startsWith('{"k":"full"') || line.startsWith('{"k":"final"')) && line.includes(needle))
   || (line.startsWith('{"k":"gap"') && line.includes(anyTicker))
   || line.startsWith('{"k":"conn"');
-for (const f of kFiles) bad += await reader.eachLine(f.path, o => { feedKalshi(C, o); feedKalshiFinal(F, o); }, keepK);
+// Hour by hour, both archives, each window reduced and let go once the
+// hours read are past its close (lib/venueStream.js): a day held at once
+// does not fit in memory.
+const hourOf = f => { const [, day, hh] = f.path.split("/"); return Date.parse(`${day}T${hh}:00:00Z`); };
+const hourStarts = [...new Set([...pFiles, ...kFiles].map(hourOf))].sort((a, b) => a - b);
+const run = newCompareRun(), C = run.C;
+let bad = 0;
+for (const h of hourStarts) {
+  for (const f of pFiles) if (hourOf(f) === h) bad += await reader.eachLine(f.path, o => feedRunPmus(run, o));
+  for (const f of kFiles) if (hourOf(f) === h) bad += await reader.eachLine(f.path, o => feedRunKalshi(run, o), keepK);
+  settleRun(run, h + 3600000);
+}
+const { S, R } = finishRun(run);
 const iso = t => Number.isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") : "—";
 console.log(`.us books ${iso(C.pmusFirst)} -> ${iso(C.pmusLast)} UTC, Kalshi books ${iso(C.kalshiFirst)} -> ${iso(C.kalshiLast)} UTC${bad ? `, ${bad} unparseable lines` : ""}`);
 {
@@ -52,8 +61,7 @@ console.log(`.us books ${iso(C.pmusFirst)} -> ${iso(C.pmusLast)} UTC, Kalshi boo
   console.log(`Kalshi recorder receive lag (box time minus Kalshi's): p50 ${q(0.5)}s, p90 ${q(0.9)}s, max ${q(1)}s — samples are paired on each venue's OWN clock, so this costs coverage, not correctness`);
 }
 console.log(`.us recorder: connection events ${JSON.stringify(C.pmusConn)}, socket errors ${C.pmusErrors}, trades seen ${C.pmusTrades.toLocaleString()}`);
-
-const S = summarize(C);
+if (run.late) console.log(`::warning::${run.late} records arrived after their window had been reduced and were left out — a recorder ran more than ${SETTLE_MS / 60000} minutes behind`);
 const pct = (a, n) => n ? `${(100 * a / n).toFixed(1)}%` : "—";
 console.log(`\n${S.windows} windows on both venues, ${S.samples.toLocaleString()} paired samples (a fresh Kalshi book + the .us book current at that instant)`);
 if (!S.samples) { console.log("::error::no paired samples — check both recorders cover the same hours"); process.exit(1); }
@@ -96,7 +104,6 @@ if (E.n) {
 }
 
 {
-  const R = finalReplay(C, F);
   const X = R.excluded;
   console.log(`\n3c. THE FINAL TWO MINUTES, TO THE MILLISECOND: every Kalshi book change replayed against every .us book,`);
   console.log(`    acting at the FIRST moment an edge appears (no hindsight). Delay runs from the exchange time of the change`);
