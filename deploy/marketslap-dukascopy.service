@@ -1,0 +1,37 @@
+# Dukascopy's free tick history for the commodity and FX 15-minute
+# markets, and how far it sits from the Pyth prices they settle on.
+# scripts/dukascopy-fetch.mjs and lib/dukascopy.js explain.
+#
+# The first run fills from 2026-08-18 at one paced request at a time and
+# takes several hours; later runs fetch only the day since. Files stay in
+# /var/lib/marketslap-dukascopy (~1GB). The comparison prints at the end
+# of every run: journalctl -u marketslap-dukascopy -n 30 --no-pager
+#
+# NO EnvironmentFile: it reads only public data and holds no key.
+#
+# Not enabled by bootstrap or the sync timer; see deploy/README.md.
+
+[Unit]
+Description=MarketSlap Dukascopy history and its comparison with Pyth
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=marketslap
+WorkingDirectory=/opt/marketslap
+ExecStart=/usr/bin/node scripts/dukascopy-fetch.mjs
+StateDirectory=marketslap-dukascopy
+# The fill is long and the script stops fetching at 18h on its own; this
+# is the backstop (a oneshot ignores RuntimeMaxSec; TimeoutStartSec is
+# what limits it). A killed run loses nothing: the next resumes.
+TimeoutStartSec=20h
+# The recorders share this machine and their data cannot be backfilled;
+# this can.
+Nice=15
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

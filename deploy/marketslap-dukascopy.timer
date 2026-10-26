@@ -1,0 +1,15 @@
+# Daily. A run still going (the first fill) is not started again.
+#
+# Not enabled by bootstrap or the sync timer — starting a job is a human
+# decision. See deploy/README.md.
+
+[Unit]
+Description=MarketSlap Dukascopy history, daily
+
+[Timer]
+OnCalendar=*-*-* 06:17:00 UTC
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

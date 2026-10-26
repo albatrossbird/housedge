@@ -22,6 +22,14 @@
 //   k:"gap" / "conn" / "mkt" / "err"  everything a reader needs to tell
 //            "the book did not change" from "we were not looking"
 //
+// TWO FOLDERS. Bitcoin and gold go to m15/, as they always have. The
+// commodity and FX series (lib/m15.js M15_EXTRA_SERIES) go to m15x/, so
+// every reader of m15/ downloads exactly what it did before they were
+// added. A market's lines follow its series; a gap line is split by
+// market; socket events (conn, err, health) go to BOTH, because each
+// folder's readers need to know when its record cannot be trusted. The
+// indices stay in m15/. One socket, one process: the box has 1GB.
+//
 // WHERE IT GOES. Not Postgres: a full day is millions of rows, several
 // times what the 15-second poller writes. Hourly gzipped NDJSON files in
 // a PRIVATE Supabase Storage bucket (migration 0029), deleted locally
@@ -32,9 +40,10 @@
 // Prices are YES-leg throughout: "b" is the YES bid stack, "a" the YES
 // ask stack (Kalshi's NO bids, already converted by use_yes_price).
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { KALSHI_REST, KALSHI_WS, WS_PATH, keyPath, loadKalshiKey, kalshiAuthHeaders } from "../lib/kalshiAuth.js";
 import { BookSet } from "../lib/kalshiBook.js";
-import { M15_SUFFIX, M15_CATEGORIES, m15InScope } from "../lib/m15.js";
+import { M15_SUFFIX, M15_CATEGORIES, m15InScope, m15InExtra } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { recorderSource } from "../lib/recorderSource.js";
 import { createArchive } from "../lib/streamArchive.js";
@@ -85,12 +94,31 @@ const archive = createArchive({
   dir: DIR, bucket: BUCKET, supabaseUrl: SUPABASE_URL, key: KEY, prefix: "m15", source: SOURCE, rotateMs: ROTATE_MS, log,
   meta: now => ({ k: "meta", t: now, source: SOURCE, yesLeg: true, levels: LEVELS, snapshotMs: SNAPSHOT_MS, finalSeconds: FINAL_MS / 1000, v: 1 }),
 });
-const write = archive.write;
-{
-  const bad = await archive.probe();
+// Its own subdirectory: an archive uploads every finished file in its
+// directory under its own prefix, so two sharing one would cross-file.
+const inExtra = m15InExtra(env);
+const archiveX = createArchive({
+  dir: join(DIR, "m15x"), bucket: BUCKET, supabaseUrl: SUPABASE_URL, key: KEY, prefix: "m15x", source: SOURCE, rotateMs: ROTATE_MS, log,
+  meta: now => ({ k: "meta", t: now, source: SOURCE, yesLeg: true, levels: LEVELS, snapshotMs: SNAPSHOT_MS, finalSeconds: FINAL_MS / 1000, v: 1 }),
+});
+const archives = [archive, archiveX];
+const archiveOf = ticker => inExtra(ticker) ? archiveX : archive;
+function write(o) {
+  if (typeof o.m === "string") return archiveOf(o.m).write(o);
+  if (o.k === "gap" && Array.isArray(o.m)) {
+    const mine = o.m.filter(t => !inExtra(t)), theirs = o.m.filter(t => inExtra(t));
+    if (mine.length || !theirs.length) archive.write({ ...o, m: mine });
+    if (theirs.length) archiveX.write({ ...o, m: theirs });
+    return;
+  }
+  if (o.k === "conn" || o.k === "err" || o.k === "health") { archive.write(o); archiveX.write(o); return; }
+  archive.write(o);
+}
+for (const a of archives) {
+  const bad = await a.probe();
   if (bad) { for (const l of bad) console.error(`::error::${l}`); process.exit(1); }
 }
-archive.recoverLeftovers();
+archives.forEach(a => a.recoverLeftovers());
 
 // ── Markets: current window plus the next ones, subscribed AHEAD ───────
 // Kalshi lists each 15-minute market about a day before it opens, as
@@ -114,9 +142,10 @@ async function restGet(path) {
   return null;
 }
 
-// Only the series in scope (lib/m15.js, M15_RESEARCH_SERIES): every
-// other book is bandwidth, CPU and archive for data nobody is using.
-const inScope = m15InScope(env);
+// Only the series in scope (lib/m15.js, M15_RESEARCH_SERIES and
+// M15_EXTRA_SERIES): every other book is bandwidth, CPU and archive for
+// data nobody is using.
+const inScope = (t => { const a = m15InScope(env); return x => a(x) || inExtra(x); })();
 let outOfScopeLogged = "";
 async function listSeries() {
   const found = new Set(), skipped = new Set();
@@ -381,14 +410,14 @@ function connect() {
 
 // ── Run ────────────────────────────────────────────────────────────────
 const started = Date.now();
-archive.open(started);
+archives.forEach(a => a.open(started));
 let stopping = false;
 const stop = async (why) => {
   if (stopping) return; stopping = true;
   log(`stopping: ${why}`);
   write({ k: "conn", t: Date.now(), ev: "stop", why });
   try { ws?.close(); } catch {}
-  await archive.close();
+  await Promise.all(archives.map(a => a.close()));
   printStats();
   process.exit(0);
 };
@@ -396,8 +425,9 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
 function printStats() {
-  const backlog = archive.backlog(), free = archive.diskFreeGB();
-  const { lines, uploads, uploadFails } = archive.stats;
+  const backlog = archive.backlog() + archiveX.backlog(), free = archive.diskFreeGB();
+  const sum = k => archive.stats[k] + archiveX.stats[k];
+  const lines = sum("lines"), uploads = sum("uploads"), uploadFails = sum("uploadFails");
   log(`frames=${stats.frames} deltas=${stats.deltas} finalDeltas=${stats.finalDeltas} snaps=${stats.snaps} trades=${stats.trades} i5=${stats.i5} i1=${stats.i1} gaps=${stats.gaps} reconnects=${stats.reconnects} errors=${stats.errors} markets=${markets.size} lines=${lines} uploads=${uploads} uploadFails=${uploadFails} backlog=${backlog} diskFreeGB=${free}`);
   if (free != null && Number(free) < 1) log(`::warning::less than 1GB free under ${DIR} — uploads are not keeping up`);
 }
@@ -409,7 +439,7 @@ log(`${series.length} series, ${markets.size} markets in the next ${LOOKAHEAD_S 
 // the gap stays visible while disconnected.
 setInterval(() => {
   const now = Date.now();
-  archive.rotateIfDue(now);
+  archives.forEach(a => a.rotateIfDue(now));
   snapshotTick(now);
   if (ws && ws.readyState === 1) {
     // A socket that stays open and says nothing is the failure a close
@@ -423,12 +453,12 @@ setInterval(() => {
     if (!ALIGN_EXIT || (inWindow >= 60 && inWindow < 120) || ran >= RUN_MINUTES + 16) stop("cycle");
   }
 }, SNAPSHOT_MS);
-setInterval(archive.flush, 5000);
+setInterval(() => archives.forEach(a => a.flush()), 5000);
 setInterval(() => { retireClosed(Date.now()); discover().catch(e => log(`::warning::discovery: ${e.message}`)); }, DISCOVER_MS);
-setInterval(() => archive.uploadAll().catch(e => log(`::warning::upload: ${e.message}`)), UPLOAD_MS);
+setInterval(() => archives.forEach(a => a.uploadAll().catch(e => log(`::warning::upload: ${e.message}`))), UPLOAD_MS);
 setInterval(printStats, Number(env.STREAM_STATS_MS || 300000));
 setInterval(() => writeHealth(Date.now()), Number(env.STREAM_HEALTH_MS || 60000));
-archive.uploadAll().catch(() => {});
+archives.forEach(a => a.uploadAll().catch(() => {}));
 
 // A handshake that keeps failing is a credential or clock problem, which
 // retrying will not fix. Exit, so StartLimitBurst stops the unit and it
@@ -441,7 +471,7 @@ while (!stopping) {
   refusedInARow = opened ? 0 : refusedInARow + 1;
   if (refusedInARow >= Number(env.STREAM_MAX_REFUSED || 5)) {
     console.error(`::error::the socket refused ${refusedInARow} handshakes in a row — check the Kalshi key (run scripts/kalshi-ws-probe.mjs) and the clock`);
-    await archive.close();
+    await Promise.all(archives.map(a => a.close()));
     process.exit(1);
   }
   stats.reconnects++;

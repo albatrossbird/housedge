@@ -352,3 +352,26 @@ not `failed`):
 The Actions workflow keeps running until the box has been seen to keep
 prices fresh; both writing the same prices is harmless. Its schedule is
 turned off in a follow-up once that is measured.
+
+## Dukascopy history (`marketslap-dukascopy.timer`)
+
+Downloads Dukascopy's free tick history for gold and the nine commodity
+and FX 15-minute series, and prints how far it sits from the Pyth
+prices those markets settle on (Kalshi's settlement price at every
+window close). It reads only public data and holds no key: the unit has
+no `EnvironmentFile`. Files stay in `/var/lib/marketslap-dukascopy`
+(~1GB); nothing is uploaded.
+
+    sudo systemctl start marketslap-sync.service
+    sudo systemctl enable --now marketslap-dukascopy.timer
+    sudo systemctl start --no-block marketslap-dukascopy.service
+
+The first run fills from 2026-08-18 (as far back as Kalshi lists settled
+markets) at one paced request at a time and takes several hours (Dukascopy throttles servers); it stops fetching at 18
+hours and the next daily run resumes. The comparison prints at the end
+of every run:
+
+    sudo journalctl -u marketslap-dukascopy -n 30 --no-pager
+
+`xz` decodes the files; it is on every Ubuntu image (`apt install
+xz-utils` if the run says otherwise).
