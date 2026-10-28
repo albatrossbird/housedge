@@ -1042,6 +1042,20 @@ $0.21 from Kalshi's strike (p90 $0.68).
   the other 6 fell while the bot was down. Execution reproduces the rule,
   so live fills count as out-of-sample evidence. Two days decide nothing;
   the 10-28 re-test and the 150-fill review do.
+  **The out-of-sample re-test did not confirm it** (run 40629623280,
+  `--since=2026-10-22`, 532 windows to 2026-10-27, 116 1bp decisions;
+  every rebuilt close landed on Kalshi's side, 532 of 532). 1bp, +1c,
+  +250ms, against the in-sample run 39536113616:
+  - 10 contracts: 74.1% filled, +2.08c, t 0.69 (was +7.37c, t 2.96).
+  - 30 contracts: +2.73c, t 0.87 (was +7.32c, t 2.92).
+  - 200 contracts: +3.54c, t 1.01 (was +6.33c, t 2.52).
+  The halves disagree in sign (-1.74c earlier, +7.38c later, at 10), the
+  filled side won 51.2% at an average 0.477 paid, and every 2bp cell
+  lost (-3c to -10c). At +100ms and the price seen it is -0.82c. So the
+  edge, if any, is about a third of the in-sample figure and inside the
+  noise of six days; the 21-day result reads as at least partly luck,
+  and the live bot's first days agree. Nothing here supports a larger
+  size.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
