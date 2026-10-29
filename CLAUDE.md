@@ -1005,6 +1005,16 @@ the once-a-second bot goes 63.8% -> 89.0% filled with +1c, 95.9% with
 the every-change path it LOWERS P&L (later moments cost more). No
 difference here clears noise (t 1-2).
 
+**The late favourite on gold and oil. Measured 2026-10-29** (archive,
+taker, 10 contracts, `strategy=paper`). Gold, run 40954124354, 1,892
+windows over 27 days: fav-15-45s +1.02c a contract, t 0.8, both halves
+positive (+1.21c / +0.83c) but ~0 at 1c worse; fav-15-60s -0.59c,
+fav-60-120s -0.34c, dog-60-120s -2.32c (t -2.0). Gold's favourite wins
+about as often as it is priced. Oil (KXWTI15M), run 40954119075, 324
+windows over 4 days, the first through the m15x path: every favourite
+rule lost (-1.5c to -4.6c, t -0.7 to -1.1). Bitcoin's fav-15-45s made
++4.83c, t 2.7 over the week to 10-29 (daily report).
+
 **The underdog in the last seconds** (`--longshot`, workflow `source:
 longshot`). One contract of the underdog at 5c or less, 15/10/5s before
 the close, off the book standing then — one-sided books INCLUDED, since a
