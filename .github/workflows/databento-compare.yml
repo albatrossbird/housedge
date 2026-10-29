@@ -42,7 +42,7 @@ concurrency:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -79,7 +79,7 @@ jobs:
         run: |
           args=(--dir=databento "--from=$FROM" "--max-usd=$MAX_USD" "--schema=$SCHEMA")
           if [ "$DRY" = "true" ]; then args+=(--dry); fi
-          python3 scripts/databento-fetch.py "${args[@]}"
+          python3 -u scripts/databento-fetch.py "${args[@]}"
       # Saved even when the compare step fails, so nothing is bought twice.
       - name: Keep what was bought
         if: always() && steps.fetch.outcome != 'skipped'
