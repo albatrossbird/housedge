@@ -1,0 +1,86 @@
+# Does Kalshi's commodity/FX 15-minute book lag the CME future? The
+# gold-and-oil version of 'BRTI lag' (scripts/brti-lag.mjs): sharp
+# one-second CME moves in each window's final two minutes, and how far
+# Kalshi's book had followed at each delay. scripts/cme-lag.mjs explains.
+#
+# BUYS NOTHING. It reads the CME data already bought (Storage,
+# stream-archive/databento/, put there by 'Databento vs Pyth') and the
+# recorded Kalshi archive. Days CME has not been bought for are simply
+# not compared; top up with 'Databento vs Pyth' first.
+#
+# Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY as repository secrets.
+name: CME lag
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Kalshi series: KXGOLD15M (archive from 2026-09-30) or KXWTI15M and the rest (from 2026-10-26)"
+        default: "KXGOLD15M"
+      since:
+        description: "First day, YYYY-MM-DD (blank: as far back as both records go)"
+        default: ""
+        required: false
+      until:
+        description: "Day to stop BEFORE, YYYY-MM-DD (blank: the last CME row held)"
+        default: ""
+        required: false
+
+# Reads the m15 archive like every other analysis run, so it queues with them.
+concurrency:
+  group: m15-analysis
+  cancel-in-progress: false
+
+jobs:
+  lag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ARCHIVE_CACHE_DIR: .archive-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the Databento client (reads local files only; no key)
+        run: pip install --quiet databento==0.87.0
+      - name: Tests
+        run: |
+          python3 scripts/databento-fetch.test.py
+          node scripts/brti-lag.test.mjs
+          node scripts/cme-lag.test.mjs
+      - name: Restore CME data from the Actions cache (a speed-up only)
+        uses: actions/cache/restore@v4
+        with:
+          path: databento
+          key: databento-${{ github.run_id }}
+          restore-keys: databento-
+      - name: Pull the CME data from Storage
+        run: node scripts/databento-store.mjs pull --dir=databento
+      # Hours the daily report already downloaded are read from its cache
+      # instead of Storage (egress). Nothing is saved back: an archive this
+      # size would push the report's own cache out.
+      - name: Restore archive cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .archive-cache
+          key: m15-archive-${{ github.run_id }}
+          restore-keys: m15-archive-
+      # Inputs through env and quoted: ${{ }} is raw text substitution
+      # before bash parses the line.
+      - name: Lag
+        env:
+          SERIES: ${{ github.event.inputs.series || 'KXGOLD15M' }}
+          SINCE: ${{ github.event.inputs.since }}
+          UNTIL: ${{ github.event.inputs.until }}
+        run: |
+          python3 -u scripts/databento-ticks.py --dir=databento "--markets=$SERIES"
+          args=(--dir=databento "--series=$SERIES")
+          if [ -n "$SINCE" ]; then args+=("--since=$SINCE"); fi
+          if [ -n "$UNTIL" ]; then args+=("--until=$UNTIL"); fi
+          node scripts/cme-lag.mjs "${args[@]}"
