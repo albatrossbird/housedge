@@ -190,11 +190,13 @@ def main():
     bought = 0
     for series, root in ROOTS.items():
         for s, e in missing_chunks(held_spans(a.dir, root, schema), start_ms, end_ms):
-            with tempfile.NamedTemporaryFile(suffix=".dbn.zst") as tmp:
+            # A path that does not exist yet: the client refuses to write
+            # over a file, and NamedTemporaryFile has already created one.
+            with tempfile.TemporaryDirectory() as tmpdir:
                 try:
                     store = client.timeseries.get_range(dataset=DATASET, start=iso(s), end=iso(e),
                                                         symbols=[f"{root}.v.0"], schema=schema,
-                                                        stype_in="continuous", path=tmp.name)
+                                                        stype_in="continuous", path=os.path.join(tmpdir, "chunk.dbn.zst"))
                 except db.BentoError as err:
                     print(f"::error::{root} {iso(s)}..{iso(e)}: {err}")
                     if "licens" in str(err).lower() or "agreement" in str(err).lower():
