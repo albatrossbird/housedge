@@ -32,6 +32,12 @@ console.log("\nreading a price at a boundary:");
   ok(R.mid(B + 5 * 3600000).missing === true, "an hour never bought is missing, not a quiet market");
 }
 
+{
+  const a = { span: [B, B + 3600000], rows: [{ b: B + Q, px: 1, end: B + Q - 5000 }] };
+  const b = { span: [B + 3600000, B + 7200000], rows: [{ b: B + Q, px: 2, end: B + Q - 1000 }] };
+  ok(boundaryReader([a, b]).mid(B + Q).mid === 2 && boundaryReader([b, a]).mid(B + Q).mid === 2, "a boundary in two pieces reads the later record, in either order");
+}
+
 console.log("\n6J is yen per dollar once inverted:");
 {
   // USD/JPY up from 150 to 151 settles YES; 6J (USD per yen) FALLS.

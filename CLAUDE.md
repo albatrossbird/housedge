@@ -753,23 +753,40 @@ several readers count every window in `m15_markets`.
   stops a run's fetch after an hour of refusals (`refused`) and paces at
   10s. If the box stays refused, Dukascopy is not a source for it.
 - **CME futures from Databento** (`scripts/databento-fetch.py`,
-  `scripts/databento-compare.mjs`, `lib/databento.js`, workflow
-  'Databento vs Pyth'). Historical data is usage-based with NO
-  subscription ("No subscription required", databento.com/pricing) and
-  paid from the $125 sign-up credit (expires 6 months after signup); only
-  LIVE CME needs a plan ($199/month). The volume-front contract
-  (`GC.v.0` etc.) as 1s bars, or 1m if 1s will not fit, keeping the last
-  trade in the 60s before each 15-minute boundary, scored with
-  Dukascopy's `compareSeries` against `m15_settlements`. Money guards:
-  Databento's own `metadata.get_cost` quotes everything not already held
-  and the run buys NOTHING over `max_usd` (default $25); bought weeks
-  live in the Actions cache so a re-run is free; `dry` quotes only.
-  6J is USD per yen and is INVERTED before the move is read; other unit
-  gaps are found from the data and printed. Futures carry a basis to
-  spot, so read side and near, not level. `DATABENTO_API_KEY` is a
-  repository secret. `scripts/databento.test.mjs` and
-  `scripts/databento-fetch.test.py` run in the workflow before any money
-  moves.
+  `scripts/databento-store.mjs`, `scripts/databento-compare.mjs`,
+  `lib/databento.js`, workflow 'Databento vs Pyth'). Historical data is
+  usage-based with NO subscription ("No subscription required",
+  databento.com/pricing), paid from the $125 sign-up credit (expires 6
+  months after signup); only LIVE CME needs a plan ($199/month).
+  Volume-front contract (`GC.v.0` etc.), scored with Dukascopy's
+  `compareSeries` against `m15_settlements`. 6J is USD per yen and is
+  INVERTED before the move is read; other unit gaps are found from the
+  data. Futures carry a basis to spot, so read side and near, not level.
+  **Measured 2026-10-29** (runs 40811473968 / 40813869121, 08-18..10-28,
+  last trade within 60s of each boundary): CME's own move agrees with how
+  Kalshi settled in 94-99% of windows, but in the fifth nearest the strike
+  only EUR 94.1%, WTI 88.3%, gold 87.4%, silver 86.9%, JPY 86.1%, GBP
+  81.5%, natgas 80.3%, copper 75.1%, platinum 74.0%, palladium 73.6%. A
+  usable direction signal, not a stand-in for Pyth on close calls (BRTI
+  rebuilt Bitcoin's settlement in 1,900 of 1,900). Copper and GBP sit
+  ~2bp from Pyth (Pyth's copper is per pound); gold futures ~$36 over
+  spot (carry).
+  **What was bought is kept, after a purchase that was not.** The first
+  version kept only the boundary prices and deleted each raw file, so a
+  $25.62 one-second purchase gave exactly the numbers a $2.35 one-minute
+  one had (the last trade before a boundary is the same trade in both)
+  and none of the second-by-second path it was bought for. Now every raw
+  file is kept and copied to the private bucket (`stream-archive/
+  databento/`), the push fails the run unless each is there at full
+  size, and a piece counts as held ONLY if its raw file exists — Storage
+  decides, not the Actions cache, which forgets after 7 days unread.
+  Money guards: the workflow defaults to `dry` (Databento's
+  `metadata.get_cost` quote, nothing bought); one schema per run, no
+  automatic fallback; nothing bought over `max_usd`. `bbo-1s` (best
+  bid/offer each second, mid at the boundary, looked back 15 minutes
+  because a record prints only on change) is the schema for a lead/lag
+  test. `scripts/databento.test.mjs` and `scripts/databento-fetch.test.py`
+  run before any money moves.
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which
