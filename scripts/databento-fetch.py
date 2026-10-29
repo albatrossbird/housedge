@@ -40,6 +40,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -118,6 +120,7 @@ def main():
     ap.add_argument("--max-usd", type=float, default=25.0)
     ap.add_argument("--schema", default="auto", choices=["auto", "ohlcv-1s", "ohlcv-1m"])
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--workers", type=int, default=6)
     a = ap.parse_args()
 
     key = os.environ.get("DATABENTO_API_KEY", "").strip()
@@ -187,24 +190,46 @@ def main():
         print("dry run: nothing bought")
         return 0
 
-    bought = 0
-    for series, root in ROOTS.items():
-        for s, e in missing_chunks(held_spans(a.dir, root, schema), start_ms, end_ms):
-            # A path that does not exist yet: the client refuses to write
-            # over a file, and NamedTemporaryFile has already created one.
-            with tempfile.TemporaryDirectory() as tmpdir:
-                try:
-                    store = client.timeseries.get_range(dataset=DATASET, start=iso(s), end=iso(e),
-                                                        symbols=[f"{root}.v.0"], schema=schema,
-                                                        stype_in="continuous", path=os.path.join(tmpdir, "chunk.dbn.zst"))
-                except db.BentoError as err:
-                    print(f"::error::{root} {iso(s)}..{iso(e)}: {err}")
-                    if "licens" in str(err).lower() or "agreement" in str(err).lower():
-                        print("::error::Databento wants a licence or agreement accepted in its portal for this dataset; accept it there and re-run.")
-                    return 1
-                bought += store.nbytes
-                arr = store.to_ndarray()
-                rows = boundary_rows(arr["ts_event"], arr["close"], INTERVAL_NS[schema])
+    # Several requests at once: each one waits seconds on Databento (a cost
+    # quote alone took ~4.5s), so 110 week-sized pieces one after another
+    # took over 25 minutes. One client per thread; every finished piece is
+    # written as it lands, so a stopped run keeps what it paid for.
+    local = threading.local()
+
+    def buy(root, s, e):
+        if not hasattr(local, "client"):
+            local.client = db.Historical(key)
+        # A path that does not exist yet: the client refuses to write over
+        # a file, which is why NamedTemporaryFile cannot be used here.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = local.client.timeseries.get_range(dataset=DATASET, start=iso(s), end=iso(e),
+                                                      symbols=[f"{root}.v.0"], schema=schema,
+                                                      stype_in="continuous", path=os.path.join(tmpdir, "chunk.dbn.zst"))
+            arr = store.to_ndarray()
+            return store.nbytes, boundary_rows(arr["ts_event"], arr["close"], INTERVAL_NS[schema])
+
+    jobs = [(series, root, s, e) for series, root in ROOTS.items()
+            for s, e in missing_chunks(held_spans(a.dir, root, schema), start_ms, end_ms)]
+    print(f"buying {len(jobs)} pieces, {a.workers} at a time")
+    bought, failed = 0, None
+    with ThreadPoolExecutor(max_workers=a.workers) as pool:
+        futures = {pool.submit(buy, root, s, e): (series, root, s, e) for series, root, s, e in jobs}
+        for fut in as_completed(futures):
+            series, root, s, e = futures[fut]
+            if fut.cancelled():
+                continue                                   # never started, nothing paid
+            try:
+                nbytes, rows = fut.result()
+            except Exception as err:                       # BentoError, or a network failure
+                print(f"::error::{root} {iso(s)}..{iso(e)}: {err}")
+                if "licens" in str(err).lower() or "agreement" in str(err).lower():
+                    print("::error::Databento wants a licence or agreement accepted in its portal for this dataset; accept it there and re-run.")
+                if failed is None:
+                    failed = err
+                    for f in futures:
+                        f.cancel()                         # nothing new starts; what is in flight finishes
+                continue
+            bought += nbytes
             path = os.path.join(a.dir, f"{root}.{schema}.{s}-{e}.csv")
             with open(path + ".part", "w", newline="") as f:
                 w = csv.writer(f)
@@ -212,6 +237,9 @@ def main():
                 w.writerows(rows)
             os.replace(path + ".part", path)                # a killed run leaves no half file
             print(f"  {series:15s} {iso(s)[:10]}..{iso(e)[:10]}  {len(rows):5d} boundaries")
+    if failed is not None:
+        print(f"\nbought {bought / 1e6:.1f} MB before stopping; a re-run buys only what is missing")
+        return 1
     print(f"\nbought {bought / 1e6:.1f} MB (quoted ${total:.4f}; Databento bills the bytes actually sent)")
     return 0
 
