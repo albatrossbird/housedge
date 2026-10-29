@@ -74,5 +74,15 @@ ok(g([(MON + 10 * H, MON + W), (MON + W, MON + W + 5 * H)], MON + 10 * H, MON + 
 ok(g([(MON + 10 * H, MON + W + 20 * H)], MON + 10 * H, MON + W + 20 * H) == [], "everything held, nothing to buy")
 ok(g([(MON + 20 * H, MON + 30 * H)], MON + 10 * H, MON + 40 * H) == [(10, 20), (30, 40)], "gaps on both sides of a held span")
 
+print("\nwhich markets:")
+ok(f.pick_markets("all") == f.ROOTS, "all is every market")
+ok(f.pick_markets("GC") == {"KXGOLD15M": "GC"} and f.pick_markets("kxgold15m") == {"KXGOLD15M": "GC"}, "a market by its CME root or its Kalshi series, any case")
+ok(list(f.pick_markets("SI, 6j ,KXWTI15M")) == ["KXSILVER15M", "KXUSDJPY15M", "KXWTI15M"], "a comma list, spaces allowed")
+for bad in ["GCX", "", " , "]:
+    try:
+        f.pick_markets(bad); ok(False, f"'{bad}' is refused")
+    except ValueError:
+        ok(True, f"'{bad}' is refused, not skipped")
+
 print(f"\n{failed} FAILED" if failed else "\nall passed")
 sys.exit(1 if failed else 0)

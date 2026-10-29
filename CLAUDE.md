@@ -781,7 +781,8 @@ several readers count every window in `m15_markets`.
   size, and a piece counts as held ONLY if its raw file exists — Storage
   decides, not the Actions cache, which forgets after 7 days unread.
   Money guards: the workflow defaults to `dry` (Databento's
-  `metadata.get_cost` quote, nothing bought); one schema per run, no
+  `metadata.get_cost` quote, nothing bought); one schema per run (and
+  `markets` to name which, refusing an unknown name), no
   automatic fallback; nothing bought over `max_usd`. `bbo-1s` (best
   bid/offer each second, mid at the boundary, looked back 15 minutes
   because a record prints only on change) is the schema for a lead/lag

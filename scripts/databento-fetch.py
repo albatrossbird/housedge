@@ -49,7 +49,7 @@ MONEY GUARDS.
 The key comes from DATABENTO_API_KEY (a repository secret) and is never
 printed.
 
-  python3 scripts/databento-fetch.py --dir=databento --schema=bbo-1s [--from=2026-08-18] [--max-usd=25] [--dry]
+  python3 scripts/databento-fetch.py --dir=databento --schema=bbo-1s [--markets=GC,SI] [--from=2026-08-18] [--max-usd=25] [--dry]
 """
 import argparse
 import csv
@@ -143,6 +143,26 @@ def missing_chunks(spans, start_ms, end_ms):
     return out
 
 
+def pick_markets(arg):
+    """--markets: 'all', or a comma list naming each market by its Kalshi
+    series or its CME root. An unknown name is refused rather than
+    skipped: a typo must not quietly buy (or quote) less than was asked."""
+    if arg.strip().lower() == "all":
+        return dict(ROOTS)
+    by_root = {r: s for s, r in ROOTS.items()}
+    out = {}
+    for name in (x.strip().upper() for x in arg.split(",") if x.strip()):
+        if name in ROOTS:
+            out[name] = ROOTS[name]
+        elif name in by_root:
+            out[by_root[name]] = name
+        else:
+            raise ValueError(f"unknown market '{name}': use a Kalshi series ({', '.join(ROOTS)}) or a CME root ({', '.join(by_root)})")
+    if not out:
+        raise ValueError("--markets named nothing")
+    return out
+
+
 def iso(ms):
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -174,8 +194,14 @@ def main():
     ap.add_argument("--schema", required=True, choices=SCHEMAS)
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--markets", default="all", help="comma list of Kalshi series or CME roots (KXGOLD15M or GC), or all")
     a = ap.parse_args()
     schema = a.schema
+    try:
+        markets = pick_markets(a.markets)
+    except ValueError as e:
+        print(f"::error::{e}")
+        return 2
 
     key = os.environ.get("DATABENTO_API_KEY", "").strip()
     if not key:
@@ -191,7 +217,7 @@ def main():
     # Raw files already held (restored from Storage by the workflow) are
     # the purchase; their boundary CSVs are rebuilt here if missing, free.
     rebuilt = 0
-    for root in ROOTS.values():
+    for root in markets.values():
         have_csv = set(spans_in(a.dir, root, schema, ".csv"))
         for s, e in spans_in(raw_dir, root, schema, ".dbn.zst"):
             if (s, e) not in have_csv:
@@ -212,12 +238,12 @@ def main():
 
     # Held means a RAW file exists. A boundary CSV alone (from before raw
     # files were kept) is not a purchase we can use again.
-    jobs = [(series, root, s, e) for series, root in ROOTS.items()
+    jobs = [(series, root, s, e) for series, root in markets.items()
             for s, e in missing_chunks(spans_in(raw_dir, root, schema, ".dbn.zst"), start_ms, end_ms)]
     total = 0.0
     print(f"\nQUOTE {schema} (Databento's metadata.get_cost, before any download):")
     try:
-        for series, root in ROOTS.items():
+        for series, root in markets.items():
             mine = [(s, e) for se, r, s, e in jobs if r == root]
             runs = []                                   # one quote per contiguous run of weeks
             for s, e in mine:
@@ -234,7 +260,7 @@ def main():
         return 1
     print(f"  total ${total:.4f}  (cap ${a.max_usd:.2f})")
     with open(os.path.join(a.dir, "run.json"), "w") as f:
-        json.dump({"schema": schema, "from": start_ms, "to": end_ms, "quotedUsd": total, "dry": a.dry}, f)
+        json.dump({"schema": schema, "from": start_ms, "to": end_ms, "quotedUsd": total, "dry": a.dry, "markets": list(markets)}, f)
     if a.dry:
         print("\ndry run: nothing bought. Run again with dry unticked to buy at this price.")
         return 0
