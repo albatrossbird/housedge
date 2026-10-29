@@ -810,6 +810,16 @@ several readers count every window in `m15_markets`.
   of its second: +0 can already include a second of repricing a tick
   feed would have beaten, so the test leans toward "already priced".
   Buys nothing; `scripts/cme-lag.test.mjs` pins it (mutation-checked).
+  **Measured 2026-10-29: no lag at one-second resolution.** Gold (run
+  40941336522, 1,856 windows 09-30..10-29, 859 1bp moves on a 15-85c
+  book): 97% of the +5s repricing done at +0, ~50% already at -500ms,
+  i.e. Kalshi moves inside the same CME second. Oil (run 40941332372, 290
+  windows 10-26..10-29, 425 moves): 97%. Every threshold and both clocks
+  agree; what is left after +0 is ~0.3-0.5c against a ~1.75c fee. Bitcoin
+  against BRTI was 82%. Only a sub-second CME feed could find anything
+  more, and it would be racing Kalshi's quoters, who evidently price off
+  CME. The gold run read 1,374 archive hours (8GB listed) — mind egress
+  before re-running it.
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which
