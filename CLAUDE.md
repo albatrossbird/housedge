@@ -752,6 +752,24 @@ several readers count every window in `m15_markets`.
   retried every 10 minutes because the fetcher never gave up. It now
   stops a run's fetch after an hour of refusals (`refused`) and paces at
   10s. If the box stays refused, Dukascopy is not a source for it.
+- **CME futures from Databento** (`scripts/databento-fetch.py`,
+  `scripts/databento-compare.mjs`, `lib/databento.js`, workflow
+  'Databento vs Pyth'). Historical data is usage-based with NO
+  subscription ("No subscription required", databento.com/pricing) and
+  paid from the $125 sign-up credit (expires 6 months after signup); only
+  LIVE CME needs a plan ($199/month). The volume-front contract
+  (`GC.v.0` etc.) as 1s bars, or 1m if 1s will not fit, keeping the last
+  trade in the 60s before each 15-minute boundary, scored with
+  Dukascopy's `compareSeries` against `m15_settlements`. Money guards:
+  Databento's own `metadata.get_cost` quotes everything not already held
+  and the run buys NOTHING over `max_usd` (default $25); bought weeks
+  live in the Actions cache so a re-run is free; `dry` quotes only.
+  6J is USD per yen and is INVERTED before the move is read; other unit
+  gaps are found from the data and printed. Futures carry a basis to
+  spot, so read side and near, not level. `DATABENTO_API_KEY` is a
+  repository secret. `scripts/databento.test.mjs` and
+  `scripts/databento-fetch.test.py` run in the workflow before any money
+  moves.
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which
