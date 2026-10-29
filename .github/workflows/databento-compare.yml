@@ -3,37 +3,42 @@
 # the Dukascopy comparison: level, side, and side on the windows nearest
 # the strike. scripts/databento-fetch.py has the why.
 #
-# SPENDS DATABENTO CREDIT. Historical data is usage-based with no
-# subscription; the account's $125 sign-up credit pays for it. The fetch
-# asks Databento for the cost of everything it does not already hold and
-# buys NOTHING if that is over max_usd. What it buys is kept in the
-# Actions cache, so a re-run (or a failed compare) costs nothing and a
-# later run buys only the days since. `dry` prints the quote only.
+# SPENDS DATABENTO CREDIT, BUT ONLY WHEN `dry` IS UNTICKED. The default
+# run prints Databento's own quote for everything not already held and
+# buys nothing. Buying is a second run at a price someone has seen, and
+# even then nothing is bought over max_usd.
 #
-# Writes nothing to Supabase. Needs DATABENTO_API_KEY, SUPABASE_URL and
-# SUPABASE_SERVICE_ROLE_KEY as repository secrets.
+# WHAT IS BOUGHT IS KEPT. Every raw file goes to the private bucket
+# (stream-archive/databento/, scripts/databento-store.mjs) and the push
+# fails the run unless each one is there at full size. Storage, not the
+# Actions cache, decides what is held: the cache forgets after 7 days
+# unread, and a raw file this run cannot find is a raw file it would buy
+# again.
+#
+# Needs DATABENTO_API_KEY, SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY as
+# repository secrets.
 name: Databento vs Pyth
 
 on:
   workflow_dispatch:
     inputs:
+      schema:
+        description: "bbo-1s = best bid/offer each second; ohlcv-1s / ohlcv-1m = trade bars"
+        type: choice
+        options: [bbo-1s, ohlcv-1s, ohlcv-1m]
+        default: bbo-1s
+      dry:
+        description: "Quote only, buy nothing (untick to buy at the quoted price)"
+        type: boolean
+        default: true
+      max_usd:
+        description: "Never buy if Databento quotes more than this"
+        default: "25"
+        required: false
       from:
         description: "First day (UTC). Kalshi lists settled markets back ~10 weeks; m15_settlements keeps them after"
         default: "2026-08-18"
         required: false
-      max_usd:
-        description: "Stop before buying anything if Databento quotes more than this"
-        default: "25"
-        required: false
-      schema:
-        description: "auto = one-second bars if they fit under max_usd, else one-minute"
-        type: choice
-        options: [auto, ohlcv-1s, ohlcv-1m]
-        default: auto
-      dry:
-        description: "Print the quote only, buy nothing"
-        type: boolean
-        default: false
 
 concurrency:
   group: databento
@@ -43,6 +48,9 @@ jobs:
   compare:
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,12 +67,14 @@ jobs:
         run: |
           python3 scripts/databento-fetch.test.py
           node scripts/databento.test.mjs
-      - name: Restore what was already bought
+      - name: Restore from the Actions cache (a speed-up only)
         uses: actions/cache/restore@v4
         with:
           path: databento
           key: databento-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: databento-
+      - name: Pull what was bought from Storage
+        run: node scripts/databento-store.mjs pull --dir=databento
       # Inputs go through env and are quoted, never interpolated into the
       # command line: `${{ }}` is raw text substitution before bash parses
       # it, so a value with a semicolon would run on a runner holding keys.
@@ -72,23 +82,24 @@ jobs:
         id: fetch
         env:
           DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
-          FROM: ${{ github.event.inputs.from || '2026-08-18' }}
+          SCHEMA: ${{ github.event.inputs.schema || 'bbo-1s' }}
+          DRY: ${{ github.event.inputs.dry || 'true' }}
           MAX_USD: ${{ github.event.inputs.max_usd || '25' }}
-          SCHEMA: ${{ github.event.inputs.schema || 'auto' }}
-          DRY: ${{ github.event.inputs.dry }}
+          FROM: ${{ github.event.inputs.from || '2026-08-18' }}
         run: |
-          args=(--dir=databento "--from=$FROM" "--max-usd=$MAX_USD" "--schema=$SCHEMA")
-          if [ "$DRY" = "true" ]; then args+=(--dry); fi
+          args=(--dir=databento "--schema=$SCHEMA" "--from=$FROM" "--max-usd=$MAX_USD")
+          if [ "$DRY" != "false" ]; then args+=(--dry); fi
           python3 -u scripts/databento-fetch.py "${args[@]}"
-      # Saved even when the compare step fails, so nothing is bought twice.
-      - name: Keep what was bought
+      # Even when the fetch failed part way: every piece it finished was
+      # paid for.
+      - name: Push what was bought to Storage
+        if: always() && steps.fetch.outcome != 'skipped'
+        run: node scripts/databento-store.mjs push --dir=databento
+      - name: Keep a copy in the Actions cache
         if: always() && steps.fetch.outcome != 'skipped'
         uses: actions/cache/save@v4
         with:
           path: databento
           key: databento-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Compare with Kalshi's settlement prices
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/databento-compare.mjs --dir=databento

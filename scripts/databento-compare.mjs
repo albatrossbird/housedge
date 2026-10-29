@@ -40,7 +40,9 @@ async function rest(path) {
 const pct = (a, n) => n ? `${(100 * a / n).toFixed(1)}%` : "—";
 const iso = ms => new Date(ms).toISOString().slice(0, 16);
 console.log(`CME FUTURES (Databento ${run.schema}, volume-front contract) AGAINST PYTH (Kalshi's settlement price at each close)`);
-console.log(`  ${iso(run.from)} -> ${iso(run.to)} UTC; price = last trade in the 60s before each boundary\n`);
+console.log(`  ${iso(run.from)} -> ${iso(run.to)} UTC; price = ${run.schema === "bbo-1s"
+  ? "mid of the best bid and offer standing at each boundary (looked back up to 15 minutes)"
+  : "last trade in the 60s before each boundary (the same trade for 1s and 1m bars)"}\n`);
 
 const files = readdirSync(DIR);
 const summary = {};
@@ -69,11 +71,11 @@ for (const [series, root] of Object.entries(DATABENTO_ROOTS)) {
   summary[series] = { root, windows: W.length, factor, invert, ...R };
   const tag = `${root}${invert ? " 1/x" : ""}${factor !== 1 ? ` x${+factor.toPrecision(6)}` : ""}`;
   if (!W.length) { console.log(`  ${series.padEnd(15)} ${tag}: no settled windows in m15_settlements for this span`); continue; }
-  if (!R.n) { console.log(`  ${series.padEnd(15)} ${tag}: ${W.length} settled windows, none comparable (not bought ${R.why.missing}, no trade within 60s ${R.why.stale})`); continue; }
+  if (!R.n) { console.log(`  ${series.padEnd(15)} ${tag}: ${W.length} settled windows, none comparable (not bought ${R.why.missing}, no price at the boundary ${R.why.stale})`); continue; }
   console.log(`  ${series.padEnd(15)} ${tag.padEnd(10)} ${String(R.n).padStart(5)} of ${String(W.length).padStart(5)} windows  `
     + `level median ${R.level.medianBp.toFixed(1)}bp p90 ${R.level.p90Bp.toFixed(1)}bp futures-Pyth ${R.level.biasMedian.toPrecision(3)}  `
     + `side ${pct(R.side.agree, R.side.n)}  near ${pct(R.close.agree, R.close.n)} of ${R.close.n}  `
-    + `(flat ${R.side.flat}, no trade ${R.why.stale}, last trade ${R.ageP50s.toFixed(1)}s old)`);
+    + `(flat ${R.side.flat}, no price ${R.why.stale}, price ${R.ageP50s.toFixed(1)}s old)`);
   if (medErr != null && medErr > 0.05) console.log(`  ${"".padEnd(15)} ::warning::units: no known factor brings ${root} within 5% of Pyth (median ${(100 * medErr).toFixed(0)}%) — read the level column as unit mismatch, side and near still hold`);
 }
 writeFileSync(join(DIR, "summary.json"), JSON.stringify({ at: new Date().toISOString(), run, summary }, null, 1));
