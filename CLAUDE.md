@@ -787,7 +787,13 @@ several readers count every window in `m15_markets`.
   bid/offer each second, mid at the boundary, looked back 15 minutes
   because a record prints only on change) is the schema for a lead/lag
   test. `scripts/databento.test.mjs` and `scripts/databento-fetch.test.py`
-  run before any money moves.
+  run before any money moves. **Never touch the returned DBNStore after
+  the rename**: it reads its file lazily, so `store.nbytes` stats the old
+  `.part` path. On 2026-10-29 that turned every successful download into
+  an error and stopped both purchases part way (14 of 20 pieces stored,
+  nothing lost; the resumed run bought only the rest). A fake client
+  whose store was eager could not see it — the test double now reads
+  lazily like the real one.
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which

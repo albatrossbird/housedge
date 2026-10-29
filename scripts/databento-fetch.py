@@ -284,10 +284,13 @@ def main():
         part = final[:-len(".dbn.zst")] + ".part.dbn.zst"
         if os.path.exists(part):
             os.remove(part)                             # the client refuses to write over a file
-        store = local.client.timeseries.get_range(dataset=DATASET, start=iso(s), end=iso(e), symbols=[f"{root}.v.0"],
-                                                  schema=schema, stype_in="continuous", path=part)
+        local.client.timeseries.get_range(dataset=DATASET, start=iso(s), end=iso(e), symbols=[f"{root}.v.0"],
+                                          schema=schema, stype_in="continuous", path=part)
         os.replace(part, final)
-        return store.nbytes, rows_from_raw(db, final, schema)
+        # Nothing from the returned store after the rename: it reads its
+        # file lazily (store.nbytes stats `part`), and on 2026-10-29 that
+        # turned 14 successful downloads into errors and stopped the run.
+        return os.path.getsize(final), rows_from_raw(db, final, schema)
 
     print(f"\nbuying {len(jobs)} pieces, {a.workers} at a time; raw files kept in {raw_dir}")
     bought, failed = 0, None
