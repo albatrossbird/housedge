@@ -107,6 +107,13 @@ console.log("m15-index.mjs end to end");
   ok(/1bp\s+\+100ms\s+seen\s+1\s+100\.0%\s+10\s+100\.0%\s+100\.0%\s+0\.510\s+\+\$\s*4\.73\s+\+47\.25c/.test(d), "D 1bp +100ms: 10 at 0.51, won, +$4.73 after a $0.1750 fee", d);
   ok(/1bp\s+\+250ms\s+seen\s+1\s+0\.0%\s+0/.test(d) && /1bp\s+\+250ms\s+\+1c\s+1\s+0\.0%\s+0/.test(d), "D +250ms: the book moved to 60/62, so no fill at 0.51 or 0.52", d);
   ok(/2bp\s+\+100ms\s+seen\s+1\s+100\.0%/.test(d) && /4bp\s+\+100ms\s+seen\s+0\s/.test(d), "D: a 3bp move is a 2bp event and not a 4bp one", d);
+  // D2: that decision, seen 0.51 at mid 0.50, unfilled at +250ms, lands in
+  // the 0.30-0.60 and 0.5-0.6 rows only, and every narrower band's own
+  // decider takes the same event.
+  const d2 = sec("D2. 1bp DECISIONS BY PRICE", "EVERY 1bp DECISION");
+  ok(/0\.30-0\.60\s+1\s+[\d.]+\s+0\s/.test(d2) && /<= 0\.30\s+0\s/.test(d2) && /> 0\.60\s+0\s/.test(d2) && /0\.5-0\.6\s+1\s/.test(d2) && /0\.4-0\.5\s+0\s/.test(d2),
+    "D2: bucketed by the price seen for the side bought (0.51 -> 0.30-0.60, 0.5-0.6)", d2);
+  ok(["0.15-0.85", "0.20-0.80", "0.25-0.75", "0.30-0.70", "0.35-0.65"].every(b => new RegExp(String.raw`mid ${b.replace(/\./g, "\\.")}\s+1\s`).test(d2)), "D2: each mid band's own decider takes the mid-0.50 event", d2);
   // --list: the one 1bp decision, 90s out, YES seen 0.51; at +250ms the book is 60/62, so nothing filled.
   const list = text.split("EVERY 1bp DECISION")[1] || "";
   ok(new RegExp(`${T}\\s+${new Date(close - 90000).toISOString().replace(/\./g, "\\.")}\\s+90\\.0\\s+3\\.00\\s+0\\.49/0\\.51\\s+yes\\s+0\\.510\\s+0\\s+—\\s+yes\\s+\\+0\\.00`).test(list), "--list: the decision, its tick time, book, side and fill", list);

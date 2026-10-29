@@ -1098,6 +1098,15 @@ $0.21 from Kalshi's strike (p90 $0.68).
   noise of six days; the 21-day result reads as at least partly luck,
   and the live bot's first days agree. Nothing here supports a larger
   size.
+  **Section D2 splits the 1bp decisions by price** (+250ms, seen +1c,
+  the first size): by the price SEEN for the side bought (the trader's
+  <=0.30 / 0.30-0.60 / >0.60 and 10c steps), and by narrower mid bands,
+  each run as ITS OWN decider since a narrower band skips an event and
+  may take a later one. `--until=YYYY-MM-DD` (workflow days
+  `YYYY-MM-DD..YYYY-MM-DD`, end exclusive) reruns a closed period alone.
+  The trader's buckets were picked on the live days 10-21..10-28, so
+  those days cannot test them; only the in-sample period and days after
+  10-28 can.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
