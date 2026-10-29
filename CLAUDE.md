@@ -794,6 +794,22 @@ several readers count every window in `m15_markets`.
   nothing lost; the resumed run bought only the rest). A fake client
   whose store was eager could not see it — the test double now reads
   lazily like the real one.
+  **Bought 2026-10-29 (bbo-1s, $2.32 quoted)**: gold 08-18..10-29, the
+  other nine 10-26..10-29; 27 raw files in Storage. On the mid, gold's
+  near-strike agreement is 89.3% (890 windows) against 87.4% on the last
+  trade. The ~258 gold windows with no CME price are CME's daily break
+  and weekend edges, when Kalshi still lists. Copper's level gap jumped
+  to ~127bp on 10-26..10-29 (was ~2bp), likely the volume front rolling
+  to a month Pyth does not track — check before reading copper.
+  **Does Kalshi's book lag CME?** (`scripts/cme-lag.mjs`, `lib/cmeLag.js`,
+  workflow 'CME lag'; the CME path from `scripts/databento-ticks.py`).
+  Bitcoin's BRTI-lag test, with CME's one-second mid in place of the
+  index, for gold (archive from 2026-09-30) and the m15x series (from
+  2026-10-26). A bbo-1s row prints only on change, so a baseline stands
+  up to 60s (older is a shut market), and each row is stamped at the END
+  of its second: +0 can already include a second of repricing a tick
+  feed would have beaten, so the test leans toward "already priced".
+  Buys nothing; `scripts/cme-lag.test.mjs` pins it (mutation-checked).
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which

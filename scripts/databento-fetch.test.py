@@ -84,5 +84,16 @@ for bad in ["GCX", "", " , "]:
     except ValueError:
         ok(True, f"'{bad}' is refused, not skipped")
 
+print("\nthe per-second path (scripts/databento-ticks.py):")
+tspec = importlib.util.spec_from_file_location("ticks", os.path.join(os.path.dirname(__file__), "databento-ticks.py"))
+t = importlib.util.module_from_spec(tspec)
+tspec.loader.exec_module(t)
+a = (np.array([3, 1, 2], dtype=np.int64) * 10**9, np.array([30, 10, 20], dtype=np.float64) * 10**9)
+b = (np.array([3, 4], dtype=np.int64) * 10**9, np.array([33, 40], dtype=np.float64) * 10**9)
+ms, mid = t.merge([a, b])
+ok(ms.tolist() == [1000, 2000, 3000, 4000] and mid.tolist() == [10, 20, 33, 40], "sorted, in ms and price units; a second held twice keeps the later piece", (ms.tolist(), mid.tolist()))
+ms, mid = t.merge([])
+ok(len(ms) == 0, "nothing held, nothing written")
+
 print(f"\n{failed} FAILED" if failed else "\nall passed")
 sys.exit(1 if failed else 0)
