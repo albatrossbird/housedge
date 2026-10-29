@@ -27,6 +27,10 @@ on:
         type: choice
         options: [bbo-1s, ohlcv-1s, ohlcv-1m]
         default: bbo-1s
+      markets:
+        description: "all, or a comma list: GC SI CL NG HG PL PA 6E 6B 6J (or their Kalshi series names)"
+        default: "all"
+        required: false
       dry:
         description: "Quote only, buy nothing (untick to buy at the quoted price)"
         type: boolean
@@ -83,11 +87,12 @@ jobs:
         env:
           DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
           SCHEMA: ${{ github.event.inputs.schema || 'bbo-1s' }}
+          MARKETS: ${{ github.event.inputs.markets || 'all' }}
           DRY: ${{ github.event.inputs.dry || 'true' }}
           MAX_USD: ${{ github.event.inputs.max_usd || '25' }}
           FROM: ${{ github.event.inputs.from || '2026-08-18' }}
         run: |
-          args=(--dir=databento "--schema=$SCHEMA" "--from=$FROM" "--max-usd=$MAX_USD")
+          args=(--dir=databento "--schema=$SCHEMA" "--markets=$MARKETS" "--from=$FROM" "--max-usd=$MAX_USD")
           if [ "$DRY" != "false" ]; then args+=(--dry); fi
           python3 -u scripts/databento-fetch.py "${args[@]}"
       # Even when the fetch failed part way: every piece it finished was
