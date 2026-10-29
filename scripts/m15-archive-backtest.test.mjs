@@ -15,13 +15,16 @@ const HERE = new URL(".", import.meta.url).pathname;
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w}\n${extra}`); } };
 
-function run(args = ["--strategies=fav-final"], tape = [], usLines = []) {
+function run(args = ["--strategies=fav-final"], tape = [], usLines = [], { series = "KXBTC15M" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "m15arch-"));
   // Settled about an hour ago, on a real 15-minute boundary, so the .us
   // slug and the Kalshi ticker for the window can be built from it.
   const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
   const iso = ms => new Date(ms).toISOString();
-  const T = kalshiM15Ticker("btc", close), SLUG = pmusSlug("btc", close - WINDOW_MS);
+  const T = series === "KXBTC15M" ? kalshiM15Ticker("btc", close) : `${series}-TEST`, SLUG = pmusSlug("btc", close - WINDOW_MS);
+  // Oil and the other extras: results in m15_settlements, books in m15x/.
+  const extra = series !== "KXBTC15M" && series !== "KXGOLD15M";
+  const top = extra ? "m15x" : "m15", table = extra ? "m15_settlements" : "m15_markets";
   const book = (secs, b, a, extra = {}) => JSON.stringify({ k: "b", t: close - secs * 1000, m: T, b, a, bs: 50, as: 50, d: [400, 900, 1500, 400, 900, 1500], L: [[], []], x: close - secs * 1000, ...extra });
   const lines = [
     JSON.stringify({ k: "meta", t: close - 1e6 }),
@@ -46,17 +49,17 @@ function run(args = ["--strategies=fav-final"], tape = [], usLines = []) {
       body: raw ? new ReadableStream({ start(c) { c.enqueue(raw); c.close(); } }) : null });
     globalThis.fetch = async (url, init = {}) => {
       const u = String(url);
-      if (u.includes("/series/KXBTC15M")) return reply(200, { series: { fee_multiplier: 1, fee_type: "quadratic" } });
+      if (u.includes("/series/${series}")) return reply(200, { series: { fee_multiplier: 1, fee_type: "quadratic" } });
       if (u.includes("/series/")) return reply(404, {});
-      if (u.includes("/rest/v1/m15_markets")) {
-        if (!u.includes("KXBTC15M")) return reply(200, []);
+      if (u.includes("/rest/v1/${table}")) {
+        if (!u.includes("${series}")) return reply(200, []);
         if (u.includes("close_time=gt.")) return reply(200, []);
         return reply(200, [{ ticker: "${T}", close_time: "${iso(close)}", result: "yes" }]);
       }
       if (u.includes("/storage/v1/object/list/")) {
         const body = JSON.parse(init.body);
         if (body.offset > 0 || !body.prefix.endsWith("/${iso(close - 1).slice(11, 13)}/")) return reply(200, []);
-        if (body.prefix.startsWith("m15/${iso(close - 1).slice(0, 10)}")) return reply(200, [{ id: "1", name: "a_box.ndjson.gz", metadata: { size: 1234 } }]);
+        if (body.prefix.startsWith("${top}/${iso(close - 1).slice(0, 10)}")) return reply(200, [{ id: "1", name: "a_box.ndjson.gz", metadata: { size: 1234 } }]);
         if (body.prefix.startsWith("pmus15/${iso(close - 1).slice(0, 10)}") && ${usLines.length > 0}) return reply(200, [{ id: "2", name: "b_box.ndjson.gz", metadata: { size: 999 } }]);
         return reply(200, []);
       }
@@ -66,7 +69,7 @@ function run(args = ["--strategies=fav-final"], tape = [], usLines = []) {
     };
     process.env.SUPABASE_URL = "https://fake.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-    process.argv.push("--days=2", ...${JSON.stringify(args)}, "KXBTC15M");
+    process.argv.push("--days=2", ...${JSON.stringify(args)}, "${series}");
     await import(${JSON.stringify(join(HERE, "m15-archive-backtest.mjs"))});
   `);
   try { return { code: 0, text: execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }; }
@@ -83,6 +86,13 @@ console.log("archive backtest end to end");
   ok(/1 dropped for having no exchange timestamp, 1 one-sided books/.test(r.text), "and drops, and counts apart, the one with no exchange timestamp and the one-sided one", r.text);
   ok(/settled markets 1, with an archived book path 1 over 1 days/.test(r.text), "reports what it covered", r.text);
   ok(/fav-final\s+1\s+1\s+100\.0%\s+0\.91/.test(r.text), "the favourite at 0.91 with 30s left is bought, through the shared engine", r.text);
+}
+
+console.log("oil and the other extras: m15_settlements and m15x/");
+{
+  const r = run(["--strategies=fav-final"], [], [], { series: "KXWTI15M" });
+  ok(r.code === 0 && /settled markets 1, with an archived book path 1 over 1 days/.test(r.text), "results from m15_settlements, books from m15x/", r.text);
+  ok(/fav-final\s+1\s+1\s+100\.0%\s+0\.91/.test(r.text), "and the same engine buys the favourite", r.text);
 }
 
 console.log("resting orders (--maker)");

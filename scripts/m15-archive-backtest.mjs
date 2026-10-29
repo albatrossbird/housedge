@@ -52,6 +52,7 @@ import { kalshiDecidesUs, chooseVariant, splitDays, US_TUNE_LIMITS, US_TUNE_DELA
 import { pmusRow, secondly, newUsTape, feedUsTape, resolveUsWindow, availableAt, bestOfBoth, delayedFill, latestAtOrBefore, VENUE_DELAYS_MS, CLOSED_BOOK } from "../lib/m15Venues.js";
 import { pmusTakerFee, pmusOrderFee } from "../lib/venueCompare.js";
 import { parsePmusSlug, kalshiM15Ticker } from "../lib/pmus15.js";
+import { M15_EXTRA_SERIES } from "../lib/m15.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -115,9 +116,13 @@ console.log(`strategies: ${Object.keys(strategies).join(", ")}`);
 
 // 1. What settled, and how. Results come from m15_markets (the backfill
 //    and the poller write them); the archive records books, not outcomes.
+//    The commodity and FX series besides gold (lib/m15.js
+//    M15_EXTRA_SERIES) are not in m15_markets: their results are in
+//    m15_settlements and their books in the archive's m15x/ folder.
+const isExtra = s => M15_EXTRA_SERIES.includes(s);
 const wanted = new Map();   // ticker -> { ticker, close, result, series }
 for (const s of series) {
-  const mk = await readAll("m15_markets", "ticker,close_time,result",
+  const mk = await readAll(isExtra(s) ? "m15_settlements" : "m15_markets", "ticker,close_time,result",
     `series=eq.${encodeURIComponent(s)}&result=not.is.null&close_time=gte.${SINCE}&`, "close_time", "ticker");
   for (const m of mk) if (m.result === "yes" || m.result === "no")
     wanted.set(m.ticker, { ticker: m.ticker, close: Date.parse(m.close_time), result: m.result, series: s });
@@ -126,7 +131,10 @@ if (!wanted.size) { console.log("nothing settled in the window"); process.exit(0
 
 // 2. Every once-a-second book for those markets within reach of the close.
 const reader = archiveReader({ url: URL, key: KEY });
-const files = await reader.listRange("m15", SINCE_MS - 3600000, Date.now());
+const tops = [...new Set(series.map(s => (isExtra(s) ? "m15x" : "m15")))];
+const fileName = f => f.path.split("/").pop();
+const files = (await Promise.all(tops.map(top => reader.listRange(top, SINCE_MS - 3600000, Date.now()))))
+  .flat().sort((a, b) => fileName(a).localeCompare(fileName(b)));
 const needles = series.map(s => `"m":"${s}-`);
 const keep = line => line.startsWith('{"k":"b"') && needles.some(n => line.includes(n));
 const paths = new Map();
