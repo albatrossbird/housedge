@@ -14,6 +14,11 @@ name: CME lag
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "lag = does Kalshi's book follow CME (reads the archive); timing = when does Pyth take the settlement print (no archive)"
+        type: choice
+        options: [lag, timing]
+        default: lag
       series:
         description: "Kalshi series: KXGOLD15M (archive from 2026-09-30) or KXWTI15M and the rest (from 2026-10-26)"
         default: "KXGOLD15M"
@@ -54,6 +59,7 @@ jobs:
           python3 scripts/databento-fetch.test.py
           node scripts/brti-lag.test.mjs
           node scripts/cme-lag.test.mjs
+          node scripts/pyth-timing.test.mjs
       - name: Restore CME data from the Actions cache (a speed-up only)
         uses: actions/cache/restore@v4
         with:
@@ -66,6 +72,7 @@ jobs:
       # instead of Storage (egress). Nothing is saved back: an archive this
       # size would push the report's own cache out.
       - name: Restore archive cache
+        if: github.event.inputs.mode != 'timing'
         uses: actions/cache/restore@v4
         with:
           path: .archive-cache
@@ -78,8 +85,13 @@ jobs:
           SERIES: ${{ github.event.inputs.series || 'KXGOLD15M' }}
           SINCE: ${{ github.event.inputs.since }}
           UNTIL: ${{ github.event.inputs.until }}
+          MODE: ${{ github.event.inputs.mode || 'lag' }}
         run: |
           python3 -u scripts/databento-ticks.py --dir=databento "--markets=$SERIES"
+          if [ "$MODE" = "timing" ]; then
+            node scripts/pyth-timing.mjs --dir=databento "--series=$SERIES"
+            exit $?
+          fi
           args=(--dir=databento "--series=$SERIES")
           if [ -n "$SINCE" ]; then args+=("--since=$SINCE"); fi
           if [ -n "$UNTIL" ]; then args+=("--until=$UNTIL"); fi
