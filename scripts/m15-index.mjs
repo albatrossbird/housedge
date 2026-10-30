@@ -17,6 +17,11 @@
 //      one second, book 15-85c, final two minutes, first such move per
 //      window), as a limit at the price seen or 1c above, filled against
 //      the recorded book 100 or 250ms later, held to settlement.
+//   B2. THE LAST MINUTE. How far the settlement average lands from the
+//      price standing 120/60/30s out, and the largest lead ever overturned.
+//   D3. MANAGE IT. The live configuration of D, but at 15s out the
+//      position is sold if our side has become the underdog (bid <= 0.30)
+//      or added to if it is the favourite (ask >= 0.75): lib/sharpManage.js.
 //
 // Upper bounds as everywhere: our orders are not in the replayed book.
 // B and C price at the touch with no depth check; D walks the real book.
@@ -33,6 +38,7 @@ import { walkFill } from "../lib/m15Chase.js";
 import { kalshiTakerFee, roundKalshiFee } from "../lib/fees.js";
 import { atOrBefore } from "../lib/brtiLag.js";
 import { createSharpMove } from "../lib/sharpMove.js";
+import { MANAGE_SECS, MANAGE_DELAY_MS, decideManage, fillManage, managedPnl } from "../lib/sharpManage.js";
 import { settleAvg, estimateAvg, bucketOf, bucketLabel, buyPrice, dayStats } from "../lib/m15Index.js";
 
 const URL = process.env.SUPABASE_URL;
@@ -59,6 +65,8 @@ const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
 const LIST = process.argv.includes("--list");
 const SIZE = 10;   // B and C price one 10-contract order at the touch
 const B_TIMES = [300, 120, 60], B_EDGES = [0, 10, 25, 50, 100];
+const B2_TIMES = [120, 60, 30];
+const B2_EDGES = [0, 5, 10, 15, 20, 30, 40, 60, 80, 100, 150];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
 const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }];
 // D2's narrower mid bands, each run as its own decider (a narrower band
@@ -86,7 +94,7 @@ const tape = newTape();
 const paths = new Map();   // ticker -> once-a-second rows within 305s of the close
 let ticks = [];            // BRTI on CF Benchmarks' clock: { t, v }
 const A = { windows: 0, end: 0, agree: 0, ties: 0, start: 0, startDiffs: [] };
-const Bs = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [];
+const Bs = [], Bmove = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [];
 const excludedD = {};
 let watermark = 0;
 const done = new Set();
@@ -124,6 +132,15 @@ function finalize(ticker) {
     Bs.push({ T, d: Math.abs(d), side, price, won: side === result, day, kalshiFav: (row.bid + row.ask) / 2 >= 0.5 ? "yes" : "no" });
   }
 
+  // B2: how far the settlement average lands from the price standing
+  // T seconds out, and whether a lead of that size was ever overturned.
+  if (endAvg != null) for (const T of B2_TIMES) {
+    const now = close - T * 1000, spot = atOrBefore(tk, now), row = rowAt(now);
+    if (!spot || now - spot.t > 2000) continue;
+    const d = spot.v - strike, side = d >= 0 ? "yes" : "no", price = row ? buyPrice(row, side) : null;
+    Bmove.push({ T, dev: endAvg - spot.v, bp: (endAvg - spot.v) / spot.v * 1e4, d: Math.abs(d), flipped: side !== result, price: price > 0 && price < 1 ? price : null, day });
+  }
+
   // C: the settlement average, estimated inside the final minute.
   for (const T of C_TIMES) {
     const e = estimateAvg(tk, close, T), row = rowAt(close - T * 1000);
@@ -154,6 +171,19 @@ function finalize(ticker) {
             const f = s2 ? walkFill(s2, side, Math.min(seen + l.c / 100, 0.99), size) : { n: 0, cost: 0, pq: 0 };
             const fee = f.n ? roundKalshiFee(0.07 * MULT * f.pq) : 0;
             Ds.push({ size, thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen, cap: limit, mid: r.mid });
+            if (thr === 1 && delay === 250 && l.key === "+1c" && size === SIZES[0] && f.n > 0) {
+              // D3: the same filled position, managed at 15s out. Its own
+              // cursor: the D cursor has moved past this decision's fill.
+              const pos = { side, won: side === result, n: f.n, cost: f.cost, fee };
+              const at = close - MANAGE_SECS * 1000;
+              let d = null, s3 = null;
+              if (r.t + delay < at) { const c3 = bookCursor(w, 20); d = decideManage(c3.at(at), side); s3 = c3.at(at + MANAGE_DELAY_MS); }
+              const fill = worse => fillManage(s3, side, d, f.n, { addQty: SIZES[0], mult: MULT, worse });
+              const m = fill(0), mw = fill(0.01), base = managedPnl(pos, null);
+              Dmanage.push({ day, n: f.n, won: pos.won, act: d ? d.action : (r.t + delay < at ? "no book" : "too late"), quote: d, k: m.k, base,
+                sell: d?.action === "sell" ? managedPnl(pos, m) : base, add: d?.action === "add" ? managedPnl(pos, m) : base,
+                both: managedPnl(pos, m), bothWorse: managedPnl(pos, mw) });
+            }
             if (LIST && thr === 1 && delay === 250 && l.key === "+1c" && size === SIZES[0])
               Dlist.push({ ticker, t: r.t, secs: (close - r.t) / 1000, bp: r.bp, bid: r.bid, ask: r.ask, side, seen, n: f.n, avg: f.n ? f.cost / f.n : null, result, pnl: (side === result ? f.n : 0) - f.cost - fee });
           }
@@ -252,6 +282,28 @@ for (const T of B_TIMES) {
   console.log(calRow("all", xs));
 }
 
+{
+  // B2. The settlement is the AVERAGE of the final minute, so from 60s out
+  // it moves about a third as far (in variance) as the price itself would.
+  console.log("\nB2. HOW FAR THE SETTLEMENT AVERAGE LANDS FROM THE PRICE STANDING T SECONDS OUT");
+  console.log("   move = settlement average (rebuilt) - BRTI then. A lead over the strike smaller than the move flips.");
+  for (const T of B2_TIMES) {
+    const xs = Bmove.filter(x => x.T === T), a = xs.map(x => Math.abs(x.dev)), b = xs.map(x => Math.abs(x.bp));
+    if (!xs.length) { console.log(`\n   ${T}s out: no windows`); continue; }
+    console.log(`\n   ${T}s out: ${xs.length} windows. |move| median $${q(a, 0.5).toFixed(2)}, p90 $${q(a, 0.9).toFixed(2)}, p99 $${q(a, 0.99).toFixed(2)}, max $${q(a, 1).toFixed(2)}`
+      + ` (${q(b, 0.5).toFixed(1)} / ${q(b, 0.9).toFixed(1)} / ${q(b, 0.99).toFixed(1)} / ${q(b, 1).toFixed(1)} bp)`);
+    const flips = xs.filter(x => x.flipped).map(x => x.d).sort((u, v) => v - u);
+    console.log(`   largest lead that still lost: ${flips.length ? `$${flips[0].toFixed(2)}` : "none"}; the five largest: ${flips.slice(0, 5).map(v => "$" + v.toFixed(2)).join(" ") || "—"}`);
+    console.log("   lead over strike      n   flipped   flip rate   Kalshi's ask for the leading side (mean)");
+    for (let i = 0; i < B2_EDGES.length; i++) {
+      const lo = B2_EDGES[i], hi = B2_EDGES[i + 1] ?? Infinity, ys = xs.filter(x => x.d >= lo && x.d < hi), pr = ys.filter(x => x.price != null);
+      if (!ys.length) continue;
+      const f = ys.filter(x => x.flipped).length;
+      console.log(`   ${(hi === Infinity ? `$${lo}+` : `$${lo}-${hi}`).padEnd(14)} ${String(ys.length).padStart(9)} ${String(f).padStart(9)} ${pct(f / ys.length).padStart(10)}   ${pr.length ? pct(pr.reduce((s, x) => s + x.price, 0) / pr.length) : "—"}`);
+    }
+  }
+}
+
 console.log("\nC. THE SETTLEMENT AVERAGE, ESTIMATED INSIDE THE FINAL MINUTE");
 console.log("   Estimate = the seconds of the averaging minute already seen, plus the latest BRTI for every second left.");
 console.log("   err = estimate - the rebuilt final average. Buckets are |estimate - strike|; side = the estimate's side.");
@@ -324,6 +376,41 @@ for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_
   for (const [lo, hi] of D_BANDS) { const k = `${lo.toFixed(2)}-${hi.toFixed(2)}`; console.log(row(`mid ${k}`, Dband.filter(x => x.band === k))); }
   console.log("   Each narrower band is its own decider run: an out-of-band event is skipped and a later in-band one in the same");
   console.log("   window may be taken, as the live bot would. The price-seen rows above filter the 0.15-0.85 decisions instead.");
+}
+
+{
+  // D3. The live configuration's filled positions, managed at 15s out.
+  // Per contract is per contract of the ORIGINAL position, so the rows
+  // compare the same positions; an add risks more for the same count.
+  const size = SIZES[0], xs = Dmanage;
+  console.log(`\nD3. MANAGE THE POSITION AT ${MANAGE_SECS}s OUT (1bp, +250ms, seen +1c, ${size} contracts; the managing order +${MANAGE_DELAY_MS}ms)`);
+  console.log("   Sell everything if our side's bid <= 0.30 (limit 1c under it); buy " + size + " more if its ask >= 0.75 (limit 1c over).");
+  console.log("   Rule fixed before this run from earlier days' results; fills walk the recorded book, Kalshi's fee on every order.");
+  const acts = {};
+  for (const x of xs) acts[x.act] = (acts[x.act] || 0) + 1;
+  console.log(`   ${xs.length} filled positions; at ${MANAGE_SECS}s out: ${Object.entries(acts).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}`);
+  const head = "   variant                 positions   P&L        per ctr  t(day)   earlier    later";
+  console.log(head);
+  const row = (label, key) => {
+    const S = dayStats(xs.map(x => ({ day: x.day, ctrs: x.n, pnl: x[key] })));
+    console.log(`   ${label.padEnd(24)} ${String(xs.length).padStart(8)}  ${(S.pnl >= 0 ? "+$" : "-$") + Math.abs(S.pnl).toFixed(2).padStart(7)}  ${cents(S.perCtr).padStart(8)} ${tt(S.t).padStart(6)}  ${cents(S.earlyPerCtr).padStart(8)} ${cents(S.latePerCtr).padStart(8)}`);
+  };
+  row("hold (as live)", "base");
+  row("sell the underdog only", "sell");
+  row("add to the favourite only", "add");
+  row("sell and add", "both");
+  row("sell and add, 1c worse", "bothWorse");
+  // Each action on its own: what it changed on the positions it touched.
+  for (const a of ["sell", "add"]) {
+    const ys = xs.filter(x => x.act === a);
+    if (!ys.length) { console.log(`   ${a}: never triggered`); continue; }
+    const filled = ys.filter(x => x.k > 0), delta = ys.map(x => ({ day: x.day, ctrs: x.k, pnl: x[a] - x.base }));
+    const S = dayStats(delta), q = ys.reduce((s, x) => s + (a === "sell" ? x.quote.bid : x.quote.ask), 0) / ys.length;
+    console.log(`   ${a}: ${ys.length} triggered, ${filled.length} filled (${S.ctrs} contracts); our side's ${a === "sell" ? "bid" : "ask"} averaged ${q.toFixed(3)} and it went on to win ${pct(ys.filter(x => x.won).length / ys.length)};`
+      + ` the ${a} changed P&L by ${(S.pnl >= 0 ? "+$" : "-$") + Math.abs(S.pnl).toFixed(2)} (${cents(S.perCtr)} per contract traded, t ${tt(S.t)})`);
+  }
+  console.log("   A sale is worth it when our side, at that bid, wins LESS often than the bid says; an add when the favourite wins MORE");
+  console.log("   often than its ask plus fee. \"too late\" positions were filled after the 15s mark and are held in every row.");
 }
 
 if (LIST) {

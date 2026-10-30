@@ -114,7 +114,7 @@ jobs:
             exit $?
           fi
           if [ "$SOURCE" = "sizes" ]; then
-            node scripts/archive-size.mjs --hours=24
+            node scripts/archive-size.mjs --hours=24 --total
             exit $?
           fi
           if [ "$SOURCE" = "vector" ]; then
