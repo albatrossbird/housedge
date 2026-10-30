@@ -18,7 +18,9 @@
 //      window), as a limit at the price seen or 1c above, filled against
 //      the recorded book 100 or 250ms later, held to settlement.
 //   B2. THE LAST MINUTE. How far the settlement average lands from the
-//      price standing 120/60/30s out, and the largest lead ever overturned.
+//      price standing 600/120/60/30s out, and the largest lead ever overturned.
+//   B3. THE LEADER 10 AND 5 MINUTES OUT, by lead size and by how much BRTI
+//      moved in the prior 5 minutes: is a big lead on a wild window cheap?
 //   D3. MANAGE IT. The live configuration of D, but at 15s out the
 //      position is sold if our side has become the underdog (bid <= 0.30)
 //      or added to if it is the favourite (ask >= 0.75): lib/sharpManage.js.
@@ -65,7 +67,10 @@ const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
 const LIST = process.argv.includes("--list");
 const SIZE = 10;   // B and C price one 10-contract order at the touch
 const B_TIMES = [300, 120, 60], B_EDGES = [0, 10, 25, 50, 100];
-const B2_TIMES = [120, 60, 30];
+const B2_TIMES = [600, 120, 60, 30];
+// B3: the leader 10 and 5 minutes out, by lead and by how much BRTI moved
+// in the 5 minutes before (a quiet window's $100 lead is not a wild one's).
+const B3_TIMES = [600, 300], B3_EDGES = [0, 25, 50, 75, 100, 150, 200];
 const B2_EDGES = [0, 5, 10, 15, 20, 30, 40, 60, 80, 100, 150];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
 const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }];
@@ -94,7 +99,7 @@ const tape = newTape();
 const paths = new Map();   // ticker -> once-a-second rows within 305s of the close
 let ticks = [];            // BRTI on CF Benchmarks' clock: { t, v }
 const A = { windows: 0, end: 0, agree: 0, ties: 0, start: 0, startDiffs: [] };
-const Bs = [], Bmove = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [];
+const Bs = [], Bmove = [], B3s = [], B3fav = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [];
 const excludedD = {};
 let watermark = 0;
 const done = new Set();
@@ -130,6 +135,21 @@ function finalize(ticker) {
     const d = spot.v - strike, side = d >= 0 ? "yes" : "no", price = buyPrice(row, side);
     if (!(price > 0 && price < 1)) continue;
     Bs.push({ T, d: Math.abs(d), side, price, won: side === result, day, kalshiFav: (row.bid + row.ask) / 2 >= 0.5 ? "yes" : "no" });
+  }
+
+  // B3: the leader 10 and 5 minutes out, with the prior 5 minutes' range.
+  for (const T of B3_TIMES) {
+    const now = close - T * 1000, spot = atOrBefore(tk, now), row = rowAt(now);
+    if (!spot || now - spot.t > 2000 || !row) continue;
+    let lo = Infinity, hi = -Infinity;
+    for (const k of tk) if (k.t > now - 300000 && k.t <= now) { if (k.v < lo) lo = k.v; if (k.v > hi) hi = k.v; }
+    if (!(hi >= lo)) continue;
+    const kalshiFav = (row.bid + row.ask) / 2 >= 0.5 ? "yes" : "no";
+    const d = spot.v - strike, side = d >= 0 ? "yes" : "no", price = buyPrice(row, side);
+    if (price > 0 && price < 1) B3s.push({ T, d: Math.abs(d), side, price, won: side === result, day, kalshiFav, range: hi - lo });
+    // Kalshi's own favourite, bought at its ask when that is 75-95c.
+    const fp = buyPrice(row, kalshiFav);
+    if (fp >= 0.75 - 1e-9 && fp <= 0.95 + 1e-9) B3fav.push({ T, d: Math.abs(d), side: kalshiFav, price: fp, won: kalshiFav === result, day, kalshiFav, range: hi - lo, ahead: kalshiFav === side });
   }
 
   // B2: how far the settlement average lands from the price standing
@@ -235,7 +255,7 @@ for (const f of files) {
       const m = want.get(o.m);
       if (!m) return;
       const r = archiveRow(o, m.close);
-      if (!r || r.secs <= 0 || r.secs > 305) return;
+      if (!r || r.secs <= 0 || r.secs > 605) return;
       if (!paths.has(o.m)) paths.set(o.m, []);
       paths.get(o.m).push(r);
       return;
@@ -280,6 +300,32 @@ for (const T of B_TIMES) {
   console.log(calHead);
   B_EDGES.forEach((_, i) => console.log(calRow(bucketLabel(B_EDGES, i), xs.filter(x => bucketOf(x.d, B_EDGES) === i))));
   console.log(calRow("all", xs));
+}
+
+{
+  // B3. Is the leader underpriced 10 and 5 minutes out, overall, on a big
+  // lead, and by how volatile the window had been? Terciles of the prior
+  // 5 minutes' BRTI range, cut separately at each time.
+  console.log("\nB3. THE LEADER 10 AND 5 MINUTES OUT, BY LEAD AND BY THE PRIOR 5 MINUTES' BRTI RANGE");
+  console.log("   Leader = the side BRTI is on; priced = Kalshi's ask for it; needs adds the fee. Held to settlement, 1 contract.");
+  for (const T of B3_TIMES) {
+    const xs = B3s.filter(x => x.T === T), rs = xs.map(x => x.range), c1 = q(rs, 1 / 3), c2 = q(rs, 2 / 3);
+    console.log(`\n   ${T / 60} min before the close: ${xs.length} windows; prior-5-min range terciles cut at $${c1?.toFixed(0) ?? "—"} and $${c2?.toFixed(0) ?? "—"}`);
+    console.log(calHead);
+    B3_EDGES.forEach((_, i) => console.log(calRow(bucketLabel(B3_EDGES, i), xs.filter(x => bucketOf(x.d, B3_EDGES) === i))));
+    console.log(calRow("all", xs));
+    console.log(calRow("$100+, ask<=85c", xs.filter(x => x.d >= 100 && x.price <= 0.85 + 1e-9)));
+    const terc = [["quiet", x => x.range <= c1], ["middle", x => x.range > c1 && x.range <= c2], ["wild", x => x.range > c2]];
+    for (const [name, f] of terc) {
+      const ys = xs.filter(f);
+      console.log(`   -- ${name} third (range ${name === "quiet" ? `<= $${c1?.toFixed(0)}` : name === "middle" ? `$${c1?.toFixed(0)}-${c2?.toFixed(0)}` : `> $${c2?.toFixed(0)}`})`);
+      for (const [lo, hi] of [[0, 50], [50, 100], [100, 150], [150, Infinity]]) console.log(calRow(hi === Infinity ? `$${lo}+` : `$${lo}-${hi}`, ys.filter(x => x.d >= lo && x.d < hi)));
+    }
+    const fs = B3fav.filter(x => x.T === T);
+    console.log(`   Kalshi's favourite at 75-95c (bought at its ask): ${fs.length} windows`);
+    console.log(calRow("fav 75-95c", fs));
+    for (const [name, f] of terc) console.log(calRow(`fav, ${name}`, fs.filter(f)));
+  }
 }
 
 {
