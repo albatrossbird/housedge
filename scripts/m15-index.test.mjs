@@ -104,6 +104,11 @@ console.log("m15-index.mjs end to end");
   // C 30s out: every known second is after the jump: estimate 100,030, err 0.
   const c30 = sec("30s before the close", "20s before the close");
   ok(/1 windows, \|err\| median \$0\.00/.test(c30) && /\$25-50\s+1\s+100\.0%\s+87\.0%/.test(c30), "C 30s: estimate exact, $30 from the strike, YES priced 87%", c30);
+  // B2: 120s out BRTI is at the strike and the close averages +$30; from
+  // 60s out on it is already at 100,030, so the average does not move.
+  const b2 = sec("B2. HOW FAR", "C. THE SETTLEMENT");
+  ok(/120s out: 1 windows\. \|move\| median \$30\.00/.test(b2) && /60s out: 1 windows\. \|move\| median \$0\.00/.test(b2), "B2: the move from 120s and 60s out", b2);
+  ok(/60s out[\s\S]*largest lead that still lost: none[\s\S]*\$30-40\s+1\s+0\s+0\.0%\s+82\.0%/.test(b2), "B2 60s: a $30 lead, kept, YES asked at 82%", b2);
   // D: the 3bp move fires 1bp and 2bp, not 4bp. +100ms: the 49/51 book is
   // still there: 10 at 0.51 at either limit. +250ms: 60/62, so neither fills.
   const d = text.split("D. BUY THE SIDE")[1].split("30 contracts")[0];

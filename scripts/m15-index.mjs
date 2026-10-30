@@ -17,6 +17,8 @@
 //      one second, book 15-85c, final two minutes, first such move per
 //      window), as a limit at the price seen or 1c above, filled against
 //      the recorded book 100 or 250ms later, held to settlement.
+//   B2. THE LAST MINUTE. How far the settlement average lands from the
+//      price standing 120/60/30s out, and the largest lead ever overturned.
 //   D3. MANAGE IT. The live configuration of D, but at 15s out the
 //      position is sold if our side has become the underdog (bid <= 0.30)
 //      or added to if it is the favourite (ask >= 0.75): lib/sharpManage.js.
@@ -63,6 +65,8 @@ const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);
 const LIST = process.argv.includes("--list");
 const SIZE = 10;   // B and C price one 10-contract order at the touch
 const B_TIMES = [300, 120, 60], B_EDGES = [0, 10, 25, 50, 100];
+const B2_TIMES = [120, 60, 30];
+const B2_EDGES = [0, 5, 10, 15, 20, 30, 40, 60, 80, 100, 150];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
 const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }];
 // D2's narrower mid bands, each run as its own decider (a narrower band
@@ -90,7 +94,7 @@ const tape = newTape();
 const paths = new Map();   // ticker -> once-a-second rows within 305s of the close
 let ticks = [];            // BRTI on CF Benchmarks' clock: { t, v }
 const A = { windows: 0, end: 0, agree: 0, ties: 0, start: 0, startDiffs: [] };
-const Bs = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [];
+const Bs = [], Bmove = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [];
 const excludedD = {};
 let watermark = 0;
 const done = new Set();
@@ -126,6 +130,15 @@ function finalize(ticker) {
     const d = spot.v - strike, side = d >= 0 ? "yes" : "no", price = buyPrice(row, side);
     if (!(price > 0 && price < 1)) continue;
     Bs.push({ T, d: Math.abs(d), side, price, won: side === result, day, kalshiFav: (row.bid + row.ask) / 2 >= 0.5 ? "yes" : "no" });
+  }
+
+  // B2: how far the settlement average lands from the price standing
+  // T seconds out, and whether a lead of that size was ever overturned.
+  if (endAvg != null) for (const T of B2_TIMES) {
+    const now = close - T * 1000, spot = atOrBefore(tk, now), row = rowAt(now);
+    if (!spot || now - spot.t > 2000) continue;
+    const d = spot.v - strike, side = d >= 0 ? "yes" : "no", price = row ? buyPrice(row, side) : null;
+    Bmove.push({ T, dev: endAvg - spot.v, bp: (endAvg - spot.v) / spot.v * 1e4, d: Math.abs(d), flipped: side !== result, price: price > 0 && price < 1 ? price : null, day });
   }
 
   // C: the settlement average, estimated inside the final minute.
@@ -267,6 +280,28 @@ for (const T of B_TIMES) {
   console.log(calHead);
   B_EDGES.forEach((_, i) => console.log(calRow(bucketLabel(B_EDGES, i), xs.filter(x => bucketOf(x.d, B_EDGES) === i))));
   console.log(calRow("all", xs));
+}
+
+{
+  // B2. The settlement is the AVERAGE of the final minute, so from 60s out
+  // it moves about a third as far (in variance) as the price itself would.
+  console.log("\nB2. HOW FAR THE SETTLEMENT AVERAGE LANDS FROM THE PRICE STANDING T SECONDS OUT");
+  console.log("   move = settlement average (rebuilt) - BRTI then. A lead over the strike smaller than the move flips.");
+  for (const T of B2_TIMES) {
+    const xs = Bmove.filter(x => x.T === T), a = xs.map(x => Math.abs(x.dev)), b = xs.map(x => Math.abs(x.bp));
+    if (!xs.length) { console.log(`\n   ${T}s out: no windows`); continue; }
+    console.log(`\n   ${T}s out: ${xs.length} windows. |move| median $${q(a, 0.5).toFixed(2)}, p90 $${q(a, 0.9).toFixed(2)}, p99 $${q(a, 0.99).toFixed(2)}, max $${q(a, 1).toFixed(2)}`
+      + ` (${q(b, 0.5).toFixed(1)} / ${q(b, 0.9).toFixed(1)} / ${q(b, 0.99).toFixed(1)} / ${q(b, 1).toFixed(1)} bp)`);
+    const flips = xs.filter(x => x.flipped).map(x => x.d).sort((u, v) => v - u);
+    console.log(`   largest lead that still lost: ${flips.length ? `$${flips[0].toFixed(2)}` : "none"}; the five largest: ${flips.slice(0, 5).map(v => "$" + v.toFixed(2)).join(" ") || "—"}`);
+    console.log("   lead over strike      n   flipped   flip rate   Kalshi's ask for the leading side (mean)");
+    for (let i = 0; i < B2_EDGES.length; i++) {
+      const lo = B2_EDGES[i], hi = B2_EDGES[i + 1] ?? Infinity, ys = xs.filter(x => x.d >= lo && x.d < hi), pr = ys.filter(x => x.price != null);
+      if (!ys.length) continue;
+      const f = ys.filter(x => x.flipped).length;
+      console.log(`   ${(hi === Infinity ? `$${lo}+` : `$${lo}-${hi}`).padEnd(14)} ${String(ys.length).padStart(9)} ${String(f).padStart(9)} ${pct(f / ys.length).padStart(10)}   ${pr.length ? pct(pr.reduce((s, x) => s + x.price, 0) / pr.length) : "—"}`);
+    }
+  }
 }
 
 console.log("\nC. THE SETTLEMENT AVERAGE, ESTIMATED INSIDE THE FINAL MINUTE");
