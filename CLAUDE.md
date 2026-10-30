@@ -1168,6 +1168,31 @@ $0.21 from Kalshi's strike (p90 $0.68).
   The trader's buckets were picked on the live days 10-21..10-28, so
   those days cannot test them; only the in-sample period and days after
   10-28 can.
+  **At the trader's 150-settled review (2026-10-30) none of it held.**
+  Live: 156 settled, +3.27c a contract, t 0.82. The backtest on the same
+  days (run 41063848009, 10-22 to 10-29 14:15) made +2.43c, t 1.08, so
+  live and backtest agree. From 10-29 (run 41066727372, 29 decisions) the
+  trader's buckets went +9.96c / -12.55c / +31.05c, against live
+  +3.92c / +5.09c / +1.41c: the middle bucket changes sign. The rule stays
+  as it is at 10 contracts. Next review is at 300 settled: stop at t <= -1
+  or a $100 drawdown.
+  **Managing the position 15s before the close does nothing (section D3,
+  `lib/sharpManage.js`).** The rule was fixed before the run: sell if our
+  side's bid is 0.30 or less, buy 10 more if its ask is 0.75 or more.
+  At 15s out most positions are already decided. 185 of 357 books had
+  one side empty. Sales triggered at a bid averaging 0.03 and adds at an
+  ask averaging 0.97-0.98. Over 10-01..10-22 (run 41097874994), holding
+  made +7.36c and selling and adding made +6.95c. From 10-22 (run
+  41099307390) holding made +2.32c and selling and adding +2.35c. The
+  sales lost both times (-10.29c and -2.15c a contract sold): the cheap
+  side won 4.0% and 3.3% against bids of 0.028 and 0.034. The adds are
+  near-certain favourites, where one loss erases about 60 wins.
+  **How far the last minute moves** (section B2, 2,806 windows over
+  10-01..10-30). The settlement average minus BRTI 60s out: median ~$7,
+  p90 ~$27, p99 $56-65. The largest lead that still lost was $43.54 at
+  60s out and $21.25 at 30s out. No lead of $60 or more lost at 60s out
+  (about 1,600 windows), and Kalshi asked 99.4-99.9% for those. At 2 min
+  out a $213 lead lost once.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
