@@ -820,6 +820,19 @@ several readers count every window in `m15_markets`.
   more, and it would be racing Kalshi's quoters, who evidently price off
   CME. The gold run read 1,374 archive hours (8GB listed) — mind egress
   before re-running it.
+  **Settled on ONE Pyth print, taken AT the close (measured 2026-10-30).**
+  Kalshi's rules (`rules_primary`/`rules_secondary` on KXGOLD15M and
+  KXWTI15M) settle on the close of a one-minute Pyth candle, not an
+  average like Bitcoin's, and read literally put that close a minute
+  AFTER trading stops. The data says otherwise: CME's move over each
+  window, shifted by offsets, against Pyth's own move (settlement minus
+  strike; `scripts/pyth-timing.mjs`, 'CME lag' with `mode=timing`, no
+  archive read) peaks at +0s for gold (run 40996267107, 4,496 windows,
+  corr 0.9968, side 97.5%, near-strike 87.8%) and at -5..0s for oil (run
+  40996269829, 302 windows). +5s is already worse (gold 0.952) and +60s
+  much worse (0.842). So the deciding price is the one standing as
+  trading stops: nothing is locked in early, and a move in the last
+  second decides a near-strike window.
 
 **Backtesting: `lib/m15Backtest.js`, run by `scripts/m15-backtest.mjs`**
 (workflow 'Backtest 15-minute strategies'). Strategies are rules — which
