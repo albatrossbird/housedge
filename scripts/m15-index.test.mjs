@@ -41,23 +41,9 @@ console.log("buckets, prices, days");
   ok(S.n === 4 && S.ctrs === 50 && near(S.pnl, 4) && near(S.perCtr, 0.08) && near(S.t, 2 / Math.sqrt(14 / 3)) && near(S.earlyPerCtr, 0.2) && near(S.latePerCtr, 0), "totals, per contract, t across days, halves", JSON.stringify(S));
 }
 
-console.log("m15-index.mjs end to end");
-{
-  // One window, strike 100,000. BRTI flat at 100,000, then +$30 (3bp) at 90s
-  // out and flat after: the close averages 100,030 -> YES, as settled.
-  // Book 49/51 until 89.8s out, then 60/62. Once-a-second rows add 80/82 at
-  // 60s out and 85/87 at 30s and 10s out.
-  const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
+// Run the script against a fake Supabase holding one archive hour.
+function runIndex(T, close, lines, args = ["--days=1", "--size=10,30,200", "--list"]) {
   const iso = ms => new Date(ms).toISOString();
-  const T = kalshiM15Ticker("btc", close);
-  const lines = [];
-  for (let x = close - 976000; x <= close; x += 200) lines.push({ k: "i5", t: x + 40, id: "BRTI", v: x < close - 90000 ? "100000.00" : "100030.00", x });
-  const b = (s, bid, ask) => ({ k: "b", t: close - s * 1000 + 30, m: T, b: bid, a: ask, d: [500, 0, 0, 500, 0, 0], L: [[], []], x: close - s * 1000 });
-  lines.push(b(300, 0.49, 0.51), b(120, 0.49, 0.51), b(60, 0.80, 0.82), b(30, 0.85, 0.87), b(10, 0.85, 0.87));
-  lines.push({ k: "final", t: close - 120000, x: close - 120000, m: T },
-    { k: "full", t: close - 119950, x: close - 120000, m: T, L: [[[0.49, 100]], [[0.51, 100]]] },
-    { k: "full", t: close - 89750, x: close - 89800, m: T, L: [[[0.60, 100]], [[0.62, 100]]] });
-  lines.sort((a, z) => a.t - z.t);
   const gz = gzipSync(Buffer.from(lines.map(o => JSON.stringify(o)).join("\n") + "\n")).toString("base64");
   const dir = mkdtempSync(join(tmpdir(), "m15index-")), h = join(dir, "h.mjs");
   writeFileSync(h, `
@@ -78,12 +64,33 @@ console.log("m15-index.mjs end to end");
     };
     process.env.SUPABASE_URL = "https://fake.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-    process.argv.push("--days=1", "--size=10,30,200", "--list");
+    process.argv.push(...${JSON.stringify(args)});
     await import(${JSON.stringify(join(new URL(".", import.meta.url).pathname, "m15-index.mjs"))});
   `);
   let text, code = 0;
   try { text = execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
   catch (e) { code = e.status; text = String(e.stdout) + String(e.stderr); }
+  return { text, code };
+}
+
+console.log("m15-index.mjs end to end");
+{
+  // One window, strike 100,000. BRTI flat at 100,000, then +$30 (3bp) at 90s
+  // out and flat after: the close averages 100,030 -> YES, as settled.
+  // Book 49/51 until 89.8s out, then 60/62. Once-a-second rows add 80/82 at
+  // 60s out and 85/87 at 30s and 10s out.
+  const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
+  const iso = ms => new Date(ms).toISOString();
+  const T = kalshiM15Ticker("btc", close);
+  const lines = [];
+  for (let x = close - 976000; x <= close; x += 200) lines.push({ k: "i5", t: x + 40, id: "BRTI", v: x < close - 90000 ? "100000.00" : "100030.00", x });
+  const b = (s, bid, ask) => ({ k: "b", t: close - s * 1000 + 30, m: T, b: bid, a: ask, d: [500, 0, 0, 500, 0, 0], L: [[], []], x: close - s * 1000 });
+  lines.push(b(300, 0.49, 0.51), b(120, 0.49, 0.51), b(60, 0.80, 0.82), b(30, 0.85, 0.87), b(10, 0.85, 0.87));
+  lines.push({ k: "final", t: close - 120000, x: close - 120000, m: T },
+    { k: "full", t: close - 119950, x: close - 120000, m: T, L: [[[0.49, 100]], [[0.51, 100]]] },
+    { k: "full", t: close - 89750, x: close - 89800, m: T, L: [[[0.60, 100]], [[0.62, 100]]] });
+  lines.sort((a, z) => a.t - z.t);
+  const { text, code } = runIndex(T, close, lines);
   ok(code === 0, "runs", text);
   ok(/1 of 1 windows rebuilt; the rebuilt close lands on Kalshi's settled side in 1 \(100\.0%\)/.test(text), "A: the rebuilt close is on the settled side", text);
   ok(/\|rebuilt - Kalshi strike\| median \$0\.00/.test(text), "A: the rebuilt opening average is the strike", text);
@@ -117,6 +124,31 @@ console.log("m15-index.mjs end to end");
   // --list: the one 1bp decision, 90s out, YES seen 0.51; at +250ms the book is 60/62, so nothing filled.
   const list = text.split("EVERY 1bp DECISION")[1] || "";
   ok(new RegExp(`${T}\\s+${new Date(close - 90000).toISOString().replace(/\./g, "\\.")}\\s+90\\.0\\s+3\\.00\\s+0\\.49/0\\.51\\s+yes\\s+0\\.510\\s+0\\s+—\\s+yes\\s+\\+0\\.00`).test(list), "--list: the decision, its tick time, book, side and fill", list);
+}
+
+console.log("m15-index.mjs D3: the position managed at 15s out");
+{
+  // As above, but the 49/51 book stands until 20s out, so the 1bp decision
+  // fills 10 YES at 0.51 (+250ms, limit 0.52; fee 0.1750). At 20s out the
+  // book drops to 20/22: YES is the underdog at 15s, so D3 sells all 10 by
+  // buying NO at 0.80 (limit 0.81; fee 0.07 x 10 x .8 x .2 = 0.112). YES
+  // still settles: held +4.725, sold 4.725 - 8.112 = -3.387.
+  const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
+  const T = kalshiM15Ticker("btc", close);
+  const lines = [];
+  for (let x = close - 976000; x <= close; x += 200) lines.push({ k: "i5", t: x + 40, id: "BRTI", v: x < close - 90000 ? "100000.00" : "100030.00", x });
+  lines.push({ k: "final", t: close - 120000, x: close - 120000, m: T },
+    { k: "full", t: close - 119950, x: close - 120000, m: T, L: [[[0.49, 100]], [[0.51, 100]]] },
+    { k: "full", t: close - 19950, x: close - 20000, m: T, L: [[[0.20, 100]], [[0.22, 100]]] });
+  lines.sort((a, z) => a.t - z.t);
+  const { text, code } = runIndex(T, close, lines, ["--days=1", "--size=10"]);
+  ok(code === 0, "runs", text);
+  const d3 = (text.split("D3. MANAGE THE POSITION")[1] || "").split("READING THIS")[0];
+  ok(/1 filled positions; at 15s out: sell 1/.test(d3), "the position is sold at 15s out", d3);
+  ok(/hold \(as live\)\s+1\s+\+\$\s*4\.73\s+\+47\.25c/.test(d3), "held: +$4.73", d3);
+  ok(/sell the underdog only\s+1\s+-\$\s*3\.39\s+-33\.87c/.test(d3), "sold: 10 pairs for $1 each, -$3.39", d3);
+  ok(/add to the favourite only\s+1\s+\+\$\s*4\.73/.test(d3), "never added", d3);
+  ok(/sell: 1 triggered, 1 filled \(10 contracts\); our side's bid averaged 0\.200 and it went on to win 100\.0%/.test(d3), "the sale's own line", d3);
 }
 
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
