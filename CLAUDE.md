@@ -1193,6 +1193,18 @@ $0.21 from Kalshi's strike (p90 $0.68).
   60s out and $21.25 at 30s out. No lead of $60 or more lost at 60s out
   (about 1,600 windows), and Kalshi asked 99.4-99.9% for those. At 2 min
   out a $213 lead lost once.
+  **Is a big lead cheap 10 minutes out? No (section B3, run 41115572253,
+  2,804 windows 10-01..10-30).** From 10 min out the settlement lands a
+  median $45.51 from BRTI, p90 $164 and p99 $355, and a $297 lead lost.
+  A $100-150 lead lost 11.8% of the time, not the ~5% an average window
+  implies. Big leads come from wild windows, and Kalshi prices that.
+  The leader against its ask plus fee: overall -1.14c (t -1.6). Leads of
+  $100+ priced 85c or less, the trader's 3:05 case: 155 windows, won
+  78.1% against 79.2% priced, -2.26c. Kalshi's favourite at 75-95c lost
+  0.96c 10 minutes out and 2.59c (t -2.7) 5 minutes out. One cell was
+  positive in both halves: $100-150 at 10 min, +2.27c, t 1.17
+  (+2.80c, t 1.51, on the wildest third). The $150-200 and $200+ cells
+  next to it lose, so it is one cell in about forty, not a finding.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
