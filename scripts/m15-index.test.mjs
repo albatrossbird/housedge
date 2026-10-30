@@ -109,6 +109,14 @@ console.log("m15-index.mjs end to end");
   const b2 = sec("B2. HOW FAR", "C. THE SETTLEMENT");
   ok(/120s out: 1 windows\. \|move\| median \$30\.00/.test(b2) && /60s out: 1 windows\. \|move\| median \$0\.00/.test(b2), "B2: the move from 120s and 60s out", b2);
   ok(/60s out[\s\S]*largest lead that still lost: none[\s\S]*\$30-40\s+1\s+0\s+0\.0%\s+82\.0%/.test(b2), "B2 60s: a $30 lead, kept, YES asked at 82%", b2);
+  // B3: 5 min out BRTI is at the strike after a flat 5 minutes (range $0):
+  // YES leads by $0, asked at 0.51, and won. No book 10 min out, so none there.
+  const b3 = sec("B3. THE LEADER", "B2. HOW FAR");
+  ok(/10 min before the close: 0 windows/.test(b3), "B3 10 min: no book recorded, no windows", b3);
+  const b35 = b3.split("5 min before the close")[1] || "";
+  ok(/1 windows; prior-5-min range terciles cut at \$0 and \$0/.test(b35) && /\$0-25\s+1\s+100\.0%\s+51\.0%/.test(b35), "B3 5 min: a $0 lead on a flat window, YES at 51%", b35);
+  ok(/-- quiet third[\s\S]*\$0-50\s+1\s+100\.0%/.test(b35) && /Kalshi's favourite at 75-95c \(bought at its ask\): 0 windows/.test(b35), "B3: the quiet third holds it; a 51c favourite is not 75-95c", b35);
+  ok(/600s out: 1 windows\. \|move\| median \$30\.00/.test(b2), "B2 now measures 10 min out too", b2);
   // D: the 3bp move fires 1bp and 2bp, not 4bp. +100ms: the 49/51 book is
   // still there: 10 at 0.51 at either limit. +250ms: 60/62, so neither fills.
   const d = text.split("D. BUY THE SIDE")[1].split("30 contracts")[0];
