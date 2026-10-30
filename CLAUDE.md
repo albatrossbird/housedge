@@ -726,6 +726,18 @@ egress is what went over quota in October. Socket events (`conn`, `err`,
 indices stay in `m15/`. The poller and `m15_markets` do NOT carry them:
 several readers count every window in `m15_markets`.
 
+**The other liquid crypto series are recorded apart too (decided
+2026-10-30)**: `M15_CRYPTO_SERIES` (KXETH15M, KXSOL15M, KXXRP15M,
+KXDOGE15M; median 210k / 77k / 116k / 50k contracts a window) go to
+**`m15c/`**, settlements to `m15_settlements`, nothing to `m15_markets`.
+The question is whether Bitcoin's late-favourite edge is the
+favourite-longshot bias of a market crowded by casual traders, which
+gold (quoted by professionals, priced fairly) does not show. Re-run the
+late-favourite rules on them (`source: archive`, `strategy=paper`) after
+2-3 weeks, with no parameter changed. `m15FolderOf` (recorder) and
+`m15ArchiveFolder` (readers) in `lib/m15.js` decide the folder;
+`scripts/m15-stream.test.mjs` pins all three.
+
 - **Settlement prices, free** (`m15_settlements`, migration `0032`,
   written by the backfill): Kalshi's `expiration_value` on a settled
   market IS Pyth's price at that close, beside `floor_strike`. **Kalshi

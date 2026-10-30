@@ -43,7 +43,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { KALSHI_REST, KALSHI_WS, WS_PATH, keyPath, loadKalshiKey, kalshiAuthHeaders } from "../lib/kalshiAuth.js";
 import { BookSet } from "../lib/kalshiBook.js";
-import { M15_SUFFIX, M15_CATEGORIES, m15InScope, m15InExtra } from "../lib/m15.js";
+import { M15_SUFFIX, M15_CATEGORIES, m15InScope, m15FolderOf } from "../lib/m15.js";
 import { assertCredential } from "../lib/supabaseCredential.js";
 import { recorderSource } from "../lib/recorderSource.js";
 import { createArchive } from "../lib/streamArchive.js";
@@ -96,22 +96,26 @@ const archive = createArchive({
 });
 // Its own subdirectory: an archive uploads every finished file in its
 // directory under its own prefix, so two sharing one would cross-file.
-const inExtra = m15InExtra(env);
-const archiveX = createArchive({
-  dir: join(DIR, "m15x"), bucket: BUCKET, supabaseUrl: SUPABASE_URL, key: KEY, prefix: "m15x", source: SOURCE, rotateMs: ROTATE_MS, log,
+// m15x/ holds the commodity and FX series, m15c/ the other crypto ones
+// (lib/m15.js m15FolderOf).
+const folderOf = m15FolderOf(env);
+const apart = folder => createArchive({
+  dir: join(DIR, folder), bucket: BUCKET, supabaseUrl: SUPABASE_URL, key: KEY, prefix: folder, source: SOURCE, rotateMs: ROTATE_MS, log,
   meta: now => ({ k: "meta", t: now, source: SOURCE, yesLeg: true, levels: LEVELS, snapshotMs: SNAPSHOT_MS, finalSeconds: FINAL_MS / 1000, v: 1 }),
 });
-const archives = [archive, archiveX];
-const archiveOf = ticker => inExtra(ticker) ? archiveX : archive;
+const byFolder = { m15: archive, m15x: apart("m15x"), m15c: apart("m15c") };
+const archives = Object.values(byFolder);
 function write(o) {
-  if (typeof o.m === "string") return archiveOf(o.m).write(o);
+  if (typeof o.m === "string") return byFolder[folderOf(o.m)].write(o);
   if (o.k === "gap" && Array.isArray(o.m)) {
-    const mine = o.m.filter(t => !inExtra(t)), theirs = o.m.filter(t => inExtra(t));
-    if (mine.length || !theirs.length) archive.write({ ...o, m: mine });
-    if (theirs.length) archiveX.write({ ...o, m: theirs });
+    // Split by market; a gap naming no market at all stays in m15/.
+    const groups = {};
+    for (const t of o.m) (groups[folderOf(t)] ||= []).push(t);
+    if (groups.m15 || !Object.keys(groups).length) archive.write({ ...o, m: groups.m15 || [] });
+    for (const [f, ms] of Object.entries(groups)) if (f !== "m15") byFolder[f].write({ ...o, m: ms });
     return;
   }
-  if (o.k === "conn" || o.k === "err" || o.k === "health") { archive.write(o); archiveX.write(o); return; }
+  if (o.k === "conn" || o.k === "err" || o.k === "health") { archives.forEach(a => a.write(o)); return; }
   archive.write(o);
 }
 for (const a of archives) {
@@ -145,7 +149,7 @@ async function restGet(path) {
 // Only the series in scope (lib/m15.js, M15_RESEARCH_SERIES and
 // M15_EXTRA_SERIES): every other book is bandwidth, CPU and archive for
 // data nobody is using.
-const inScope = (t => { const a = m15InScope(env); return x => a(x) || inExtra(x); })();
+const inScope = (t => { const a = m15InScope(env); return x => a(x) || folderOf(x) !== "m15"; })();
 let outOfScopeLogged = "";
 async function listSeries() {
   const found = new Set(), skipped = new Set();
@@ -425,8 +429,8 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
 function printStats() {
-  const backlog = archive.backlog() + archiveX.backlog(), free = archive.diskFreeGB();
-  const sum = k => archive.stats[k] + archiveX.stats[k];
+  const backlog = archives.reduce((s, a) => s + a.backlog(), 0), free = archive.diskFreeGB();
+  const sum = k => archives.reduce((s, a) => s + a.stats[k], 0);
   const lines = sum("lines"), uploads = sum("uploads"), uploadFails = sum("uploadFails");
   log(`frames=${stats.frames} deltas=${stats.deltas} finalDeltas=${stats.finalDeltas} snaps=${stats.snaps} trades=${stats.trades} i5=${stats.i5} i1=${stats.i1} gaps=${stats.gaps} reconnects=${stats.reconnects} errors=${stats.errors} markets=${markets.size} lines=${lines} uploads=${uploads} uploadFails=${uploadFails} backlog=${backlog} diskFreeGB=${free}`);
   if (free != null && Number(free) < 1) log(`::warning::less than 1GB free under ${DIR} — uploads are not keeping up`);
