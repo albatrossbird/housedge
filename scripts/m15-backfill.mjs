@@ -10,13 +10,15 @@
 // It also keeps the price each window SETTLED at (m15_settlements,
 // migration 0032) for the recorded series and the commodity and FX ones
 // (lib/m15.js M15_EXTRA_SERIES): Pyth's value at every close, the
-// yardstick for any cheaper feed. Those nine are not written to
-// m15_markets, whose readers count every window in it.
+// yardstick for any cheaper feed; and for the other crypto series
+// (M15_CRYPTO_SERIES), whose outcomes the late-favourite test needs.
+// None of those is written to m15_markets, whose readers count every
+// window in it.
 //
 // Runs in GitHub Actions, not Vercel: this pages thousands of markets
 // per series and writes thousands of rows, which is neither a 300s job
 // nor something to spend the Hobby plan's 4 CPU-hours/month on.
-import { listM15Series, kalshiGet, toM15Row, toM15Settlement, m15InScope, m15InExtra } from "../lib/m15.js";
+import { listM15Series, kalshiGet, toM15Row, toM15Settlement, m15InScope, m15FolderOf } from "../lib/m15.js";
 import { authHeaders } from "../lib/supabaseHeaders.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -63,8 +65,9 @@ async function upsert(table, rows, onConflict) {
   return { written, failed: false };
 }
 
-const inScope = m15InScope(), inExtra = m15InExtra();
-const { series, outOfScope, errors } = await listM15Series({ inScope: t => inScope(t) || inExtra(t) });
+// Settlements only for the series recorded apart (m15x/, m15c/).
+const inScope = m15InScope(), folderOf = m15FolderOf();
+const { series, outOfScope, errors } = await listM15Series({ inScope: t => inScope(t) || folderOf(t) !== "m15" });
 errors.forEach(e => console.log(`::warning::series list: ${e}`));
 if (outOfScope.length) console.log(`out of scope (lib/m15.js), not read: ${outOfScope.join(" ")}`);
 if (!series.length) { console.error("::error::no 15-minute series found"); process.exit(1); }

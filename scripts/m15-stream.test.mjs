@@ -65,7 +65,7 @@ function run({ fake = {}, storage = "ok", rest = "ok", seconds = 4, envx = {}, l
     Object.assign(process.env, {
       KALSHI_KEY_FILE: ${JSON.stringify(kf)}, KALSHI_KEY_ID: "test-key-id",
       SUPABASE_URL: "https://fake.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_fake",
-      STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t", KALSHI_WS_CLIENT: "global", M15_SERIES: "all",
+      STREAM_DIR: ${JSON.stringify(arch)}, INVOCATION_ID: "t", KALSHI_WS_CLIENT: "global", M15_SERIES: "all", M15_CRYPTO_SERIES: "none",
       STREAM_RUN_MINUTES: String(${seconds} / 60), STREAM_ALIGN_EXIT: "0",
       STREAM_ROTATE_MS: "1500", STREAM_SNAPSHOT_MS: "200", STREAM_DISCOVER_MS: "400", STREAM_UPLOAD_MS: "700",
       STREAM_FINAL_SECONDS: "59", STREAM_REMOVE_AFTER_CLOSE_MS: "300", STREAM_STATS_MS: "100000", STREAM_SERIES_MS: "1000", STREAM_HEALTH_MS: "500",
@@ -81,13 +81,14 @@ function run({ fake = {}, storage = "ok", rest = "ok", seconds = 4, envx = {}, l
   const r = JSON.parse(readFileSync(res, "utf8"));
   const local = readdirSync(arch);
   const archX = join(arch, "m15x"), localX = (() => { try { return readdirSync(archX); } catch { return []; } })();
+  const archC = join(arch, "m15c"), localC = (() => { try { return readdirSync(archC); } catch { return []; } })();
   // Every archive line, uploaded files then whatever is still local, in
   // name order: m15/ in `files`, m15x/ (the commodity and FX series) in `filesX`.
   const pick = (prefix, dir, names) => [
     ...r.uploads.filter(u => u.path.startsWith(`stream-archive/${prefix}/`) && u.path.endsWith(".gz")).map(u => ({ name: u.path, buf: Buffer.from(u.body, "base64") })),
     ...names.filter(n => n.endsWith(".ndjson.gz")).map(n => ({ name: n, buf: readFileSync(join(dir, n)), local: true })),
   ];
-  return { code, text, ...r, local, localX, files: pick("m15", arch, local), filesX: pick("m15x", archX, localX) };
+  return { code, text, ...r, local, localX, localC, files: pick("m15", arch, local), filesX: pick("m15x", archX, localX), filesC: pick("m15c", archC, localC) };
 }
 
 const linesOf = f => gunzipSync(f.buf).toString().trim().split("\n").map(l => JSON.parse(l));
@@ -105,8 +106,8 @@ console.log("a normal run");
   ok(r.code === 0, "exits cleanly at the end of its run", r);
   ok(r.uploads.some(u => u.path === "stream-archive/m15/_probe/box.txt"), "proves the bucket before recording", r);
   const gz = r.uploads.filter(u => u.path.endsWith(".gz"));
-  ok(gz.length >= 1 && gz.every(u => /^stream-archive\/m15x?\/\d{4}-\d\d-\d\d\/\d\d\/\d{8}T\d{9}Z_box\.ndjson\.gz$/.test(u.path))
-     && gz.some(u => u.path.startsWith("stream-archive/m15/")), "rotated files are uploaded to m15/<day>/<hour>/ (and m15x/)", r);
+  ok(gz.length >= 1 && gz.every(u => /^stream-archive\/m15[xc]?\/\d{4}-\d\d-\d\d\/\d\d\/\d{8}T\d{9}Z_box\.ndjson\.gz$/.test(u.path))
+     && gz.some(u => u.path.startsWith("stream-archive/m15/")), "rotated files are uploaded to m15/<day>/<hour>/ (and m15x/, m15c/)", r);
   let clean = true; for (const f of r.files) { try { const L = linesOf(f); if (L[0].k !== "meta") clean = false; } catch { clean = false; } }
   ok(clean, "every file is a complete gzip that opens with a meta line", r);
   ok(r.local.filter(n => n.endsWith(".gz")).length <= 1 && !r.local.some(n => n.endsWith(".part")), "only the last file is left locally, closed (the next run uploads it)", r);
@@ -242,6 +243,22 @@ console.log("\nthe commodity and FX series go to their own folder, m15x/");
   ok(has(L, "conn") && has(X, "conn") && has(L, "health") && has(X, "health"), "socket events and health go to BOTH folders", r);
   ok(has(L, "i5") && !has(X, "i5"), "the indices stay in m15/", r);
   ok(!r.local.some(n => n.endsWith(".part")) && !r.localX.some(n => n.endsWith(".part")), "both archives close their files", r);
+}
+
+console.log("\nthe other crypto series go to theirs, m15c/");
+{
+  // Bitcoin in scope, ETH a crypto series recorded apart, silver an extra:
+  // three folders, each market in exactly one.
+  const r = run({ envx: { M15_SERIES: "KXBTC15M", M15_CRYPTO_SERIES: "" }, later: `fake.addMarket("KXSILVER15M-S", { close: iso(30000) });` });
+  ok(r.code === 0, "exits cleanly", r);
+  const L = byTime(r.files), X = byTime(r.filesX), C = byTime(r.filesC);
+  const has = (A, k, m) => A.some(l => l.k === k && (m == null ? true : String(l.m).startsWith(m)));
+  ok(r.uploads.some(u => u.path === "stream-archive/m15c/_probe/box.txt"), "proves the m15c/ folder before recording", r);
+  ok(has(C, "b", "KXETH15M") && has(C, "mkt", "KXETH15M"), "ETH's books and listing are in m15c/", r);
+  ok(!L.concat(X).some(l => String(l.m).startsWith("KXETH15M")), "and nowhere else", r);
+  ok(!C.some(l => String(l.m).startsWith("KXBTC15M") || String(l.m).startsWith("KXSILVER15M")), "Bitcoin and silver stay out of m15c/", r);
+  ok(has(C, "conn") && has(C, "health") && has(L, "conn") && has(X, "conn"), "socket events go to all three folders", r);
+  ok(!r.localC.some(n => n.endsWith(".part")), "m15c/ closes its files", r);
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
