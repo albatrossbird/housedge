@@ -43,26 +43,34 @@ const SINCE_MS = Math.max(SINCE ? Date.parse(`${SINCE}T00:00:00Z`) : Date.now() 
 const UNTIL_MS = Math.min(UNTIL ? Date.parse(`${UNTIL}T00:00:00Z`) : Infinity, Date.now() - 20 * 60000);
 if (!(UNTIL_MS > SINCE_MS)) { console.error("::error::--until must be after the start"); process.exit(2); }
 const SERIES = String(opt("series", "KXBTC15M,KXETH15M,KXSOL15M,KXXRP15M,KXDOGE15M")).toUpperCase().split(/[,\s]+/).filter(Boolean);
-const SIZE = Number(opt("size", 10)), CONC = Number(opt("conc", 4)), PACE = Number(opt("pace", 100));
+const SIZE = Number(opt("size", 10)), CONC = Number(opt("conc", 4)), PACE = Number(opt("pace", 200));
 const THRESHOLDS = [1, 2, 4], STALE_MS = 5000, DELAY_MS = 250, FILL_WINDOW_MS = 2000;
 const symbolOf = s => s.replace(/^KX/, "").replace(/15M$/, "");
 
 // ---- Kalshi, public ------------------------------------------------------
 const B = "https://api.elections.kalshi.com/trade-api/v2";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let requests = 0, nextAt = 0;
+let requests = 0, refused = 0, nextAt = 0;
+// One shared clock for every worker: Kalshi holds an IP to ~5-6 requests a
+// second, and a 429 pauses ALL of them. Each worker backing off on its own
+// let the others keep hitting the limit, and on 2026-11-02 that cut a run
+// to ~1 useful request a second while its counter read ~6.
 async function kget(path) {
-  for (let i = 0; i < 7; i++) {
-    // One shared pace across the workers: Kalshi rate-limits datacenter IPs.
+  for (let i = 0; i < 8; i++) {
     const wait = Math.max(0, nextAt - Date.now()); nextAt = Math.max(Date.now(), nextAt) + PACE;
     await sleep(wait); requests++;
     let r;
     try { r = await fetch(B + path); } catch { await sleep(1000 * 2 ** i); continue; }
-    if (r.status === 429 || r.status >= 500) { await sleep(Number(r.headers.get("retry-after")) * 1000 || 1500 * 2 ** i); continue; }
+    if (r.status === 429 || r.status >= 500) {
+      refused++;
+      const pause = Number(r.headers.get("retry-after")) * 1000 || Math.min(1000 * 2 ** i, 20000);
+      nextAt = Math.max(nextAt, Date.now() + pause);
+      continue;
+    }
     if (!r.ok) throw new Error(`GET ${path.slice(0, 90)} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
     return r.json();
   }
-  throw new Error(`GET ${path.slice(0, 90)}: still refused after 7 tries`);
+  throw new Error(`GET ${path.slice(0, 90)}: still refused after 8 tries`);
 }
 const cutoff = await kget("/historical/cutoff");
 const tradeCut = Date.parse(cutoff.trades_created_ts);
@@ -206,10 +214,10 @@ await Promise.all(Array.from({ length: CONC }, async () => {
   while (queue.length) {
     const w = queue.shift();
     await decideWindow(w);
-    if (++done % 1000 === 0) console.error(`  ${done}/${windows.length} windows, ${requests} requests`);
+    if (++done % 500 === 0) console.log(`  ${done}/${windows.length} windows, ${requests} requests, ${refused} refused, ${Math.round((Date.now() - t0) / 1000)}s`);
   }
 }));
-console.log(`\ntape: ${requests} requests, read only around events`);
+console.log(`\ntape: ${requests} requests (${refused} refused and retried), read only around events`);
 
 // ---- Report --------------------------------------------------------------
 const pct = v => (v == null ? "—" : `${(100 * v).toFixed(1)}%`);
