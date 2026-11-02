@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createSharpMove } from "../lib/sharpMove.js";
-import { tapeBook } from "../lib/tapeBook.js";
+import { decideOnTape } from "../lib/tapeBook.js";
 import { parseTrade } from "../lib/m15Tape.js";
 import { parseAggTrade, sampleLast } from "../lib/binanceTicks.js";
 import { kalshiTakerFee } from "../lib/fees.js";
@@ -113,44 +113,29 @@ async function dayTicks(day, closes) {
 }
 
 // ---- The tape around events, cached per window ----------------------------
+// lib/tapeBook.js decideOnTape reads it only where the decider asks.
 const segFile = join(CACHE, "kalshi-segments.json");
 const segCache = existsSync(segFile) ? JSON.parse(readFileSync(segFile, "utf8")) : {};
 let segWrites = 0;
-async function fetchSeg(w, fromMs, toMs) {
-  const lo = Math.floor(fromMs / 1000), hi = Math.ceil(toMs / 1000);
+async function rangeTrades(w, fromMs, toMs) {
   const base = w.close <= tradeCut ? "/historical/trades" : "/markets/trades";
-  const rows = []; let cursor = "";
+  const out = []; let cursor = "";
   do {
-    const d = await get(`${base}?ticker=${w.ticker}&min_ts=${lo}&max_ts=${hi}&limit=1000${cursor ? `&cursor=${cursor}` : ""}`);
-    for (const raw of d.trades || []) { const x = parseTrade(raw); if (x) rows.push([x.t, x.side, x.price, x.count]); }
+    const d = await get(`${base}?ticker=${w.ticker}&min_ts=${Math.floor(fromMs / 1000)}&max_ts=${Math.ceil(toMs / 1000)}&limit=1000${cursor ? `&cursor=${cursor}` : ""}`);
+    for (const raw of d.trades || []) { const x = parseTrade(raw); if (x) out.push(x); }
     cursor = d.cursor || "";
   } while (cursor);
-  const s = segCache[w.ticker] ||= { ranges: [], trades: [] };
-  s.ranges.push([lo * 1000, hi * 1000]);
-  const seen = new Set(s.trades.map(r => r.join("|")));
-  for (const r of rows) if (!seen.has(r.join("|"))) s.trades.push(r);
-  s.trades.sort((a, b) => a[0] - b[0]);
-  if (++segWrites % 200 === 0) writeFileSync(segFile, JSON.stringify(segCache));
+  return out;
 }
-
-// The rule on one window at one threshold, reading the tape only where the
-// decider asks: a touch at an instant the cached tape does not cover stops
-// the replay, fetches [t - 6s, t + 3s], and starts it again from the top.
-async function decide(w, ticks, thr) {
-  for (;;) {
-    const s = segCache[w.ticker] || { ranges: [], trades: [] };
-    const covered = t => s.ranges.some(([a, b]) => t - 6000 >= a && t + 3000 <= b);
-    const book = tapeBook(s.trades.map(([t, side, price, count]) => ({ t, side, price, count })), { staleMs: STALE_MS });
-    const dec = createSharpMove(w.close, { thrBp: thr });
-    let need = null, res = null;
-    for (const [t, v] of ticks) {
-      const r = dec.onTick(t, v, at => { if (!covered(at)) { need = at; return null; } return book.at(at); });
-      if (need != null) break;
-      if (r?.order) { res = r; break; }
-    }
-    if (need == null) return res ? { r: res, fill: book.fill(res.t, res.order.side, res.order.limit, { delayMs: DELAY_MS, windowMs: FILL_WINDOW_MS }) } : null;
-    await fetchSeg(w, need - 6000, need + 3000);
+async function decide(w, ticks, thr, seg) {
+  const before = seg.ranges.length;
+  const d = await decideOnTape({ ticks, seg, staleMs: STALE_MS, delayMs: DELAY_MS, windowMs: FILL_WINDOW_MS,
+    fetchRange: (a, b) => rangeTrades(w, a, b), makeDecider: () => createSharpMove(w.close, { thrBp: thr }) });
+  if (seg.ranges.length > before) {
+    segCache[w.ticker] = { ranges: seg.ranges, trades: seg.trades.map(x => [x.t, x.side, x.price, x.count]) };
+    if (++segWrites % 200 === 0) writeFileSync(segFile, JSON.stringify(segCache));
   }
+  return d;
 }
 
 // ---- Run -------------------------------------------------------------------
@@ -169,8 +154,11 @@ for (const [day, ws] of byDay) {
     while (queue.length) {
       const w = queue.shift(), tk = ticks[w.close] || [];
       if (tk.length < 100) { noTicks++; continue; }
+      const c = segCache[w.ticker];
+      const seg = c ? { ranges: c.ranges, trades: c.trades.map(([t, side, price, count]) => ({ t, side, price, count })) } : { ranges: [], trades: [] };
+      const ticksObj = tk.map(([t, v]) => ({ t, v }));
       for (const thr of THRESHOLDS) {
-        const d = await decide(w, tk, thr);
+        const d = await decide(w, ticksObj, thr, seg);
         if (!d) continue;
         const { side, seen } = d.r.order, won = side === w.result, f = d.fill;
         const row = { thr, day: w.day, month: w.day.slice(0, 7), ticker: w.ticker, secs: (w.close - d.r.t) / 1000, side, seen, won, filled: f.filled, ctrs: SIZE, result: w.result };

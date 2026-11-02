@@ -24,9 +24,11 @@
 //   node scripts/m15-alt-sharp.mjs --since=YYYY-MM-DD [--until=YYYY-MM-DD]
 //        [--series=KXBTC15M,KXETH15M,KXSOL15M,KXXRP15M,KXDOGE15M] [--size=10] [--conc=4]
 import { archiveReader } from "../lib/archiveRead.js";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { createSharpMove } from "../lib/sharpMove.js";
 import { settleAvg, dayStats } from "../lib/m15Index.js";
-import { tapeBook } from "../lib/tapeBook.js";
+import { decideOnTape } from "../lib/tapeBook.js";
 import { parseTrade } from "../lib/m15Tape.js";
 import { kalshiTakerFee } from "../lib/fees.js";
 import { seriesFees } from "../lib/m15BacktestReport.js";
@@ -79,16 +81,16 @@ async function settled(series) {
   } while (cursor);
   return out.sort((a, b) => a.close - b.close);
 }
-async function finalTrades(m) {
+// Every trade of one window in [fromMs, toMs], oldest first.
+async function rangeTrades(m, fromMs, toMs) {
   const base = m.close <= tradeCut ? "/historical/trades" : "/markets/trades";
-  const from = m.close - 130000, to = m.close;
   const out = []; let cursor = "";
   do {
-    const d = await kget(`${base}?ticker=${m.ticker}&min_ts=${Math.floor(from / 1000)}&max_ts=${Math.ceil(to / 1000)}&limit=1000${cursor ? `&cursor=${cursor}` : ""}`);
-    for (const raw of d.trades || []) { const x = parseTrade(raw); if (x && x.t >= from && x.t < to) out.push(x); }
+    const d = await kget(`${base}?ticker=${m.ticker}&min_ts=${Math.floor(fromMs / 1000)}&max_ts=${Math.ceil(toMs / 1000)}&limit=1000${cursor ? `&cursor=${cursor}` : ""}`);
+    for (const raw of d.trades || []) { const x = parseTrade(raw); if (x) out.push(x); }
     cursor = d.cursor || "";
   } while (cursor);
-  return out.sort((a, b) => a.t - b.t);
+  return out;
 }
 
 const windows = [];
@@ -102,12 +104,22 @@ console.log(`  Touch and fill from Kalshi's trade tape: last print of each side 
 // Only ticks inside the final 125s of some window are kept: windows close
 // on the quarter hour, so that is a test on the clock, not a lookup.
 const inTail = t => { const r = ((900000 - (t % 900000)) % 900000); return r <= 125000; };
-const symbols = SERIES.map(symbolOf);
 const ticksById = new Map(), idCounts = new Map();
+// --ticks=FILE keeps the tails read from the archive (gzipped JSON), so a
+// second run over the same days reads no Storage at all.
+const TICKS = opt("ticks", null);
 const reader = archiveReader({ url: URL, key: KEY });
-const files = await reader.listRange("m15", SINCE_MS - 3600000, Math.min(UNTIL_MS + 3600000, Date.now()));
 const t0 = Date.now();
-let bytes = 0;
+let bytes = 0, files = [];
+if (TICKS && existsSync(TICKS)) {
+  const saved = JSON.parse(gunzipSync(readFileSync(TICKS)).toString());
+  // It must cover this run's days; a window past its end (up to an hour,
+  // a re-run of an open-ended span) shows as "index missing", never as a guess.
+  if (saved.since > SINCE_MS || saved.until + 3600000 < UNTIL_MS) { console.error(`::error::${TICKS} holds ${new Date(saved.since).toISOString()}..${new Date(saved.until).toISOString()}, which does not cover this run's days`); process.exit(2); }
+  for (const [id, a] of Object.entries(saved.ticks)) ticksById.set(id, a.map(([t, v]) => ({ t, v })));
+  for (const [id, n] of Object.entries(saved.counts)) idCounts.set(id, n);
+  console.log(`ticks: read from ${TICKS}, no archive download`);
+} else files = await reader.listRange("m15", SINCE_MS - 3600000, Math.min(UNTIL_MS + 3600000, Date.now()));
 for (const f of files) {
   bytes += f.size || 0;
   await reader.eachLine(f.path, o => {
@@ -115,12 +127,15 @@ for (const f of files) {
     idCounts.set(o.id, (idCounts.get(o.id) || 0) + 1);
     const v = Number(o.v);
     if (o.v == null || o.v === "" || !Number.isFinite(v) || !inTail(o.x)) return;
-    if (o.id !== "BRTI" && !symbols.some(s => String(o.id).toUpperCase().includes(s))) return;
+    // Every 5Hz id is kept (there are five), so a saved --ticks file serves
+    // a later run over other coins.
     if (!ticksById.has(o.id)) ticksById.set(o.id, []);
     ticksById.get(o.id).push({ t: o.x, v });
   }, line => line.startsWith('{"k":"i5"'));
 }
 for (const a of ticksById.values()) a.sort((x, y) => x.t - y.t);
+if (TICKS && files.length) writeFileSync(TICKS, gzipSync(JSON.stringify({ since: SINCE_MS, until: UNTIL_MS, counts: Object.fromEntries(idCounts),
+  ticks: Object.fromEntries([...ticksById].map(([id, a]) => [id, a.map(k => [k.t, k.v])])) })));
 console.log(`archive: ${files.length} hourly files (${(bytes / 1e6).toFixed(0)} MB) in ${Math.round((Date.now() - t0) / 1000)}s; 5Hz ids seen: ${[...idCounts].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n.toLocaleString()}`).join(", ")}`);
 
 const slice = (arr, lo, hi) => {
@@ -156,26 +171,27 @@ for (const s of SERIES) {
 // ---- Decide each window --------------------------------------------------
 const rows = [];   // one per window x threshold that sent an order
 const skips = {};
-let tapeTrades = 0, done = 0;
+let done = 0;
 async function decideWindow(w) {
   const pick = idFor[w.series];
   if (!pick) return;
   const tk = slice(ticksById.get(pick.id), w.close - 125000, w.close);
   if (tk.length < 100) { skips[`${w.series} index missing`] = (skips[`${w.series} index missing`] || 0) + 1; return; }
-  const trades = await finalTrades(w);
-  tapeTrades += trades.length;
-  const book = tapeBook(trades, { staleMs: STALE_MS });
+  const seg = { ranges: [], trades: [] }, skipsNow = [];
   for (const thr of THRESHOLDS) {
-    const dec = createSharpMove(w.close, { thrBp: thr });
-    let order = null;
-    for (const k of tk) {
-      const r = dec.onTick(k.t, k.v, t => book.at(t));
-      if (r?.skip && thr === 1) { const key = `${w.series} ${r.skip}`; skips[key] = (skips[key] || 0) + 1; }
-      if (r?.order) { order = r; break; }
-    }
-    if (!order) continue;
-    const { side, seen, limit } = order.order;
-    const f = book.fill(order.t, side, limit, { delayMs: DELAY_MS, windowMs: FILL_WINDOW_MS });
+    const d = await decideOnTape({ ticks: tk, seg, staleMs: STALE_MS, delayMs: DELAY_MS, windowMs: FILL_WINDOW_MS,
+      fetchRange: (a, b) => rangeTrades(w, a, b),
+      makeDecider: () => {
+        const dec = createSharpMove(w.close, { thrBp: thr });
+        // Count what 1bp passed over in the FINAL replay only: an aborted
+        // one stopped on a touch it had not read yet.
+        skipsNow.length = 0;
+        return thr !== 1 ? dec : { onTick(t, v, bookAt) { const r = dec.onTick(t, v, bookAt); if (r?.skip) skipsNow.push(r.skip); return r; } };
+      } });
+    if (thr === 1) { for (const k of skipsNow.splice(0)) { const key = `${w.series} ${k}`; skips[key] = (skips[key] || 0) + 1; } }
+    if (!d) continue;
+    const order = d.r, f = d.fill;
+    const { side, seen } = order.order;
     const won = side === w.result, m = mult[w.series];
     const row = { series: w.series, thr, day: w.day, won, side, seen, filled: f.filled, ctrs: SIZE, secs: (w.close - order.t) / 1000, mid: order.mid };
     if (f.filled) {
@@ -193,7 +209,7 @@ await Promise.all(Array.from({ length: CONC }, async () => {
     if (++done % 1000 === 0) console.error(`  ${done}/${windows.length} windows, ${requests} requests`);
   }
 }));
-console.log(`\ntape: ${tapeTrades.toLocaleString()} trades read in ${requests} requests`);
+console.log(`\ntape: ${requests} requests, read only around events`);
 
 // ---- Report --------------------------------------------------------------
 const pct = v => (v == null ? "—" : `${(100 * v).toFixed(1)}%`);
