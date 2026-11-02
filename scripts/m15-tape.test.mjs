@@ -1,5 +1,5 @@
 // lib/m15Tape.js — p75 decided on Kalshi's trade tape. Hand-built trades.
-import { parseTrade, tapeEntry, tapePnl, bandOf, firstBuys, pickCell, GRID_BANDS } from "../lib/m15Tape.js";
+import { parseTrade, tapeEntry, tapePnl, bandOf, firstBuys, pickCell, candleQuote, packCandle, GRID_BANDS } from "../lib/m15Tape.js";
 
 let failed = 0;
 const ok = (c, w, extra = "") => { if (c) console.log(`  ok  ${w}`); else { failed++; console.error(`FAIL ${w} ${extra}`); } };
@@ -49,6 +49,20 @@ console.log("grid: pickCell");
   ok(pickCell([c("a", 200, 1.5), c("b", 300, 2.1), c("c", 100, 5)]).key === "b", "highest train t among cells with enough trades");
   ok(pickCell([c("a", 200, 2.1), c("b", 400, 2.1)]).key === "b", "a tie goes to more trades");
   ok(pickCell([c("a", 149, 3)]) === null && pickCell([{ key: "x", train: null }]) === null, "too few trades, or none: no choice");
+}
+
+console.log("grid: candles");
+{
+  // Shape copied from a live /historical/markets/<t>/candlesticks reply (2026-11-02).
+  const raw = { end_period_ts: 1784116200, yes_bid: { close_dollars: "0.4600", open_dollars: "0.4600" }, yes_ask: { close_dollars: "0.4800", open_dollars: "0.4700" }, volume_fp: "1532.05" };
+  ok(JSON.stringify(packCandle(raw)) === "[1784116200000,0.46,0.48]", "a candle keeps its end, bid close and ask close", JSON.stringify(packCandle(raw)));
+  const c0 = 1784116800000, cs = [[c0 - 660000, 0.40, 0.42], [c0 - 600000, 0.46, 0.48], [c0 - 540000, 0.70, 0.72], [c0 - 300000, 0, 1]];
+  const q = candleQuote(cs, c0, 600);
+  ok(near(q.yes.price, 0.48) && q.yes.side === "yes" && near(q.no.price, 0.54) && q.no.side === "no", "10m out: YES at the ask, NO at 1 - bid, from the minute ending then", JSON.stringify(q));
+  ok(near(candleQuote(cs, c0, 570).yes.price, 0.48), "between minute ends: the latest candle before, never a later one");
+  ok(candleQuote(cs, c0, 300).yes === null && candleQuote(cs, c0, 300).no === null, "an empty book (bid 0, ask $1) buys nothing");
+  ok(candleQuote(cs, c0, 120).yes === null, "a candle more than 60s old is not the touch");
+  ok(candleQuote([], c0, 600).yes === null && candleQuote(undefined, c0, 600).no === null, "no candles: nothing");
 }
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
