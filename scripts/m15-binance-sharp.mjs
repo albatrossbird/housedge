@@ -30,7 +30,7 @@ const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--$
 const SERIES = "KXBTC15M";
 const SINCE = Date.parse(`${opt("since", "2026-10-01")}T00:00:00Z`);
 const UNTIL = Math.min(opt("until") ? Date.parse(`${opt("until")}T00:00:00Z`) : Infinity, Math.floor((Date.now() - 4 * 3600000) / 86400000) * 86400000);   // a day's file is published ~02:00 UTC the next day
-const SIZE = Number(opt("size", 10)), PACE = Number(opt("pace", 180)), CONC = Math.max(1, Number(opt("conc", 3)));
+const SIZE = Number(opt("size", 10)), PACE = Number(opt("pace", 200)), CONC = Math.max(1, Number(opt("conc", 3)));
 const CACHE = opt("cache", ".binance-sharp"), LIST = process.argv.includes("--list");
 const THRESHOLDS = [1, 2, 4], STALE_MS = 5000, DELAY_MS = 250, FILL_WINDOW_MS = 2000, TAIL_MS = 125000;
 if (!(SINCE < UNTIL)) { console.error("::error::--since must be before --until (and Binance publishes a day's file the next day)"); process.exit(2); }
@@ -39,18 +39,27 @@ mkdirSync(join(CACHE, "ticks"), { recursive: true });
 // ---- Kalshi, public ------------------------------------------------------
 const B = "https://api.elections.kalshi.com/trade-api/v2";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let requests = 0, nextAt = 0;
+let requests = 0, refused = 0, nextAt = 0;
+// One shared clock for every worker: Kalshi holds an IP to ~5-6 requests a
+// second, and a 429 pauses ALL of them. Each worker backing off on its own
+// let the others keep hitting the limit, and on 2026-11-02 that cut a run
+// to ~1 useful request a second while its counter read ~6.
 async function get(path) {
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 8; i++) {
     const wait = Math.max(0, nextAt - Date.now()); nextAt = Math.max(Date.now(), nextAt) + PACE;
     await sleep(wait); requests++;
     let r;
     try { r = await fetch(B + path); } catch { await sleep(1000 * 2 ** i); continue; }
-    if (r.status === 429 || r.status >= 500) { await sleep(1500 * 2 ** i); continue; }
+    if (r.status === 429 || r.status >= 500) {
+      refused++;
+      const pause = Number(r.headers.get("retry-after")) * 1000 || Math.min(1000 * 2 ** i, 20000);
+      nextAt = Math.max(nextAt, Date.now() + pause);
+      continue;
+    }
     if (!r.ok) throw new Error(`GET ${path.slice(0, 90)} -> ${r.status} ${(await r.text()).slice(0, 160)}`);
     return r.json();
   }
-  throw new Error(`GET ${path.slice(0, 90)}: still refused after 7 tries`);
+  throw new Error(`GET ${path.slice(0, 90)}: still refused after 8 tries`);
 }
 const cutoff = await get("/historical/cutoff");
 const marketCut = Date.parse(cutoff.market_settled_ts), tradeCut = Date.parse(cutoff.trades_created_ts);
@@ -184,7 +193,7 @@ const line = (label, ys) => {
   const paid = fl.length ? fl.reduce((a, r) => a + r.price, 0) / fl.length : null;
   return `   ${label.padEnd(12)} ${String(ys.length).padStart(7)} ${String(fl.length).padStart(7)} ${String(ms.length).padStart(6)} ${String(un.length).padStart(7)}  ${pct(fl.length ? fl.filter(r => r.won).length / fl.length : null).padStart(6)} ${pct(ms.length ? ms.filter(r => r.won).length / ms.length : null).padStart(9)}  ${paid == null ? "  —  " : paid.toFixed(3)} ${cents(S?.perCtr).padStart(9)} ${tt(S?.t).padStart(6)}  ${cents(S?.earlyPerCtr).padStart(8)} ${cents(S?.latePerCtr).padStart(8)}  ${cents(W?.perCtr).padStart(8)}`;
 };
-console.log(`\n${requests} Kalshi requests; ${noTicks} windows with no Binance ticks in their final two minutes`);
+console.log(`\n${requests} Kalshi requests (${refused} refused and retried); ${noTicks} windows with no Binance ticks in their final two minutes`);
 console.log("   cut           orders  filled missed unknown  won(f) won(miss)  paid    per ctr t(day)   earlier    later  1c worse");
 for (const thr of THRESHOLDS) console.log(line(`${thr}bp`, rows.filter(r => r.thr === thr)));
 for (const mo of [...new Set(rows.map(r => r.month))].sort()) console.log(line(`1bp ${mo}`, rows.filter(r => r.thr === 1 && r.month === mo)));
