@@ -345,6 +345,27 @@ included** — a ~10s refresh every minute is ~43k runs and blows through
 it; every 5 minutes is ~8.6k runs and fits. Supabase's 5GB egress is the
 next ceiling after that.
 
+### Sports board (`/sports`, `/api/sports-board`)
+
+The sports scanner runs on its OWN server, not the recorder box, which
+has 1GB against a scan's ~700MB peak. It rewrites `data.json` every 5
+minutes as `{ scannedAt, rows, arbs }`.
+- **The site never touches the odds feed or its key.** `/api/sports-board`
+  fetches `SPORTS_BOARD_URL`, with `SPORTS_BOARD_TOKEN` as a bearer if
+  set; both are server-only, never `NEXT_PUBLIC_`.
+- **What passes is a whitelist** (`lib/sportsBoard.js`). The feed's
+  license allows showing derived results and forbids passing on the raw
+  feed, so a field the scanner adds later reaches nobody until it is
+  named there.
+- **Dropped on purpose:** the scanner's bankroll `stake`, its research
+  `lead` tag, its `source`, and any non-https link.
+- **A body that is not a board is a 502,** never an empty board.
+- **The page states the measured caveat:** picks have won ~2 points less
+  often than the consensus said, so under +2% is no edge. It explains
+  every flag, and goes amber when the scan is over 15 minutes old.
+- **Not linked from the home page** until the scanner is connected.
+  Per-user accounts and bet tracking are not built yet.
+
 ### Search (`/api/search`)
 
 The grid answers "what did we find". Search answers "what about this
@@ -1208,6 +1229,39 @@ $0.21 from Kalshi's strike (p90 $0.68).
   positive in both halves: $100-150 at 10 min, +2.27c, t 1.17
   (+2.80c, t 1.51, on the wildest third). The $150-200 and $200+ cells
   next to it lose, so it is one cell in about forty, not a finding.
+  **Since July, on stand-ins: about break-even before October (measured
+  2026-11-02).** The archive starts 2026-09-30, so
+  `scripts/m15-binance-sharp.mjs` replaces both inputs with public data.
+  - **Index:** Binance BTCUSDT trades (data.binance.vision, free), sampled
+    at 5Hz, stand in for BRTI.
+  - **Book and fill:** Kalshi's public trade tape, read only around each
+    event (`decideOnTape`, `lib/tapeBook.js`). Bought at the last print
+    of our side; filled if the first print 250ms-2.25s later is at or
+    under seen +1c.
+
+  **October calibration**, against source=index (run 41459024157,
+  10-03..11-01, BRTI and the recorded book). Book: 637 1bp decisions,
+  75% filled, +4.60c, t 2.54. Stand-in: 499 decisions, 58% filled, +7.03c,
+  t 4.00.
+  - **Same window, same side** (390 windows): book +11.3c, stand-in
+    +10.3c. The tape is a fair stand-in for the book.
+  - **Binance is the weak half.** It misses 174 of BRTI's decisions,
+    which netted about 0 on the book, and takes the other side on 73
+    shared windows. Those 73 lost 16.6c a contract on the book against
+    3.7c on the stand-in.
+  - **So the stand-in reads about 2.4c high.**
+
+  | 1bp, stand-in | decisions | filled | per ctr | t |
+  |---|---|---|---|---|
+  | July | 405 | 221 | -1.69c | -0.60 |
+  | August | 457 | 236 | +3.89c | 1.51 |
+  | September (to 10-02) | 700 | 411 | -0.21c | -0.08 |
+  | October (to 11-01) | 499 | 287 | +7.03c | 4.00 |
+
+  Less the ~2.4c, July-September was about break-even or a small loss.
+  October was the rule's best month by far, and the 2026-10-21 finding
+  came from inside it. That fits the out-of-sample re-test since 10-22
+  (~+2c) and says nothing for a larger size.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
