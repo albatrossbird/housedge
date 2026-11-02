@@ -1341,6 +1341,25 @@ the "a venue does not publish X" mistake this file keeps recording.
 won, 0.880 paid, +2.35c a contract (t 1.5). The trade tape found 223
 trades, 90.6% won, 0.874 paid, +2.46c (t 1.58).
 
+**p75 over 4 months, 2026-07-01 to 11-01, 10 contracts (trade tape):**
+
+| | trades | won | per ctr | t | halves | 1c worse |
+|---|---|---|---|---|---|---|
+| KXBTC15M | 2,057 | 89.5% | +1.53c | 2.58 | +1.40c / +1.65c | +0.59c |
+| KXETH15M | 1,712 | 88.0% | +0.48c | 0.64 | +0.10c / +0.82c | -0.47c |
+| KXSOL15M | 1,771 | 87.9% | +0.18c | 0.22 | +0.50c / -0.14c | -0.77c |
+| KXXRP15M | 1,767 | 87.3% | -0.84c | -1.14 | -1.04c / -0.63c | -1.78c |
+| KXDOGE15M | 1,750 | 85.9% | -1.68c | -1.95 | +0.17c / -3.45c | -2.63c |
+
+Bitcoin's late favourite holds over four months, but at about half the
+October figure. By month it was +2.50c, +0.52c, +0.43c and +2.99c. Its
+edge is in the cheapest favourites: 75-85c made +3.68c (t 2.78, both
+halves positive), while 92-97c made -0.10c. That split was found on
+this data, so it is a candidate to re-test, not a rule change. The four
+other coins together make about -0.5c over 7,000 trades: the favourite
+wins as often as its price plus the fee, with no edge. Retail chatter
+in a market's comments did not predict an edge.
+
 #### The price path is the perishable half
 
 A settled market reports only its last price, so *"what was this quoted
