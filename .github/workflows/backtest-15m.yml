@@ -24,8 +24,10 @@ name: Backtest 15-minute strategies
 # source=altsharp: scripts/m15-alt-sharp.mjs — the sharp-move rule on
 # ETH/SOL/XRP/DOGE against each coin's own 5Hz CF index, with the touch
 # and fill from Kalshi's public trade tape; KXBTC15M through the same
-# path is the control. days: YYYY-MM-DD or YYYY-MM-DD..YYYY-MM-DD (30 max).
-# Reads Kalshi at ~10 requests a second, so it gets a longer timeout.
+# path is the control. days: YYYY-MM-DD or YYYY-MM-DD..YYYY-MM-DD (30 max);
+# series: the coins (two or three a run: Kalshi allows ~6 requests a
+# second, ~3 a window). The index tails are cached per span of days, so
+# only the first run over a span reads Storage.
 # source=sizes: scripts/archive-size.mjs — the stream archives' size per
 # hour and day from the Storage listing (m15/, m15x/, pmus15/), and which
 # series the newest m15x/ file holds. Downloads one file.
@@ -90,6 +92,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # altsharp: the index tails read from Storage are kept per span of
+      # days, so a second run over the same days (other coins) reads none.
+      - name: Restore altsharp index ticks
+        if: ${{ github.event.inputs.source == 'altsharp' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: .altsharp-ticks.json.gz
+          key: altsharp-ticks-${{ github.event.inputs.days }}-${{ github.run_id }}
+          restore-keys: altsharp-ticks-${{ github.event.inputs.days }}-
       - name: Backtest
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -120,9 +131,9 @@ jobs:
           fi
           if [ "$SOURCE" = "altsharp" ]; then
             if [[ "$DAYS" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})\.\.([0-9]{4}-[0-9]{2}-[0-9]{2})$ ]]; then
-              node --max-old-space-size=8192 scripts/m15-alt-sharp.mjs "--since=${BASH_REMATCH[1]}" "--until=${BASH_REMATCH[2]}" "--size=$SIZE"
+              node --max-old-space-size=8192 scripts/m15-alt-sharp.mjs "--since=${BASH_REMATCH[1]}" "--until=${BASH_REMATCH[2]}" "--size=$SIZE" "--series=${SERIES// /,}" --ticks=.altsharp-ticks.json.gz
             elif [[ "$DAYS" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-              node --max-old-space-size=8192 scripts/m15-alt-sharp.mjs "--since=$DAYS" "--size=$SIZE"
+              node --max-old-space-size=8192 scripts/m15-alt-sharp.mjs "--since=$DAYS" "--size=$SIZE" "--series=${SERIES// /,}" --ticks=.altsharp-ticks.json.gz
             else
               echo "::error::altsharp takes days as YYYY-MM-DD or YYYY-MM-DD..YYYY-MM-DD"; exit 2
             fi
@@ -169,6 +180,12 @@ jobs:
           else
             node "$SCRIPT" "--days=$DAYS" "--size=$SIZE" "--strategies=$STRATEGIES" $EXTRA $SERIES
           fi
+      - name: Save altsharp index ticks
+        if: ${{ always() && github.event.inputs.source == 'altsharp' && hashFiles('.altsharp-ticks.json.gz') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .altsharp-ticks.json.gz
+          key: altsharp-ticks-${{ github.event.inputs.days }}-${{ github.run_id }}
       - name: Upload the rule file's actions
         if: ${{ always() && github.event.inputs.source == 'rulebook' }}
         uses: actions/upload-artifact@v4

@@ -68,12 +68,14 @@ console.log("m15-alt-sharp.mjs end to end");
     };
     process.env.SUPABASE_URL = "https://fake.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_fake";
-    process.argv.push("--series=KXETH15M", "--since=${iso(close - 86400000).slice(0, 10)}", "--pace=0", "--conc=1");
+    process.argv.push("--series=KXETH15M", "--since=${iso(close - 86400000).slice(0, 10)}", "--pace=0", "--conc=1", ...(process.env.EXTRA ? process.env.EXTRA.split(" ") : []));
     await import(${JSON.stringify(join(new URL(".", import.meta.url).pathname, "m15-alt-sharp.mjs"))});
   `);
-  let text, code = 0;
-  try { text = execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
-  catch (e) { code = e.status; text = String(e.stdout) + String(e.stderr); }
+  const run = (extra = "") => {
+    try { return { code: 0, text: execFileSync(process.execPath, [h], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, EXTRA: extra } }) }; }
+    catch (e) { return { code: e.status, text: String(e.stdout) + String(e.stderr) }; }
+  };
+  const { text, code } = run();
   ok(code === 0, "runs", text.slice(-1500));
   ok(/KXETH15M\s+ETHUSD_RTI\s+1 windows rebuilt, 1 on Kalshi's side/.test(text), "the ETH index is found and rebuilds the settled side", text.match(/A\. CHECK[\s\S]*?\n\n/)?.[0]);
   ok(!/KXETH15M\s+SOLUSD_RTI/.test(text), "another coin's index is never a candidate");
@@ -82,6 +84,11 @@ console.log("m15-alt-sharp.mjs end to end");
   // fills. 10 x (1 - 0.51) - fee ceil(0.07 x 10 x .51 x .49) = 4.90 - 0.1750.
   ok(/KXETH15M\s+1bp\s+1\s+1\s+0\s+0\s+100\.0%\s+—\s+0\.510\s+\+47\.25c/.test(text), "1bp: one order, filled at the next print, +47.25c a contract", text.match(/D\. BUY[\s\S]*?Passed/)?.[0]);
   ok(/KXETH15M\s+4bp\s+0/.test(text), "a 3.3bp move is not a 4bp event");
+  // --ticks: the first run saves the tails, the second reads them instead of Storage.
+  const tf = join(dir, "ticks.json.gz"), a = run(`--ticks=${tf}`), b = run(`--ticks=${tf}`);
+  const dOf = t => t.match(/D\. BUY[\s\S]*?READING/)?.[0];
+  ok(a.code === 0 && b.code === 0 && /no archive download/.test(b.text) && !/no archive download/.test(a.text), "a saved tick file is read on the second run", b.text.slice(-800));
+  ok(dOf(a.text) && dOf(a.text) === dOf(b.text) && dOf(a.text) === dOf(text), "and decides exactly as the archive did");
 }
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
