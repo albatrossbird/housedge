@@ -1262,6 +1262,36 @@ $0.21 from Kalshi's strike (p90 $0.68).
   October was the rule's best month by far, and the 2026-10-21 finding
   came from inside it. That fits the out-of-sample re-test since 10-22
   (~+2c) and says nothing for a larger size.
+  **On the other coins' own indices it does not travel (measured
+  2026-11-02).** `scripts/m15-alt-sharp.mjs` (workflow `source:
+  altsharp`) runs the same decider unchanged on each coin's 5Hz CF index
+  from the m15/ archive.
+  - **Which index:** the one whose rebuilt settlement lands on Kalshi's
+    side: ETH 99.8%, SOL 99.8%, DOGE 99.6%, XRP 98.8%.
+  - **Book and fill:** Kalshi's trade tape, since the altcoin books were
+    not recorded before m15c/.
+  - **Days and runs:** 10-03..11-01, runs 41509329799, 41528262603 and
+    41528267234.
+  - **Control:** KXBTC15M through the same tape reads +5.52c, t 3.16
+    (652 decisions), against the recorded book's +4.60c, t 2.54 (637).
+    So the tape reads about 0.9c high.
+
+  | 1bp, tape | decisions | filled | won filled / missed | per ctr | t | halves |
+  |---|---|---|---|---|---|---|
+  | KXETH15M | 723 | 505 | 37.6% / 56.7% | -5.44c | -3.63 | -3.96c / -6.77c |
+  | KXSOL15M | 700 | 419 | 45.8% / 60.9% | +3.73c | 2.19 | +6.94c / +1.42c |
+  | KXXRP15M | 675 | 397 | 44.3% / 61.4% | +0.11c | 0.06 | -0.89c / +1.05c |
+  | KXDOGE15M | 760 | 315 | 40.6% / 58.5% | -5.72c | -3.02 | -4.97c / -6.41c |
+
+  - **Misses beat fills on every coin.** The order fills when the move is
+    about to fade: ETH and DOGE fills lose 5-6c a contract at t below -3.
+  - **SOL alone is positive.** About +2.8c less the tape's 0.9c, both
+    halves positive, +2.72c at 1c worse. But it is one coin of four,
+    chosen after the fact. It is a candidate to re-run on November's
+    days (`days` from 2026-11-02), not a rule to trade.
+  - **Cost:** the trade tape is read only around events
+    (`decideOnTape`). Kalshi holds a runner to ~5 requests a second, so
+    two coins fit a 150-minute run, about 90 minutes each pair.
 
 **Priced vs won, EV, Sharpe, Kelly** (`lib/m15Stats.js`, printed under
 every series table by both backtests and the daily report). Entry price
