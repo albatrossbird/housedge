@@ -345,6 +345,27 @@ included** — a ~10s refresh every minute is ~43k runs and blows through
 it; every 5 minutes is ~8.6k runs and fits. Supabase's 5GB egress is the
 next ceiling after that.
 
+### Sports board (`/sports`, `/api/sports-board`)
+
+The sports scanner runs on its OWN server, not the recorder box, which
+has 1GB against a scan's ~700MB peak. It rewrites `data.json` every 5
+minutes as `{ scannedAt, rows, arbs }`.
+- **The site never touches the odds feed or its key.** `/api/sports-board`
+  fetches `SPORTS_BOARD_URL`, with `SPORTS_BOARD_TOKEN` as a bearer if
+  set; both are server-only, never `NEXT_PUBLIC_`.
+- **What passes is a whitelist** (`lib/sportsBoard.js`). The feed's
+  license allows showing derived results and forbids passing on the raw
+  feed, so a field the scanner adds later reaches nobody until it is
+  named there.
+- **Dropped on purpose:** the scanner's bankroll `stake`, its research
+  `lead` tag, its `source`, and any non-https link.
+- **A body that is not a board is a 502,** never an empty board.
+- **The page states the measured caveat:** picks have won ~2 points less
+  often than the consensus said, so under +2% is no edge. It explains
+  every flag, and goes amber when the scan is over 15 minutes old.
+- **Not linked from the home page** until the scanner is connected.
+  Per-user accounts and bet tracking are not built yet.
+
 ### Search (`/api/search`)
 
 The grid answers "what did we find". Search answers "what about this
