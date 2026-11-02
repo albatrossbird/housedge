@@ -740,11 +740,14 @@ late-favourite rules on them (`source: archive`, `strategy=paper`) after
 
 - **Settlement prices, free** (`m15_settlements`, migration `0032`,
   written by the backfill): Kalshi's `expiration_value` on a settled
-  market IS Pyth's price at that close, beside `floor_strike`. **Kalshi
-  lists settled markets for only ~10 weeks** (measured 2026-10-26:
-  KXBTC15M's oldest is 2026-08-19, and its 6,461 matched the "6,458 back
-  to 2026-06-30" of September because the window rolls), so this table
-  is what keeps them. Pyth's own API needs a paid key since 2026-08-26
+  market IS Pyth's price at that close, beside `floor_strike`. **This
+  file said Kalshi lists settled markets for only ~10 weeks. That was
+  wrong.** `/markets` holds the LIVE tier only. Older markets, and their
+  trades, move to `/historical/markets` and `/historical/trades`, behind
+  a cutoff that `GET /historical/cutoff` reports (2026-09-02 on
+  2026-11-02). A KXBTC15M window from 2026-07-01 answers there with every
+  trade. The backfill reads only the live tier, so this table is still
+  where the settlement prices are easiest to read. Pyth's own API needs a paid key since 2026-08-26
   (Hermes answers `401`; Starter $500 is crypto-only, metals from
   $2,500) and Kalshi's `pyth_value` channel is $1,000/month (7 days
   free). Median volume per window, 7 days to 2026-10-26: BTC 3.1M,
@@ -1314,8 +1317,48 @@ on day one. `backfill-15m.yml` pulls them daily and upserts on ticker,
 so a re-run is a no-op.
 
 This corrects an earlier claim in this file's history that "you cannot
-backtest what you never recorded". True of the price PATH, wrong of
-outcomes.
+backtest what you never recorded". True of the order BOOK, wrong of
+outcomes, and wrong of TRADES too.
+
+#### Every trade is public too: the trade-tape backtest
+
+Kalshi publishes every trade on every market, with no key. Each trade
+carries its time to the microsecond, price, size and taker side. Recent
+trades are at `/markets/trades`, older ones at `/historical/trades`, and
+both filter by `min_ts`/`max_ts`. No order-book history is published.
+`scripts/m15-tape-backtest.mjs` (`lib/m15Tape.js`,
+`scripts/m15-tape.test.mjs`) decides a rule from those trades. p75 takes
+the earliest taker buy of a side at 75-97c, 15-45s before the close, and
+holds it to settlement. It needs no Supabase and reads any series
+Kalshi lists, as far back as Kalshi keeps it. It is an upper bound: the
+spread is not checked, the fill is assumed at the printed price, and a
+window nobody bought in is not decided (about 15% are decided). It was
+missed for months because nothing asked the trades endpoint, which is
+the "a venue does not publish X" mistake this file keeps recording.
+
+**Checked against the recorded book first.** On KXBTC15M, 10-18 to
+11-02, the archive backtest (run 41382145909) found 206 trades, 90.8%
+won, 0.880 paid, +2.35c a contract (t 1.5). The trade tape found 223
+trades, 90.6% won, 0.874 paid, +2.46c (t 1.58).
+
+**p75 over 4 months, 2026-07-01 to 11-01, 10 contracts (trade tape):**
+
+| | trades | won | per ctr | t | halves | 1c worse |
+|---|---|---|---|---|---|---|
+| KXBTC15M | 2,057 | 89.5% | +1.53c | 2.58 | +1.40c / +1.65c | +0.59c |
+| KXETH15M | 1,712 | 88.0% | +0.48c | 0.64 | +0.10c / +0.82c | -0.47c |
+| KXSOL15M | 1,771 | 87.9% | +0.18c | 0.22 | +0.50c / -0.14c | -0.77c |
+| KXXRP15M | 1,767 | 87.3% | -0.84c | -1.14 | -1.04c / -0.63c | -1.78c |
+| KXDOGE15M | 1,750 | 85.9% | -1.68c | -1.95 | +0.17c / -3.45c | -2.63c |
+
+Bitcoin's late favourite holds over four months, but at about half the
+October figure. By month it was +2.50c, +0.52c, +0.43c and +2.99c. Its
+edge is in the cheapest favourites: 75-85c made +3.68c (t 2.78, both
+halves positive), while 92-97c made -0.10c. That split was found on
+this data, so it is a candidate to re-test, not a rule change. The four
+other coins together make about -0.5c over 7,000 trades: the favourite
+wins as often as its price plus the fee, with no edge. Retail chatter
+in a market's comments did not predict an edge.
 
 #### The price path is the perishable half
 
