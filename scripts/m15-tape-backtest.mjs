@@ -98,8 +98,13 @@ for (const series of SERIES) {
   const markets = await settledMarkets(series);
   const xs = [];
   let printedSize = 0;
+  let fetched = 0;
   for (const m of markets) {
-    if (!cache[m.ticker]) cache[m.ticker] = await windowTrades(m);
+    if (!cache[m.ticker]) {
+      cache[m.ticker] = await windowTrades(m);
+      // A pull back to July is hours of requests: keep what is fetched.
+      if (++fetched % 500 === 0) { writeFileSync(cacheFile, JSON.stringify(cache)); console.error(`  ${series}: ${fetched} windows fetched`); }
+    }
     const trades = cache[m.ticker].map(([t, side, price, count]) => ({ t, side, price, count }));
     const e = tapeEntry(trades, m.close, RULE);
     if (!e) continue;
