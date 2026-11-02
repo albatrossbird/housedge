@@ -1360,6 +1360,58 @@ other coins together make about -0.5c over 7,000 trades: the favourite
 wins as often as its price plus the fee, with no edge. Retail chatter
 in a market's comments did not predict an edge.
 
+#### No other simple rule works on the coins either (grid, 2026-11-02)
+
+`--grid` on `scripts/m15-tape-backtest.mjs` tested 24 cells per coin:
+four decision points (10m, 5m, 2m and 45s before the close) times six
+price bands, three below 50c (the underdog) and three above (the
+favourite). Every cell holds 10 contracts to settlement.
+- **Prices at 10m, 5m and 2m** are Kalshi's touch at that moment, from its
+  one-minute candlesticks: YES is bought at the ask and NO at 1 minus the
+  bid, so the spread is included.
+  - `/historical/markets/<t>/candlesticks` serves windows before the
+    cutoff.
+  - `/markets/candlesticks?market_tickers=` serves windows after it. The
+    batch is capped at 10,000 candles, counted as markets times the minutes
+    spanned, which works out to about 24 windows a request.
+- **Prices at 45s** are p75's: the first taker buy of each side, from the
+  trade tape.
+- **Why candles and not the tape:** reading the tape at three more points
+  would have cost ~176k requests, and Kalshi holds one IP to about 5
+  requests a second.
+- **The candles were checked against the tape** at 10m. Each candle price
+  was compared with the first print of that side in the next 15s.
+  - BTC: 97% within 1c.
+  - Altcoins: median gap 1c, 54-69% within 1c, and prints averaged
+    0.5-0.8c cheaper than the candle ask.
+  - So on the altcoins the candle price is, if anything, slightly
+    pessimistic. Adding that back changes no verdict below.
+
+The choosing rule was fixed in code before the run:
+- On July-August (train), take the cell with the highest t (by day) among
+  cells with 150+ trades.
+- Score only that cell on September-October (test).
+- It passes if the test t is at least 2 and it is still positive at 1c
+  worse.
+
+| | chosen on train | train | test | verdict |
+|---|---|---|---|---|
+| KXETH15M | 10m favourite 80-97c | +1.06c, t 1.40 | -0.76c, t -0.98 | FAIL |
+| KXSOL15M | 45s favourite 80-97c | +2.35c, t 2.07 | +0.11c, t 0.09 | FAIL |
+| KXXRP15M | 45s favourite 65-80c | +6.17c, t 2.45 | -2.79c, t -0.64 | FAIL |
+| KXDOGE15M | 2m underdog 20-35c | +1.14c, t 0.54 | -0.71c, t -0.36 | FAIL |
+| KXBTC15M (reference) | 10m favourite 80-97c | +1.49c, t 1.74 | +0.03c, t 0.03 | FAIL |
+
+Nearly every cell on every coin loses about the fee in both halves, which
+means the coins' 15-minute markets are priced about right. Two BTC cells
+were positive in the test half. Neither was chosen, so they are
+reference only, not a second chance:
+- **45s favourite 80-97c: +2.65c, t 3.05.** This is p75's own territory
+  and agrees with it.
+- **2m underdog 3-20c: +2.12c, t 2.78.** Train was only +0.83c (t 1.07).
+
+The 2m underdog cell is something to re-test on November, nothing more.
+
 #### The price path is the perishable half
 
 A settled market reports only its last price, so *"what was this quoted

@@ -29,7 +29,7 @@ import { dayStats } from "../lib/m15Index.js";
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 const SERIES = "KXBTC15M";
 const SINCE = Date.parse(`${opt("since", "2026-10-01")}T00:00:00Z`);
-const UNTIL = Math.min(opt("until") ? Date.parse(`${opt("until")}T00:00:00Z`) : Infinity, Math.floor((Date.now() - 86400000 * 1.2) / 86400000) * 86400000);
+const UNTIL = Math.min(opt("until") ? Date.parse(`${opt("until")}T00:00:00Z`) : Infinity, Math.floor((Date.now() - 4 * 3600000) / 86400000) * 86400000);   // a day's file is published ~02:00 UTC the next day
 const SIZE = Number(opt("size", 10)), PACE = Number(opt("pace", 180)), CONC = Math.max(1, Number(opt("conc", 3)));
 const CACHE = opt("cache", ".binance-sharp"), LIST = process.argv.includes("--list");
 const THRESHOLDS = [1, 2, 4], STALE_MS = 5000, DELAY_MS = 250, FILL_WINDOW_MS = 2000, TAIL_MS = 125000;
