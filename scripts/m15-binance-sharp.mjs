@@ -27,7 +27,10 @@ import { kalshiTakerFee } from "../lib/fees.js";
 import { dayStats } from "../lib/m15Index.js";
 
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
-const SERIES = "KXBTC15M";
+// --series=KXSOL15M --symbol=SOLUSDT runs another coin on its own Binance pair.
+const SERIES = String(opt("series", "KXBTC15M")).toUpperCase();
+const SYMBOL = String(opt("symbol", "BTCUSDT")).toUpperCase();
+if (!/^KX[A-Z]+15M$/.test(SERIES) || !/^[A-Z]+USDT$/.test(SYMBOL)) { console.error("::error::--series=KX<COIN>15M --symbol=<COIN>USDT"); process.exit(2); }
 const SINCE = Date.parse(`${opt("since", "2026-10-01")}T00:00:00Z`);
 const UNTIL = Math.min(opt("until") ? Date.parse(`${opt("until")}T00:00:00Z`) : Infinity, Math.floor((Date.now() - 4 * 3600000) / 86400000) * 86400000);   // a day's file is published ~02:00 UTC the next day
 const SIZE = Number(opt("size", 10)), PACE = Number(opt("pace", 200)), CONC = Math.max(1, Number(opt("conc", 3)));
@@ -92,12 +95,12 @@ async function settledWindows() {
 // One day's file -> { closeMs: [[t, v], ...] } for every window closing that
 // day, sampled at 5Hz over its final TAIL_MS. Cached; the zip is deleted.
 async function dayTicks(day, closes) {
-  const file = join(CACHE, "ticks", `${day}.json`);
+  const file = join(CACHE, "ticks", `${SYMBOL}-${day}.json`);   // per pair: two coins can share a cache
   if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
   // Downloaded data goes in its own directory, read only as data.
   const dl = join(CACHE, "dl"); mkdirSync(dl, { recursive: true });
-  const zip = join(dl, `BTCUSDT-aggTrades-${day}.zip`);
-  const url = `https://data.binance.vision/data/spot/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-${day}.zip`;
+  const zip = join(dl, `${SYMBOL}-aggTrades-${day}.zip`);
+  const url = `https://data.binance.vision/data/spot/daily/aggTrades/${SYMBOL}/${SYMBOL}-aggTrades-${day}.zip`;
   for (let i = 0; ; i++) {
     const r = await fetch(url);
     if (r.ok) { writeFileSync(zip, Buffer.from(await r.arrayBuffer())); break; }
@@ -151,7 +154,7 @@ async function decide(w, ticks, thr, seg) {
 const windows = await settledWindows();
 const byDay = new Map();
 for (const w of windows) { if (!byDay.has(w.day)) byDay.set(w.day, []); byDay.get(w.day).push(w); }
-console.log(`SHARP-MOVE ON KXBTC15M, BINANCE BTCUSDT AS THE INDEX, KALSHI'S TAPE AS THE BOOK — ${new Date(SINCE).toISOString().slice(0, 10)} -> ${new Date(UNTIL).toISOString().slice(0, 10)}, ${windows.length} settled windows, ${SIZE} contracts`);
+console.log(`SHARP-MOVE ON ${SERIES}, BINANCE ${SYMBOL} AS THE INDEX, KALSHI'S TAPE AS THE BOOK — ${new Date(SINCE).toISOString().slice(0, 10)} -> ${new Date(UNTIL).toISOString().slice(0, 10)}, ${windows.length} settled windows, ${SIZE} contracts`);
 console.log(`  Index: the last Binance trade sampled every 200ms. Touch: the last print of each side within ${STALE_MS / 1000}s. Fill: the first print of our side ${DELAY_MS}ms-${(DELAY_MS + FILL_WINDOW_MS) / 1000}s later, at or under seen +1c.`);
 const rows = [];
 let noTicks = 0;
