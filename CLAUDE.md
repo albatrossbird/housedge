@@ -400,7 +400,13 @@ are in [`docs/accounts-setup.md`](docs/accounts-setup.md); the migration is
     gambling site, so it was dropped.
   - The server still refuses a request without `agree` and stores when it
     was given (`agreed_18_at`).
-  - `/terms` and `/privacy` must exist before `ACCOUNTS_MODE=on`.
+  - `/terms` and `/privacy` are drafts in plain language, written around
+    what the code collects and the services it uses. The facts they rest
+    on (entity, contact email, state of formation, effective date) live in
+    `lib/legal.js`. While `state` is null the governing-law clause shows a
+    visible blank rather than a guess. Update the privacy page whenever a
+    new collector or provider is added (analytics, a new email tool), and
+    have a lawyer review both before paid plans launch.
 - **The email link lands on a button** (`/auth/confirm`), not on an
   automatic sign-in. Mail scanners open every link, and a GET that spent
   the token would leave the real click with "expired".

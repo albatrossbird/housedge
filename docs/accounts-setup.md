@@ -90,9 +90,10 @@ In `preview`, only allowlisted emails can sign in, and the public sports
 board stays whole for everyone else. `on` opens sign-in to everyone and
 makes the public board the free view.
 
-**Before `on`:** `/terms` and `/privacy` must exist. The sign-up page says
-"By continuing, you confirm you are 18 or older and agree to the Terms and
-Privacy Policy", and links to both.
+**Before `on`:** fill in `state` (where the LLC was formed) in
+`lib/legal.js`, which sets the governing-law clause on `/terms`. Create
+the `support@marketslap.com` mailbox the Terms and Privacy pages name.
+Have a lawyer read both pages.
 
 ## 7. Try it
 
