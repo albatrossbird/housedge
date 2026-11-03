@@ -1,10 +1,17 @@
-// Sign in or create an account: Google, or an emailed link (with a code in
-// the same email, for opening it on a different device). No passwords.
+// Sign up (or log back in: the same buttons do both). Google, or an emailed
+// link with a code in the same email for opening it on another device. No
+// passwords.
+//
+// Age and terms are agreed by pressing a button, with the line saying so
+// directly under it — the standard "by continuing" pattern. A checkbox that
+// talks about betting ages, above the buttons, made a sign-up page read like
+// a gambling site's. The server still requires the agreement on every
+// request (agree: true / ?agree=1) and stores when it was given.
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import AccountShell, { ACCENT, T, input, primary, secondary } from "../components/AccountShell.js";
 
-const ERRORS = { agree: "Please confirm you are 18 or older." };
+const ERRORS = { agree: "You must be 18 or older to use MarketSlap." };
 
 async function post(url, body) {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -24,12 +31,13 @@ function GoogleMark() {
   );
 }
 
-export default function SignIn() {
+const link = { color: T.muted, textDecoration: "underline" };
+
+export default function SignUp() {
   const router = useRouter();
   const next = typeof router.query.next === "string" ? router.query.next : "/sports";
   const [me, setMe] = useState(null);
   const [email, setEmail] = useState("");
-  const [agree, setAgree] = useState(false);
   const [sentTo, setSentTo] = useState(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -39,11 +47,10 @@ export default function SignIn() {
   useEffect(() => { if (router.query.error) setError(ERRORS[router.query.error] || String(router.query.error)); }, [router.query.error]);
   useEffect(() => { if (me?.user) router.replace(next); }, [me, next, router]);
 
-  async function send(e) {
+  async function send(e, to = email) {
     e?.preventDefault();
-    if (!agree) return setError(ERRORS.agree);
     setBusy(true); setError(null);
-    try { await post("/api/auth/send", { email, agree: true }); setSentTo(email.trim().toLowerCase()); }
+    try { await post("/api/auth/send", { email: to, agree: true }); setSentTo(to.trim().toLowerCase()); }
     catch (err) { setError(err.message); }
     setBusy(false);
   }
@@ -54,26 +61,19 @@ export default function SignIn() {
     catch (err) { setError(err.message); }
     setBusy(false);
   }
-  function google() {
-    if (!agree) return setError(ERRORS.agree);
-    window.location.assign(`/api/auth/google?agree=1&next=${encodeURIComponent(next)}`);
-  }
+  const google = () => window.location.assign(`/api/auth/google?agree=1&next=${encodeURIComponent(next)}`);
 
   if (me && !me.enabled) {
-    return <AccountShell title="Sign in"><h1 style={{ fontSize: 20, margin: 0 }}>Accounts are coming soon</h1>
+    return <AccountShell title="Sign up"><h1 style={{ fontSize: 20, margin: 0 }}>Accounts are coming soon</h1>
       <p style={{ color: T.muted, fontSize: 14, lineHeight: 1.5 }}>MarketSlap accounts are not open yet. Everything on the site is free to use in the meantime.</p></AccountShell>;
   }
 
   return (
-    <AccountShell title="Sign in">
+    <AccountShell title="Sign up">
       {!sentTo ? (
         <>
-          <h1 style={{ fontSize: 20, margin: "0 0 6px" }}>Sign in to MarketSlap</h1>
-          <p style={{ margin: "0 0 20px", color: T.muted, fontSize: 14 }}>New here? This creates your account. No password needed.</p>
-          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, lineHeight: 1.4, marginBottom: 18, cursor: "pointer" }}>
-            <input type="checkbox" checked={agree} onChange={e => { setAgree(e.target.checked); setError(null); }} style={{ marginTop: 2, width: 16, height: 16, accentColor: ACCENT }} />
-            <span>I am 18 or older, and I will only bet where it is legal for me (21 or older in most US states).</span>
-          </label>
+          <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>Create your free account</h1>
+          <p style={{ margin: "0 0 22px", color: T.muted, fontSize: 14 }}>Already have one? The same buttons log you in.</p>
           <button type="button" onClick={google} style={{ ...secondary, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
             <GoogleMark /> Continue with Google
           </button>
@@ -82,22 +82,25 @@ export default function SignIn() {
           </div>
           <form onSubmit={send}>
             <input type="email" required autoComplete="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} style={input} />
-            <button type="submit" disabled={busy} style={{ ...primary, marginTop: 10, opacity: busy ? 0.6 : 1 }}>{busy ? "Sending…" : "Email me a sign-in link"}</button>
+            <button type="submit" disabled={busy} style={{ ...primary, marginTop: 10, opacity: busy ? 0.6 : 1 }}>{busy ? "Sending…" : "Continue with email"}</button>
           </form>
+          <p style={{ margin: "18px 0 0", fontSize: 12, lineHeight: 1.5, color: T.muted, textAlign: "center" }}>
+            By continuing, you confirm you are 18 or older and agree to the <a href="/terms" style={link}>Terms</a> and <a href="/privacy" style={link}>Privacy Policy</a>.
+          </p>
         </>
       ) : (
         <>
           <h1 style={{ fontSize: 20, margin: "0 0 6px" }}>Check your email</h1>
           <p style={{ margin: "0 0 18px", color: T.muted, fontSize: 14, lineHeight: 1.5 }}>
-            We sent a sign-in link to <b style={{ color: T.text }}>{sentTo}</b>. Open it on this device, or type the code from the email here.
+            We sent a link to <b style={{ color: T.text }}>{sentTo}</b>. Open it on this device, or type the code from the email here.
           </p>
           <form onSubmit={verify}>
             <input inputMode="numeric" autoComplete="one-time-code" placeholder="Code" value={code} onChange={e => setCode(e.target.value)} style={{ ...input, letterSpacing: "0.2em", fontSize: 18, textAlign: "center" }} />
-            <button type="submit" disabled={busy || code.trim().length < 6} style={{ ...primary, marginTop: 10, opacity: busy || code.trim().length < 6 ? 0.6 : 1 }}>{busy ? "Signing in…" : "Sign in"}</button>
+            <button type="submit" disabled={busy || code.trim().length < 6} style={{ ...primary, marginTop: 10, opacity: busy || code.trim().length < 6 ? 0.6 : 1 }}>{busy ? "Signing in…" : "Continue"}</button>
           </form>
           <div style={{ marginTop: 16, fontSize: 13, color: T.muted, display: "flex", justifyContent: "space-between" }}>
             <button type="button" onClick={() => { setSentTo(null); setCode(""); setError(null); }} style={{ background: "none", border: 0, color: ACCENT, cursor: "pointer", padding: 0, fontFamily: "inherit", fontSize: 13 }}>Use a different email</button>
-            <button type="button" disabled={busy} onClick={() => { setEmail(sentTo); send(); }} style={{ background: "none", border: 0, color: ACCENT, cursor: "pointer", padding: 0, fontFamily: "inherit", fontSize: 13 }}>Send again</button>
+            <button type="button" disabled={busy} onClick={() => send(null, sentTo)} style={{ background: "none", border: 0, color: ACCENT, cursor: "pointer", padding: 0, fontFamily: "inherit", fontSize: 13 }}>Send again</button>
           </div>
         </>
       )}

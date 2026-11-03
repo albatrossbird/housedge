@@ -89,7 +89,7 @@ function LockedCard({ title, detail, signedIn }) {
         <div style={{ fontSize: 13, color: T.muted, marginTop: 2 }}>{detail}</div>
       </div>
       {signedIn ? <span style={{ fontSize: 13, color: T.muted }}>Paid plans launch soon</span>
-        : <a href="/signin?next=/sports" style={signLink}>Sign in →</a>}
+        : <a href="/signup?next=/sports" style={signLink}>Sign up free →</a>}
     </div>
   );
 }
@@ -212,7 +212,7 @@ export default function Sports() {
           <span style={{ fontSize: 15, fontWeight: 600 }}>Sports</span>
           {me?.enabled && (
             <span style={{ marginLeft: "auto" }}>
-              {me.user ? <a href="/account" style={{ ...signLink, color: T.muted, fontWeight: 500 }}>Account</a> : <a href="/signin?next=/sports" style={signLink}>Sign in</a>}
+              {me.user ? <a href="/account" style={{ ...signLink, color: T.muted, fontWeight: 500 }}>Account</a> : <a href="/signup?next=/sports" style={{ ...signLink, color: "#fff", background: ACCENT, borderRadius: 8, padding: "7px 14px" }}>Sign up</a>}
             </span>
           )}
         </div>

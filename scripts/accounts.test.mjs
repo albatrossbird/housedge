@@ -212,9 +212,9 @@ S.pkce["C1|V1"] = "u2";
 res = await run(callback, { query: { code: "C1" }, cookies: { ms_pkce: "V1", ms_agree: "2026-11-03T00:00:00Z", ms_next: "/account", ms_ref: "creator" } });
 ok(res.statusCode === 302 && res.location === "/account" && res.cookies().ms_at && S.profiles.find(p => p.id === "u2")?.referred_by === "CREATOR", "Google: the code is exchanged, the profile made with the referral, and the reader lands where they were going");
 res = await run(callback, { query: { code: "C1" }, cookies: { ms_next: "//evil.com" } });
-ok(res.statusCode === 302 && res.location.startsWith("/signin?error=") && !res.cookies().ms_at, "Google: no verifier, no session");
+ok(res.statusCode === 302 && res.location.startsWith("/signup?error=") && !res.cookies().ms_at, "Google: no verifier, no session");
 res = await run(callback, { query: { code: "C1" }, cookies: { ms_pkce: "WRONG" } });
-ok(res.location.startsWith("/signin?error="), "Google: a verifier that does not match is refused");
+ok(res.location.startsWith("/signup?error="), "Google: a verifier that does not match is refused");
 
 // referral cookie: first touch wins, only real codes
 reset();

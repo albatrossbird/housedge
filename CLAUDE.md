@@ -391,6 +391,16 @@ are in [`docs/accounts-setup.md`](docs/accounts-setup.md); the migration is
     on another device.
   - Google, through PKCE.
   - No passwords.
+- **The page is `/signup`** (`/signin` redirects there), and the same
+  buttons log a returning user in.
+- **Age and terms are agreed by pressing the button.** A line under the
+  buttons says "By continuing, you confirm you are 18 or older and agree to
+  the Terms and Privacy Policy".
+  - A betting-age checkbox above the buttons made the page read like a
+    gambling site, so it was dropped.
+  - The server still refuses a request without `agree` and stores when it
+    was given (`agreed_18_at`).
+  - `/terms` and `/privacy` must exist before `ACCOUNTS_MODE=on`.
 - **The email link lands on a button** (`/auth/confirm`), not on an
   automatic sign-in. Mail scanners open every link, and a GET that spent
   the token would leave the real click with "expired".

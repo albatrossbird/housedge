@@ -28,20 +28,29 @@ like spam, so it is not usable for real sign-ins.
 
 ## 3. Email templates
 
-Supabase -> **Authentication -> Emails -> Templates**. Set BOTH **Confirm
-signup** (first-time users get this one) and **Magic Link** (returning
-users get this one) to:
+Supabase -> **Authentication -> Emails -> Templates**. New users get
+**Confirm signup**; returning users get **Magic Link**. Both use the same
+link and code, and only the wording differs.
 
-Subject: `Your MarketSlap sign-in link`
+**Confirm signup**, subject `Confirm your MarketSlap account`:
 
 ```html
-<h2>Sign in to MarketSlap</h2>
-<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email">Sign in to MarketSlap</a></p>
-<p>Or enter this code on the sign-in page: <strong>{{ .Token }}</strong></p>
+<h2>Welcome to MarketSlap</h2>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email">Confirm your account</a></p>
+<p>Or enter this code on the sign-up page: <strong>{{ .Token }}</strong></p>
+<p>The link and code expire in an hour. If you did not sign up, you can ignore this email.</p>
+```
+
+**Magic Link**, subject `Your MarketSlap login link`:
+
+```html
+<h2>Log in to MarketSlap</h2>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email">Log in to MarketSlap</a></p>
+<p>Or enter this code on the sign-up page: <strong>{{ .Token }}</strong></p>
 <p>The link and code expire in an hour. If you did not ask for this, you can ignore this email.</p>
 ```
 
-The link opens a page with a "Sign in" button rather than signing in
+The link opens a page with a "Continue" button rather than signing in
 straight away. Mail scanners open every link in an email, and a link that
 signed in on open would be spent before you clicked it.
 
@@ -81,9 +90,13 @@ In `preview`, only allowlisted emails can sign in, and the public sports
 board stays whole for everyone else. `on` opens sign-in to everyone and
 makes the public board the free view.
 
+**Before `on`:** `/terms` and `/privacy` must exist. The sign-up page says
+"By continuing, you confirm you are 18 or older and agree to the Terms and
+Privacy Policy", and links to both.
+
 ## 7. Try it
 
-- `https://marketslap.com/signin`: try both email and Google.
+- `https://marketslap.com/signup`: try both email and Google.
 - `https://marketslap.com/account`: shows your plan.
 - Give yourself a plan to see the paid view (SQL editor):
   `update profiles set plan = 'pro' where email = 'you@example.com';`

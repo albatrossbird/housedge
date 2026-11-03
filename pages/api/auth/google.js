@@ -5,7 +5,7 @@ import { googleAuthorizeUrl, pkcePair } from "../../../lib/auth/gotrue.js";
 
 export default function handler(req, res) {
   if (accountsMode() === "off") return res.status(404).json({ error: "not found" });
-  if (req.query.agree !== "1") return res.redirect(302, "/signin?error=agree");
+  if (req.query.agree !== "1") return res.redirect(302, "/signup?error=agree");
   const { verifier, challenge } = pkcePair();
   const opts = { maxAge: 600, path: "/api/auth" };
   addCookie(res, serializeCookie(COOKIE.pkce, verifier, opts));
