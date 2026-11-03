@@ -278,6 +278,7 @@ export default function Sports() {
         <div style={{ marginTop: 24, fontSize: 11, lineHeight: 1.6, color: T.muted }}>
           <p style={{ margin: 0 }}>Information only, not betting advice. Prices move between scans, so check the venue before you bet, and only bet where it is legal for you.</p>
           <p style={{ margin: "4px 0 0" }}>MarketSlap is not affiliated with, endorsed by or operated by any venue shown here.</p>
+          <p style={{ margin: "8px 0 0" }}><a href="/terms" style={{ color: "inherit" }}>Terms</a> · <a href="/privacy" style={{ color: "inherit" }}>Privacy</a></p>
         </div>
       </div>
     </div>

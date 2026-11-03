@@ -2112,7 +2112,11 @@ export default function HouseEdge() {
             Information only, not financial or betting advice. Prices come from a scheduled read
             and can be out of date — always check the venue before you trade.
           </p>
-          <p style={{ margin: "8px 0 0" }}>© {new Date().getFullYear()} MarketSlap</p>
+          <p style={{ margin: "8px 0 0" }}>
+            © {new Date().getFullYear()} MarketSlap ·{" "}
+            <a href="/terms" style={{ color: "inherit" }}>Terms</a> ·{" "}
+            <a href="/privacy" style={{ color: "inherit" }}>Privacy</a>
+          </p>
         </div>
         </>
         )}
