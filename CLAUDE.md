@@ -403,8 +403,8 @@ are in [`docs/accounts-setup.md`](docs/accounts-setup.md); the migration is
   - `/terms` and `/privacy` are drafts in plain language, written around
     what the code collects and the services it uses. The facts they rest
     on (entity, contact email, state of formation, effective date) live in
-    `lib/legal.js`. While `state` is null the governing-law clause shows a
-    visible blank rather than a guess. Update the privacy page whenever a
+    `lib/legal.js`. MarketSlap LLC is a Virginia LLC, so Virginia law
+    governs. Update the privacy page whenever a
     new collector or provider is added (analytics, a new email tool), and
     have a lawyer review both before paid plans launch.
 - **The email link lands on a button** (`/auth/confirm`), not on an
