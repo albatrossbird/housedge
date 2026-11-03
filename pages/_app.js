@@ -1,8 +1,24 @@
 import Head from "next/head";
+import { useEffect } from "react";
+import { useRouter } from "next/router";
 
 import "@/styles/globals.css";
 
+// An affiliate link (?ref=CODE, on any page) is remembered server-side in an
+// httpOnly cookie, then dropped from the address bar so it is not shared on.
+// Nothing happens while accounts are off: the route answers 404.
+function useReferral() {
+  const router = useRouter();
+  useEffect(() => {
+    if (!router.isReady || typeof router.query.ref !== "string") return;
+    const { ref, ...rest } = router.query;
+    fetch("/api/auth/ref", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: ref }) }).catch(() => {});
+    router.replace({ pathname: router.pathname, query: rest }, undefined, { shallow: true, scroll: false });
+  }, [router.isReady]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 export default function App({ Component, pageProps }) {
+  useReferral();
   return (
     <>
       <Head>

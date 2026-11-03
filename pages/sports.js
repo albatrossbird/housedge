@@ -12,6 +12,11 @@
 //     disagreeing books, stale or small quotes), shown, never hidden;
 //   - the scan is up to 5 minutes old before a price is read, so the page
 //     says how old, and goes amber when the scanner stops updating.
+//
+// Accounts (ACCOUNTS_MODE, lib/auth/config.js): a signed-in reader reads
+// /api/sports-board?tier=member, cut to their plan on the server; everyone
+// else reads the public URL. What a plan does not unlock arrives as
+// `locked` counts only, never as the prices themselves.
 import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import { venueName, sportName } from "../lib/sportsBoard.js";
@@ -71,6 +76,24 @@ function OpenLink({ href }) {
   if (!href) return null;
   return <a href={href} target="_blank" rel="noopener noreferrer nofollow" style={{ color: ACCENT, fontSize: 13, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>Open ↗</a>;
 }
+const signLink = { color: ACCENT, fontSize: 14, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" };
+
+const sportCount = (bySport, sport) => (sport === "all" ? Object.values(bySport ?? {}).reduce((a, b) => a + b, 0) : bySport?.[sport] ?? 0);
+
+function LockedCard({ title, detail, signedIn }) {
+  return (
+    <div style={{ background: `${ACCENT}08`, border: `1px dashed ${ACCENT}66`, borderRadius: 10, padding: "16px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <span aria-hidden="true" style={{ fontSize: 18 }}>🔒</span>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
+        <div style={{ fontSize: 13, color: T.muted, marginTop: 2 }}>{detail}</div>
+      </div>
+      {signedIn ? <span style={{ fontSize: 13, color: T.muted }}>Paid plans launch soon</span>
+        : <a href="/signin?next=/sports" style={signLink}>Sign in →</a>}
+    </div>
+  );
+}
+
 const card = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "14px 16px" };
 
 function EvCard({ r }) {
@@ -134,12 +157,17 @@ export default function Sports() {
   const [hideFlagged, setHideFlagged] = useState(false);
   const [shown, setShown] = useState(60);
   const [now, setNow] = useState(Date.now());
+  const [me, setMe] = useState(null);
+
+  useEffect(() => { fetch("/api/me").then(r => r.json()).then(setMe).catch(() => setMe({ enabled: false })); }, []);
 
   useEffect(() => {
+    if (!me) return undefined;
     let cancelled = false;
+    const url = me.user ? "/api/sports-board?tier=member" : "/api/sports-board";
     async function load() {
       try {
-        const r = await fetch("/api/sports-board");
+        const r = await fetch(url);
         const j = await r.json();
         if (cancelled) return;
         if (!r.ok) { setError(j.error || `HTTP ${r.status}`); return; }
@@ -149,10 +177,13 @@ export default function Sports() {
     load();
     const id = setInterval(() => { load(); setNow(Date.now()); }, 60000);
     return () => { cancelled = true; clearInterval(id); };
-  }, []);
+  }, [me]);
 
   const ageSec = board ? Math.max(0, Math.round((now - Date.parse(board.scannedAt)) / 1000)) : null;
-  const sports = useMemo(() => [...new Set([...(board?.rows ?? []), ...(board?.arbs ?? [])].map(x => x.sport).filter(Boolean))].sort(), [board]);
+  const sports = useMemo(() => [...new Set([
+    ...[...(board?.rows ?? []), ...(board?.arbs ?? [])].map(x => x.sport),
+    ...Object.keys(board?.locked?.ev?.bySport ?? {}), ...Object.keys(board?.locked?.arb?.bySport ?? {}),
+  ].filter(s => s && s !== "other"))].sort(), [board]);
   const venues = useMemo(() => [...new Set((board?.rows ?? []).map(r => r.venue).filter(Boolean))].sort((a, b) => venueName(a).localeCompare(venueName(b))), [board]);
   const rows = useMemo(() => (board?.rows ?? [])
     .filter(r => (sport === "all" || r.sport === sport) && (venue === "all" || r.venue === venue) && (r.evNet ?? -1) >= minEv && (!hideFlagged || !r.flags?.length))
@@ -161,6 +192,9 @@ export default function Sports() {
     .filter(a => (sport === "all" || a.sport === sport) && (venue === "all" || a.legs.some(l => l.venue === venue)))
     .sort((a, b) => b.ret - a.ret), [board, sport, venue]);
   const list = tab === "ev" ? rows : arbs;
+  const locked = board?.locked ?? null;
+  const lockedEv = locked?.ev ? sportCount(locked.ev.bySport, sport) : 0;
+  const lockedArb = locked?.arb ? sportCount(locked.arb.bySport, sport) : 0;
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif", color: T.text }}>
@@ -176,6 +210,11 @@ export default function Sports() {
           </a>
           <span style={{ width: 1, height: 22, background: T.border }} />
           <span style={{ fontSize: 15, fontWeight: 600 }}>Sports</span>
+          {me?.enabled && (
+            <span style={{ marginLeft: "auto" }}>
+              {me.user ? <a href="/account" style={{ ...signLink, color: T.muted, fontWeight: 500 }}>Account</a> : <a href="/signin?next=/sports" style={signLink}>Sign in</a>}
+            </span>
+          )}
         </div>
       </div>
 
@@ -194,7 +233,7 @@ export default function Sports() {
 
         <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Chip active={tab === "ev"} onClick={() => { setTab("ev"); setShown(60); }}>+EV prices{board ? ` (${rows.length})` : ""}</Chip>
-          <Chip active={tab === "arb"} onClick={() => { setTab("arb"); setShown(60); }}>Arbitrage{board ? ` (${arbs.length})` : ""}</Chip>
+          <Chip active={tab === "arb"} onClick={() => { setTab("arb"); setShown(60); }}>Arbitrage{board ? ` (${locked?.arb ? lockedArb : arbs.length})` : ""}</Chip>
         </div>
         <div style={{ marginTop: 12, display: "flex", gap: "8px 16px", flexWrap: "wrap", alignItems: "center" }}>
           <Select label="Sport" value={sport} onChange={setSport} options={[["all", "All"], ...sports.map(s => [s, sportName(s)])]} />
@@ -212,16 +251,27 @@ export default function Sports() {
         </div>
 
         <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-          {board && list.length === 0 && (
+          {board && list.length === 0 && !(tab === "arb" && locked?.arb) && (
             <div style={{ ...card, color: T.muted, fontSize: 14 }}>
               {tab === "ev" ? "Nothing clears this filter right now." : "No arbitrage at a bettable venue right now. They are rare and short-lived."}
             </div>
+          )}
+          {tab === "arb" && locked?.arb && (
+            <LockedCard signedIn={!!me?.user}
+              title={lockedArb ? `${lockedArb} arbitrage ${lockedArb === 1 ? "pair" : "pairs"} right now` : "No arbitrage right now"}
+              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with the Arbitrage plan or Sports Pro.`
+                : "Arbitrage is rare and short-lived. The Arbitrage plan or Sports Pro shows every pair the moment it appears."} />
           )}
           {list.slice(0, shown).map((x, i) => tab === "ev" ? <EvCard key={i} r={x} /> : <ArbCard key={i} a={x} />)}
           {list.length > shown && (
             <button onClick={() => setShown(s => s + 60)} style={{ ...card, cursor: "pointer", color: ACCENT, fontWeight: 600, fontFamily: "inherit", fontSize: 14 }}>
               Show more ({list.length - shown} left)
             </button>
+          )}
+          {tab === "ev" && locked?.ev && lockedEv > 0 && (
+            <LockedCard signedIn={!!me?.user}
+              title={`${lockedEv} more ${lockedEv === 1 ? "price" : "prices"} at +${Math.round(locked.ev.cap * 100)}% EV or better`}
+              detail={`Free shows edges under +${Math.round(locked.ev.cap * 100)}%. The +EV plan or Sports Pro shows all of them.`} />
           )}
         </div>
 

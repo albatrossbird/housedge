@@ -366,6 +366,65 @@ minutes as `{ scannedAt, rows, arbs }`.
 - **Not linked from the home page** until the scanner is connected.
   Per-user accounts and bet tracking are not built yet.
 
+### Accounts (stage 1: sign-in, plans, referrals; `ACCOUNTS_MODE`)
+
+Built behind a flag and **off by default**, so with the variable unset
+every route and page behaves as it did before accounts existed. Setup steps
+are in [`docs/accounts-setup.md`](docs/accounts-setup.md); the migration is
+`0033`. Stripe is stage 2, and plans are set by hand until then.
+
+- **Modes** (`lib/auth/config.js`):
+  - `off`: no sign-in at all.
+  - `preview`: only `ACCOUNTS_ALLOWLIST` emails can sign in, and the
+    public board stays whole.
+  - `on`: anyone can sign in, and the public board is the free view.
+- **The browser holds no Supabase key and no readable token.** Supabase
+  Auth is called over plain HTTP from the API routes
+  (`lib/auth/gotrue.js`, not supabase-js, whose auth client keeps tokens in
+  the browser). Both tokens live in httpOnly, Secure, SameSite=Lax
+  cookies. POSTs also check `Origin`.
+- **An Auth outage keeps the cookies.** A 4xx is a rejected token and signs
+  the user out; a 5xx or a network error does not. Otherwise every user
+  would be logged out on a blip.
+- **Sign-in methods:**
+  - Email link plus code, from one email: the code covers opening the email
+    on another device.
+  - Google, through PKCE.
+  - No passwords.
+- **The email link lands on a button** (`/auth/confirm`), not on an
+  automatic sign-in. Mail scanners open every link, and a GET that spent
+  the token would leave the real click with "expired".
+- **The free view is cut on the server** (`lib/entitlements.js`).
+  - Blurring in the browser would still send every price to the network tab.
+  - Free sees +EV prices under `FREE_EV_CAP` (3%). Arbs and higher prices
+    arrive only as `locked` counts by sport.
+  - Plans are `free | ev | arb | pro`, held until `plan_until`.
+  - A day pass is a separate `pass_until`, so buying one never overwrites a
+    subscription.
+- **Two board URLs, because the edge cache keys on the URL and not on
+  cookies.**
+  - `/api/sports-board` is public and cached.
+  - `?tier=member` is per user and `no-store`.
+  - Serving a paid board from the public URL would hand it, from the cache,
+    to whoever asked next.
+- **Referrals:**
+  - `?ref=CODE` on any page sets an httpOnly cookie for 60 days, only for an
+    active code that exists. First touch wins.
+  - The code also rides on the NEW user's metadata, so a link opened on
+    another device still credits it.
+  - It is decided once, when the profile is created, and never rewritten. A
+    code is never credited to its own owner.
+  - Commission terms (`commission_pct`, `commission_months`, null =
+    lifetime) are stored per affiliate. Payouts are by hand until there are
+    enough affiliates to justify a tool.
+- `profiles` and `affiliates` are service-role only: RLS on, no policies,
+  and anon/authenticated grants revoked (see migration 0028 for why the
+  grant matters).
+- `scripts/accounts.test.mjs` drives every route against a fake Supabase.
+  It was mutation-checked on the self-referral, outage, cap, public-view,
+  allowlist, first-touch, cross-device referral, open-redirect and
+  insert-race guards.
+
 ### Search (`/api/search`)
 
 The grid answers "what did we find". Search answers "what about this
