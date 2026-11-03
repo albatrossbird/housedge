@@ -1289,6 +1289,26 @@ $0.21 from Kalshi's strike (p90 $0.68).
     halves positive, +2.72c at 1c worse. But it is one coin of four,
     chosen after the fact. It is a candidate to re-run on November's
     days (`days` from 2026-11-02), not a rule to trade.
+  - **SOL back to July, on Binance SOLUSDT, is no better (measured
+    2026-11-03).** Run with `scripts/m15-binance-sharp.mjs
+    --series=KXSOL15M --symbol=SOLUSDT`, 1bp, with the tape as the book.
+
+    | Month | filled | per ctr | t |
+    |---|---|---|---|
+    | July | 314 | -2.69c | -1.17 |
+    | August | 420 | -1.16c | -0.54 |
+    | September | 377 | +4.41c | 2.18 |
+    | October | 319 | +1.35c | 0.70 |
+
+    Weighted by fills, that is about +0.5c over four months, before the
+    tape's ~0.9c. **The Binance stand-in's error is not one direction.**
+    In October it read 2.4c HIGH on Bitcoin and 2.4c LOW on SOL (+1.35c
+    against +3.73c on SOL's own index), so no offset can be subtracted.
+    Read it as about ±2.5c of noise. July and August decided fewer
+    windows and left a quarter of fills unknown: the tape was thinner
+    then. Two positive months after two negative ones is a shape, not
+    an edge. **The test that decides it** is SOL's recorded book (m15c/,
+    from 2026-10-30) on the days after 11-02.
   - **Cost:** the trade tape is read only around events
     (`decideOnTape`). Kalshi holds a runner to ~5 requests a second, so
     two coins fit a 150-minute run, about 90 minutes each pair.
