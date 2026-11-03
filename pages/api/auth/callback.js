@@ -5,7 +5,7 @@ import { COOKIE, parseCookies, clearCookie } from "../../../lib/auth/cookies.js"
 import { exchangeCode } from "../../../lib/auth/gotrue.js";
 import { finishSignIn } from "../../../lib/auth/session.js";
 
-const back = (res, why) => res.redirect(302, `/signin?error=${encodeURIComponent(why)}`);
+const back = (res, why) => res.redirect(302, `/signup?error=${encodeURIComponent(why)}`);
 
 export default async function handler(req, res) {
   if (accountsMode() === "off") return res.status(404).json({ error: "not found" });

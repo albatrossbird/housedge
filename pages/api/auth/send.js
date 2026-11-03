@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   if (!sameOrigin(req)) return res.status(403).json({ error: "cross-site request refused" });
   const email = String(req.body?.email || "").trim().toLowerCase();
   if (!isEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
-  if (req.body?.agree !== true) return res.status(400).json({ error: "Please confirm you are 18 or older." });
+  if (req.body?.agree !== true) return res.status(400).json({ error: "You must be 18 or older to use MarketSlap." });
   if (!emailAllowed(email)) return res.status(403).json({ error: "MarketSlap accounts are not open yet." });
   // Carried on the NEW user, so a link opened on another device still knows
   // who referred them and when they confirmed their age.

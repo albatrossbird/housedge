@@ -9,7 +9,7 @@ export default function Account() {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     fetch("/api/me?full=1").then(r => r.json()).then(j => {
-      if (j.enabled && !j.user) window.location.replace("/signin?next=/account");
+      if (j.enabled && !j.user) window.location.replace("/signup?next=/account");
       else setMe(j);
     }).catch(() => setMe({ error: "Could not load your account." }));
   }, []);

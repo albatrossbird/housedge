@@ -26,15 +26,15 @@ export default function Confirm() {
   }
 
   return (
-    <AccountShell title="Finish signing in">
-      <h1 style={{ fontSize: 20, margin: "0 0 6px" }}>Finish signing in</h1>
+    <AccountShell title="Continue to MarketSlap">
+      <h1 style={{ fontSize: 20, margin: "0 0 6px" }}>Almost there</h1>
       {router.isReady && !tokenHash ? (
-        <p style={{ color: T.muted, fontSize: 14 }}>This link is incomplete. <a href="/signin">Request a new one.</a></p>
+        <p style={{ color: T.muted, fontSize: 14 }}>This link is incomplete. <a href="/signup">Request a new one.</a></p>
       ) : (
         <>
           <p style={{ margin: "0 0 18px", color: T.muted, fontSize: 14 }}>One more click and you are in.</p>
-          <button onClick={finish} disabled={busy || !router.isReady} style={{ ...primary, opacity: busy ? 0.6 : 1 }}>{busy ? "Signing in…" : "Sign in to MarketSlap"}</button>
-          {error && <p role="alert" style={{ margin: "14px 0 0", color: T.no, fontSize: 13 }}>{error} {/expired/.test(error) && <a href="/signin">Get a new link.</a>}</p>}
+          <button onClick={finish} disabled={busy || !router.isReady} style={{ ...primary, opacity: busy ? 0.6 : 1 }}>{busy ? "Signing in…" : "Continue to MarketSlap"}</button>
+          {error && <p role="alert" style={{ margin: "14px 0 0", color: T.no, fontSize: 13 }}>{error} {/expired/.test(error) && <a href="/signup">Get a new link.</a>}</p>}
         </>
       )}
     </AccountShell>
