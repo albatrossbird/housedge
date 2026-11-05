@@ -24,6 +24,10 @@
 //   D3. MANAGE IT. The live configuration of D, but at 15s out the
 //      position is sold if our side has become the underdog (bid <= 0.30)
 //      or added to if it is the favourite (ask >= 0.75): lib/sharpManage.js.
+//   D4. LEAVE EARLY. The same filled positions, and the late favourite's
+//      (15-45s out, 75-97c, spread <= 3c), with take-profit, stop-loss and
+//      trailing-stop rules checked on every book change from the fill to the
+//      close (lib/m15Exit.js), each against holding the same positions.
 //
 // Upper bounds as everywhere: our orders are not in the replayed book.
 // B and C price at the touch with no depth check; D walks the real book.
@@ -35,7 +39,9 @@ import { pageAll } from "../lib/restPage.js";
 import { archiveReader } from "../lib/archiveRead.js";
 import { archiveRow } from "../lib/m15Backtest.js";
 import { seriesFees } from "../lib/m15BacktestReport.js";
-import { newTape, feedTape, disrupted, bookCursor } from "../lib/m15Maker.js";
+import { newTape, feedTape, disrupted, bookCursor, changeRows, snapshotsAt } from "../lib/m15Maker.js";
+import { findEntry } from "../lib/m15Backtest.js";
+import { EXIT_RULES, EXIT_DELAY_MS, exitTrigger } from "../lib/m15Exit.js";
 import { walkFill } from "../lib/m15Chase.js";
 import { kalshiTakerFee, roundKalshiFee } from "../lib/fees.js";
 import { atOrBefore } from "../lib/brtiLag.js";
@@ -99,7 +105,23 @@ const tape = newTape();
 const paths = new Map();   // ticker -> once-a-second rows within 305s of the close
 let ticks = [];            // BRTI on CF Benchmarks' clock: { t, v }
 const A = { windows: 0, end: 0, agree: 0, ties: 0, start: 0, startDiffs: [] };
-const Bs = [], Bmove = [], B3s = [], B3fav = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [];
+const Bs = [], Bmove = [], B3s = [], B3fav = [], Cs = [], Ds = [], Dlimits = [], Dlist = [], Dband = [], Dmanage = [], Dexit = [];
+// D4's late favourite: the live rule's shape (lib/paperM15.js fav-15-45s
+// with the 75c floor the 2026-10-15 run favoured), decided on every change.
+const LATE_FAV = { entry: { side: "favourite", secsMin: 15, secsMax: 45, priceMin: 0.75, priceMax: 0.97, maxSpread: 0.03 } };
+const FILL_DELAY_MS = 250;
+
+// D4: every exit rule on one filled position. `from` is when it filled.
+function exitsFor(strat, w, rows, close, day, pos, from) {
+  const trig = EXIT_RULES.map(rule => exitTrigger(rule, rows, { side: pos.side, entry: pos.cost / pos.n, from, close }));
+  const snaps = snapshotsAt(w, trig.filter(Boolean).map(x => x.t + EXIT_DELAY_MS), 20);
+  const base = managedPnl(pos, null);
+  EXIT_RULES.forEach((rule, i) => {
+    const x = trig[i];
+    const m = x ? fillManage(snaps.get(x.t + EXIT_DELAY_MS), pos.side, { action: "sell", bid: x.bid }, pos.n, { mult: MULT }) : null;
+    Dexit.push({ strat, rule: rule.key, day, n: pos.n, won: pos.won, fired: !!x, sold: m?.k || 0, base, pnl: m ? managedPnl(pos, m) : base });
+  });
+}
 const excludedD = {};
 let watermark = 0;
 const done = new Set();
@@ -173,6 +195,8 @@ function finalize(ticker) {
   // D: buy the side a sharp move favours, against the recorded book.
   const why = w ? disrupted(tape, w) : "no final-window record";
   if (why) { excludedD[why] = (excludedD[why] || 0) + 1; return; }
+  let exitRows = null;
+  const rowsForExit = () => (exitRows ??= changeRows(w));
   for (const thr of D_THRESHOLDS) {
     // The decision is lib/sharpMove.js's, tick by tick, exactly as a live
     // bot would make it; only the fill below is the backtest's.
@@ -199,6 +223,7 @@ function finalize(ticker) {
               let d = null, s3 = null;
               if (r.t + delay < at) { const c3 = bookCursor(w, 20); d = decideManage(c3.at(at), side); s3 = c3.at(at + MANAGE_DELAY_MS); }
               const fill = worse => fillManage(s3, side, d, f.n, { addQty: SIZES[0], mult: MULT, worse });
+              exitsFor("sharp move", w, rowsForExit(), close, day, pos, r.t + delay);
               const m = fill(0), mw = fill(0.01), base = managedPnl(pos, null);
               Dmanage.push({ day, n: f.n, won: pos.won, act: d ? d.action : (r.t + delay < at ? "no book" : "too late"), quote: d, k: m.k, base,
                 sell: d?.action === "sell" ? managedPnl(pos, m) : base, add: d?.action === "add" ? managedPnl(pos, m) : base,
@@ -210,6 +235,19 @@ function finalize(ticker) {
         }
       }
       break;   // one order per window
+    }
+  }
+  // D4: the late favourite, decided on every change, filled +250ms as a
+  // limit 1c over the price seen, then the same exit rules.
+  {
+    const hit = findEntry(LATE_FAV, { close }, rowsForExit(), { size: SIZES[0] });
+    if (hit) {
+      const tf = hit.row.t + FILL_DELAY_MS, snap = snapshotsAt(w, [tf], 20).get(tf);
+      const f = snap ? walkFill(snap, hit.side, Math.min(hit.price + 0.01, 0.99), SIZES[0]) : { n: 0 };
+      if (f.n) {
+        const fee = roundKalshiFee(0.07 * MULT * f.pq);
+        exitsFor("late favourite", w, rowsForExit(), close, day, { side: hit.side, won: hit.side === result, n: f.n, cost: f.cost, fee }, tf);
+      }
     }
   }
   // D2: 1bp with each narrower mid band, as live: +250ms, seen +1c, first size.
@@ -457,6 +495,31 @@ for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_
   }
   console.log("   A sale is worth it when our side, at that bid, wins LESS often than the bid says; an add when the favourite wins MORE");
   console.log("   often than its ask plus fee. \"too late\" positions were filled after the 15s mark and are held in every row.");
+}
+
+{
+  // D4. Leave early: every exit rule against holding the SAME positions.
+  console.log(`\nD4. LEAVE EARLY — TAKE PROFIT, STOP LOSS, TRAILING STOP (${SIZES[0]} contracts; the sale +${EXIT_DELAY_MS}ms, limit 1c under the bid seen)`);
+  console.log("   Rules fixed before this run. Checked on every book change from the fill to the close; a sale pays Kalshi's fee.");
+  console.log("   \"won if held\" is how often the positions a rule sold went on to win: selling a side that would have won is the cost.");
+  console.log("   A rule passes only if it beats holding in BOTH halves of the days and its change is t >= 2.");
+  const money = v => (v >= 0 ? "+$" : "-$") + Math.abs(v).toFixed(2);
+  for (const strat of ["sharp move", "late favourite"]) {
+    const xs = Dexit.filter(x => x.strat === strat);
+    const base = xs.filter(x => x.rule === EXIT_RULES[0].key);
+    if (!base.length) { console.log(`\n   ${strat}: no filled positions`); continue; }
+    const H = dayStats(base.map(x => ({ day: x.day, ctrs: x.n, pnl: x.base })));
+    console.log(`\n   ${strat}: ${base.length} filled positions, ${H.ctrs} contracts; HOLD ${money(H.pnl)}, ${cents(H.perCtr)} per contract, t ${tt(H.t)} (earlier ${cents(H.earlyPerCtr)}, later ${cents(H.latePerCtr)})`);
+    console.log("   rule        fired  sold   won if held   P&L       per ctr   change/ctr  t(change)  earlier    later   verdict");
+    for (const rule of EXIT_RULES) {
+      const ys = xs.filter(x => x.rule === rule.key), fired = ys.filter(x => x.fired);
+      const R = dayStats(ys.map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl })));
+      const D = dayStats(ys.map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl - x.base })));
+      const pass = D.earlyPerCtr > 0 && D.latePerCtr > 0 && D.t != null && D.t >= 2;
+      console.log(`   ${rule.key.padEnd(11)} ${String(fired.length).padStart(5)} ${String(ys.reduce((a, x) => a + x.sold, 0)).padStart(5)}   ${pct(fired.length ? fired.filter(x => x.won).length / fired.length : null).padStart(9)}   ${money(R.pnl).padStart(8)}  ${cents(R.perCtr).padStart(8)}  ${cents(D.perCtr).padStart(9)}  ${tt(D.t).padStart(8)}  ${cents(D.earlyPerCtr).padStart(8)} ${cents(D.latePerCtr).padStart(8)}   ${pass ? "PASS" : "no"}`);
+    }
+  }
+  console.log("   \"fired\" without \"sold\" is a sale that missed: the bid had gone by the time the order landed, so it was held.");
 }
 
 if (LIST) {
