@@ -1286,6 +1286,31 @@ $0.21 from Kalshi's strike (p90 $0.68).
   sales lost both times (-10.29c and -2.15c a contract sold): the cheap
   side won 4.0% and 3.3% against bids of 0.028 and 0.034. The adds are
   near-certain favourites, where one loss erases about 60 wins.
+  **Leaving early loses money on both bots (section D4, `lib/m15Exit.js`,
+  measured 2026-11-05).** Run 41971561482: 30 days to 11-04, 20
+  contracts.
+  - **The rules**, fixed before the run: take profit at +5/+10/+15c,
+    stop loss at -10/-20c, a 10c trailing stop, and a +10c/-10c bracket.
+  - **How they were checked:** on every book change from the fill to the
+    close. Each sale goes out +250ms later as a limit 1c under the bid and
+    pays the fee. Each rule is compared with holding the same positions.
+  - **Result: none passed.**
+  - **Sharp move** (499 positions; holding made +4.26c, t 2.39):
+    - Take profit at +5c fired on 390 positions and cost -7.20c a
+      contract (t -6.19). The positions it sold went on to win 64.9% of
+      the time.
+    - tp10 cost -6.92c and tp15 -5.26c.
+    - The trailing stop cost -5.00c and the bracket -5.80c.
+    - sl10 cost -1.55c. sl20 was +0.08c (t 0.08), which is noise.
+    - A sharp move's winners keep going, consistent with the ~18% of
+      repricing that comes after the BRTI tick. Selling a position that
+      is up sells the continuation.
+  - **Late favourite** (330 positions; holding made +2.47c, t 1.73):
+    every rule lost 1.2-2.8c a contract. The positions tp5 sold won 93.3%
+    if held.
+  - **Hold to settlement.** A remembered "was up $1, lost $7" trade is
+    the visible half: the positions sold up $1 that would have won the
+    full payout are the larger, invisible half.
   **How far the last minute moves** (section B2, 2,806 windows over
   10-01..10-30). The settlement average minus BRTI 60s out: median ~$7,
   p90 ~$27, p99 $56-65. The largest lead that still lost was $43.54 at
