@@ -164,5 +164,33 @@ console.log("m15-index.mjs D3: the position managed at 15s out");
   ok(/sell: 1 triggered, 1 filled \(10 contracts\); our side's bid averaged 0\.200 and it went on to win 100\.0%/.test(d3), "the sale's own line", d3);
 }
 
+console.log("m15-index.mjs D4: leaving early, on the same window");
+{
+  // The sharp-move position above (10 YES at 0.51, held +4.725) sees a 0.49
+  // bid until 20s out, then 0.20: no take-profit ever fires; sl10, sl20,
+  // trail10 and the bracket all sell at 20s out, exactly as D3's sale did
+  // (-3.387, a change of -8.112 over 10 contracts). The late favourite
+  // buys NO at 0.80 at 20s out (fee 0.112) and loses -8.112 held; nothing
+  // changes after its fill, so no rule fires on it.
+  const close = Math.floor((Date.now() - 3600000) / WINDOW_MS) * WINDOW_MS;
+  const T = kalshiM15Ticker("btc", close);
+  const lines = [];
+  for (let x = close - 976000; x <= close; x += 200) lines.push({ k: "i5", t: x + 40, id: "BRTI", v: x < close - 90000 ? "100000.00" : "100030.00", x });
+  lines.push({ k: "final", t: close - 120000, x: close - 120000, m: T },
+    { k: "full", t: close - 119950, x: close - 120000, m: T, L: [[[0.49, 100]], [[0.51, 100]]] },
+    { k: "full", t: close - 19950, x: close - 20000, m: T, L: [[[0.20, 100]], [[0.22, 100]]] });
+  lines.sort((a, z) => a.t - z.t);
+  const { text, code } = runIndex(T, close, lines, ["--days=1", "--size=10"]);
+  ok(code === 0, "runs", text);
+  const d4 = (text.split("D4. LEAVE EARLY")[1] || "").split("READING THIS")[0];
+  const sharp = (d4.split("sharp move:")[1] || "").split("late favourite")[0], fav = d4.split("late favourite:")[1] || "";
+  ok(/1 filled positions, 10 contracts; HOLD \+\$4\.73/.test(sharp), "sharp move: the same position D3 held", sharp);
+  ok(/tp5\s+0\s+0\s+—\s+\+\$4\.73\s+\+47\.25c\s+\+0\.00c/.test(sharp), "no take-profit fires on a bid that never rises", sharp);
+  for (const k of ["sl10", "sl20", "trail10", "tp10\\/sl10"])
+    ok(new RegExp(`${k}\\s+1\\s+10\\s+100\\.0%\\s+-\\$3\\.39\\s+-33\\.87c\\s+-81\\.12c`).test(sharp), `${k.replace(/\\/g, "")}: sells all 10 at 20s out, a winner sold for -81c a contract`, sharp);
+  ok(/1 filled positions, 10 contracts; HOLD -\$8\.11/.test(fav), "late favourite: NO bought at 0.80 at 20s out, lost", fav);
+  ok(/sl10\s+0\s+0/.test(fav), "late favourite: nothing changes after the fill, nothing fires", fav);
+}
+
 if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
