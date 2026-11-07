@@ -20,7 +20,7 @@ export default function Privacy() {
       <ul style={ul}>
         <li style={li}><b>Account details:</b> your email address. If you sign in with Google, we receive your email address and basic profile details from Google; we do not receive your Google password.</li>
         <li style={li}><b>Your agreement:</b> when you confirmed you are 18 or older and accepted our terms.</li>
-        <li style={li}><b>Plan and billing status:</b> which plan you hold, until when, and an identifier for your customer record at Stripe. Stripe handles your card details; we never see or store your full card number.</li>
+        <li style={li}><b>Plan and billing status:</b> which plan you hold, until when, an identifier for your customer record at Stripe, and a record of each payment (amount, date and any refund). Stripe handles your card details; we never see or store your full card number.</li>
         <li style={li}><b>Referral:</b> if you arrived through a referral link, the referral code that brought you.</li>
         <li style={li}><b>Technical information:</b> like most websites, our hosting and database providers log requests, including IP address, browser type and the pages requested, to run and secure the Service.</li>
       </ul>

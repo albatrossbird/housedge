@@ -88,7 +88,7 @@ function LockedCard({ title, detail, signedIn }) {
         <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
         <div style={{ fontSize: 13, color: T.muted, marginTop: 2 }}>{detail}</div>
       </div>
-      {signedIn ? <span style={{ fontSize: 13, color: T.muted }}>Paid plans launch soon</span>
+      {signedIn ? <a href="/pricing" style={signLink}>See plans →</a>
         : <a href="/signup?next=/sports" style={signLink}>Sign up free →</a>}
     </div>
   );

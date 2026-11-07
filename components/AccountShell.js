@@ -15,10 +15,10 @@ export const primary = {
 };
 export const secondary = { ...primary, color: T.text, background: T.surface, border: `1px solid ${T.border}` };
 
-export default function AccountShell({ title, children }) {
+export default function AccountShell({ title, children, wide = false, index = false }) {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif", color: T.text }}>
-      <Head><title>{`${title} · MarketSlap`}</title><meta name="robots" content="noindex" /></Head>
+      <Head><title>{`${title} · MarketSlap`}</title>{!index && <meta name="robots" content="noindex" />}</Head>
       <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)" }}>
         <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", gap: 12 }}>
           <a href="/" aria-label="MarketSlap home" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
@@ -28,9 +28,13 @@ export default function AccountShell({ title, children }) {
           <span style={{ marginLeft: "auto" }}><a href="/sports" style={{ color: T.muted, fontSize: 14, textDecoration: "none" }}>Sports</a></span>
         </div>
       </div>
-      <div style={{ maxWidth: 420, margin: "0 auto", padding: "40px clamp(16px, 4vw, 24px)" }}>
-        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "28px 24px" }}>{children}</div>
-      </div>
+      {wide
+        ? <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px clamp(16px, 4vw, 24px) 48px" }}>{children}</div>
+        : (
+          <div style={{ maxWidth: 420, margin: "0 auto", padding: "40px clamp(16px, 4vw, 24px)" }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "28px 24px" }}>{children}</div>
+          </div>
+        )}
     </div>
   );
 }
