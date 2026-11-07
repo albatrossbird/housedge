@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import AccountShell, { ACCENT, T, input, primary, secondary } from "../components/AccountShell.js";
+import { safeNext } from "../lib/auth/config.js";
 
 const ERRORS = { agree: "You must be 18 or older to use MarketSlap." };
 
@@ -35,7 +36,8 @@ const link = { color: T.muted, textDecoration: "underline" };
 
 export default function SignUp() {
   const router = useRouter();
-  const next = typeof router.query.next === "string" ? router.query.next : "/sports";
+  // The same check the server makes: "//evil.com" is a path to the browser.
+  const next = safeNext(router.query.next);
   const [me, setMe] = useState(null);
   const [email, setEmail] = useState("");
   const [sentTo, setSentTo] = useState(null);

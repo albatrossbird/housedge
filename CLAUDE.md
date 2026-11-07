@@ -371,7 +371,7 @@ minutes as `{ scannedAt, rows, arbs }`.
 Built behind a flag and **off by default**, so with the variable unset
 every route and page behaves as it did before accounts existed. Setup steps
 are in [`docs/accounts-setup.md`](docs/accounts-setup.md); the migration is
-`0033`. Stripe is stage 2, and plans are set by hand until then.
+`0033`. Billing is stage 2, below.
 
 - **Modes** (`lib/auth/config.js`):
   - `off`: no sign-in at all.
@@ -440,6 +440,68 @@ are in [`docs/accounts-setup.md`](docs/accounts-setup.md); the migration is
   It was mutation-checked on the self-referral, outage, cap, public-view,
   allowlist, first-touch, cross-device referral, open-redirect and
   insert-race guards.
+
+### Billing (stage 2: Stripe; off until `STRIPE_SECRET_KEY` is set)
+
+Setup steps are in [`docs/billing-setup.md`](docs/billing-setup.md); the
+migration is `0034` (`payments`). Billing needs accounts on as well, so in
+`preview` a test key on production reaches only the allowlist.
+
+- **Prices live in `lib/billing/plans.js`, not in Stripe.**
+  - Products (fixed ids `ms_ev`, `ms_arb`, `ms_pro`, `ms_pass`) and prices
+    are created on first checkout, with prices found by a lookup key that
+    carries the amount (`ms_pro_5900`).
+  - Changing an amount gives new buyers a new price and leaves every
+    subscription on its old one: the founding-price lock comes free.
+  - The pricing page reads the same file, so it cannot quote a price
+    Stripe does not charge.
+- **Plain HTTPS, no SDK, API version PINNED (`2024-06-20`).**
+  - A webhook is read for its type and object id only; the object is
+    re-fetched in the pinned version.
+  - So a payload shaped by the endpoint's version, or Stripe's next
+    default, never reaches the code. Later versions move
+    `current_period_end`, `invoice.payment_intent` and `charge.invoice`.
+- **Nothing trusts an event's payload or order.**
+  - A plan is RECOMPUTED from the customer's subscriptions as Stripe holds
+    them (`planFromSubscriptions`), so an `updated` landing after `deleted`
+    cannot revive a plan.
+  - +EV and Arbitrage held together are Sports Pro. `past_due` keeps the
+    plan while Stripe retries.
+  - `plan_until` is the period end plus a day's grace, so a renewal's
+    webhook lag never locks a payer out. A cancellation is a `deleted`,
+    which ends it at once.
+- **The day pass is a chain over `payments`**: each pass starts when bought
+  or when the previous one ends. Two passes stack, a redelivery adds
+  nothing, and a pass given by hand is never shortened.
+- **Payments are upserted on the Stripe id**: invoice `in_...` or Checkout
+  Session `cs_...`.
+  - A redelivered invoice cannot clear `refunded_cents`, because the column
+    is left out of the payload.
+  - `referred_by` is COPIED from the profile at payment time, so the
+    commission report (in the setup doc) reads one table.
+  - $0 invoices (a 100%-off code) are not payments.
+- **One subscription per account.** A second checkout answers 409
+  `manage: true` and the page opens Stripe's portal, which prorates a switch;
+  a second checkout would bill twice. A pass is refused only on Sports Pro.
+- **A stored customer Stripe no longer knows is replaced**, whether
+  `deleted: true` (a 200, not a 404) or missing. That covers every TEST
+  customer once the key goes live.
+- **Checkout returns to `/account?checkout=done&session_id=`**, which POSTs
+  `/api/billing/confirm` to apply the purchase at once. The confirm call is
+  idempotent with the webhook, and checks the session is the caller's.
+- **The webhook verifies the RAW body** (`bodyParser: false`), HMAC-SHA256 in
+  constant time, inside 5 minutes, accepting any `v1` (secret rotation).
+  - It answers 500 on failure (Stripe retries for 3 days) and 200 on an
+    event it does not use.
+  - A customer with no profile (made in the dashboard) is skipped with 200,
+    not retried.
+- `/api/me` reports `billing: { enabled, test }` and `hasBilling`, never the
+  customer id.
+- `scripts/billing.test.mjs` drives every route against a fake Stripe and
+  Supabase. 27 mutations were checked, including signature, replay, order,
+  stacking, refund, ownership, double-subscription and leak guards. In the
+  fake Stripe, products and prices outlive a reset, as they do in a real
+  account.
 
 ### Search (`/api/search`)
 
