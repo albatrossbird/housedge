@@ -40,3 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 __pycache__/
+
+# Kalshi trade-tape and Binance caches from the m15 tape scripts: recorded data, never committed.
+.tape-cache/
+.binance-sharp/

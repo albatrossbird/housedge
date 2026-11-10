@@ -1678,6 +1678,41 @@ reference only, not a second chance:
 
 The 2m underdog cell is something to re-test on November, nothing more.
 
+#### Time of day decides nothing yet (2026-11-10)
+
+The trader found, on live fills from 10-19/21, that 16-20h ET was p75's
+worst 4-hour block and sharp-move's best. That was one block of twelve on the
+days it was found, so `--tod` on `scripts/m15-tape-backtest.mjs` and
+`scripts/m15-binance-sharp.mjs` scores it only on the days BEFORE the live
+period.
+- **Hypotheses, fixed in `lib/m15TimeOfDay.js` before the run:**
+  - p75 is worse at 16-20h ET, and worse at 08-20h than at 20-08h.
+  - Sharp-move is better at 16-20h ET.
+- **The test:** a paired-day t of 2 or more in the predicted direction.
+  `scripts/m15-time-of-day.test.mjs` pins New York hours across the DST
+  change.
+
+**p75, trade tape, 07-01..10-18:**
+- 1,850 trades, overall +1.24c, t 2.10.
+- 16-20h ET was the worst block, -0.76c against the rest. The difference was
+  -1.91c, t -0.93: **FAIL**.
+- 08-20h vs 20-08h: t -0.40, **FAIL**.
+
+**Sharp-move, Binance stand-in plus tape, 07-01..10-20:**
+- 1bp, 1,860 orders.
+- 16-20h ET made +6.42c. The difference was +6.26c, t 1.39: **FAIL**.
+- 04-08h made a similar +6.86c.
+- The stand-in may also track BRTI better at some hours than at others.
+
+Both rules lean the way the trader saw, but neither clears noise. At the
+out-of-sample sizes, reaching t 2 would take about 4x the days for p75 and 2x
+for sharp-move, so new data cannot settle this soon. No rule change.
+
+**Weekday vs weekend repeats for p75 but was not tested:** out of sample,
+weekday +2.09c (t 2.94) against weekend -0.23c, the same shape as the
+trader's live split. It was not in the fixed test. If it is ever acted on,
+fix it first and score it on days after 11-10.
+
 #### The price path is the perishable half
 
 A settled market reports only its last price, so *"what was this quoted
