@@ -25,6 +25,7 @@ import { parseTrade } from "../lib/m15Tape.js";
 import { parseAggTrade, sampleLast } from "../lib/binanceTicks.js";
 import { kalshiTakerFee } from "../lib/fees.js";
 import { dayStats } from "../lib/m15Index.js";
+import { printTimeOfDay } from "../lib/m15TimeOfDay.js";
 
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 // --series=KXSOL15M --symbol=SOLUSDT runs another coin on its own Binance pair.
@@ -35,6 +36,8 @@ const SINCE = Date.parse(`${opt("since", "2026-10-01")}T00:00:00Z`);
 const UNTIL = Math.min(opt("until") ? Date.parse(`${opt("until")}T00:00:00Z`) : Infinity, Math.floor((Date.now() - 4 * 3600000) / 86400000) * 86400000);   // a day's file is published ~02:00 UTC the next day
 const SIZE = Number(opt("size", 10)), PACE = Number(opt("pace", 200)), CONC = Math.max(1, Number(opt("conc", 3)));
 const CACHE = opt("cache", ".binance-sharp"), LIST = process.argv.includes("--list");
+// --tod [--live=2026-10-21]: 1bp decisions split by the hour in New York time (lib/m15TimeOfDay.js).
+const TOD = process.argv.includes("--tod"), LIVE = Date.parse(`${opt("live", "2026-10-21")}T00:00:00Z`);
 const THRESHOLDS = [1, 2, 4], STALE_MS = 5000, DELAY_MS = 250, FILL_WINDOW_MS = 2000, TAIL_MS = 125000;
 if (!(SINCE < UNTIL)) { console.error("::error::--since must be before --until (and Binance publishes a day's file the next day)"); process.exit(2); }
 mkdirSync(join(CACHE, "ticks"), { recursive: true });
@@ -173,7 +176,7 @@ for (const [day, ws] of byDay) {
         const d = await decide(w, ticksObj, thr, seg);
         if (!d) continue;
         const { side, seen } = d.r.order, won = side === w.result, f = d.fill;
-        const row = { thr, day: w.day, month: w.day.slice(0, 7), ticker: w.ticker, secs: (w.close - d.r.t) / 1000, side, seen, won, filled: f.filled, ctrs: SIZE, result: w.result };
+        const row = { thr, t: d.r.t, day: w.day, month: w.day.slice(0, 7), ticker: w.ticker, secs: (w.close - d.r.t) / 1000, side, seen, won, filled: f.filled, ctrs: SIZE, result: w.result };
         if (f.filled) {
           const fee = kalshiTakerFee(f.price, SIZE), worseFee = kalshiTakerFee(f.price + 0.01, SIZE);
           Object.assign(row, { price: f.price, pnl: (won ? SIZE : 0) - f.price * SIZE - fee, worse: (won ? SIZE : 0) - (f.price + 0.01) * SIZE - worseFee });
@@ -200,6 +203,8 @@ console.log(`\n${requests} Kalshi requests (${refused} refused and retried); ${n
 console.log("   cut           orders  filled missed unknown  won(f) won(miss)  paid    per ctr t(day)   earlier    later  1c worse");
 for (const thr of THRESHOLDS) console.log(line(`${thr}bp`, rows.filter(r => r.thr === thr)));
 for (const mo of [...new Set(rows.map(r => r.month))].sort()) console.log(line(`1bp ${mo}`, rows.filter(r => r.thr === 1 && r.month === mo)));
+if (TOD) printTimeOfDay({ rows: rows.filter(r => r.thr === 1), rule: "sharp", liveStart: LIVE, line,
+  header: "   cut           orders  filled missed unknown  won(f) won(miss)  paid    per ctr t(day)   earlier    later  1c worse" });
 if (LIST) {
   console.log("\n1bp decisions: ticker, seconds out, side, seen, filled at, settled, P&L");
   for (const r of rows.filter(r => r.thr === 1).sort((a, b) => a.ticker.localeCompare(b.ticker)))

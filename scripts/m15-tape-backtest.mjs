@@ -11,6 +11,10 @@
 //        [--size=10] [--cache=.tape-cache] [--pace=150]
 // The default rule is the trader's p75: favourite 15-45s out at 75-97c.
 //
+//   --tod [--live=2026-10-19]: p75 split by the decision's hour in New York
+//   time, with the trader's 16-20h hypothesis scored on the days before --live
+//   (lib/m15TimeOfDay.js).
+//
 //   --grid [--split=2026-09-01]: the pre-registered grid in lib/m15Tape.js
 //   instead — 4 decision points x 6 price bands, one cell chosen on the days
 //   before --split by the fixed rule there, and only that cell scored after.
@@ -19,6 +23,7 @@ import { join } from "node:path";
 import { parseTrade, tapeEntry, tapePnl, GRID_POINTS, GRID_LOOK_MS, GRID_BANDS, GRID_MIN_TRAIN, bandOf, firstBuys, pickCell, candleQuote, packCandle } from "../lib/m15Tape.js";
 import { kalshiTakerFee } from "../lib/fees.js";
 import { dayStats } from "../lib/m15Index.js";
+import { printTimeOfDay } from "../lib/m15TimeOfDay.js";
 
 const B = "https://api.elections.kalshi.com/trade-api/v2";
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
@@ -30,6 +35,7 @@ const SIZE = Number(opt("size", 10)), PACE = Number(opt("pace", 150)), CACHE = o
 // between any two requests, so it still caps the rate.
 const CONC = Math.max(1, Number(opt("conc", 1)));
 const RULE = { secsMin: 15, secsMax: 45, priceMin: 0.75, priceMax: 0.97 };
+const TOD = process.argv.includes("--tod"), LIVE = Date.parse(`${opt("live", "2026-10-19")}T00:00:00Z`);
 const GRID = process.argv.includes("--grid"), SPLIT = Date.parse(`${opt("split", "2026-09-01")}T00:00:00Z`);
 if (!(SINCE < UNTIL)) { console.error("::error::--since must be before --until"); process.exit(2); }
 
@@ -276,7 +282,7 @@ for (const series of SERIES) {
     if (!e) continue;
     if (e.count >= SIZE) printedSize++;
     const fee = kalshiTakerFee(e.price, SIZE), worseFee = kalshiTakerFee(e.price + 0.01, SIZE);
-    xs.push({ day: day(m.close), month: day(m.close).slice(0, 7), price: e.price, won: e.side === m.result, ctrs: SIZE,
+    xs.push({ t: e.t, day: day(m.close), month: day(m.close).slice(0, 7), price: e.price, won: e.side === m.result, ctrs: SIZE,
       pnl: tapePnl(e, m.result, SIZE, fee), worse: tapePnl({ ...e, price: e.price + 0.01 }, m.result, SIZE, worseFee) });
   }
   writeFileSync(cacheFile, JSON.stringify(cache));
@@ -293,6 +299,8 @@ for (const series of SERIES) {
   const band = (lo, hi, last) => x => x.price >= lo - 1e-9 && (last ? x.price <= hi + 1e-9 : x.price < hi - 1e-9);
   for (const [lo, hi, last] of [[0.75, 0.85], [0.85, 0.92], [0.92, 0.97, true]]) console.log(row(`${lo.toFixed(2)}-${hi.toFixed(2)}`, xs.filter(band(lo, hi, last))));
   for (const mo of [...new Set(xs.map(x => x.month))].sort()) console.log(row(mo, xs.filter(x => x.month === mo)));
+  if (TOD) printTimeOfDay({ rows: xs, rule: "p75", liveStart: LIVE, line: row,
+    header: "  cut            trades    won   paid   needs         P&L   per ctr t(day)   earlier    later  1c worse" });
   console.log("");
 }
 console.log(`READING THIS
