@@ -49,7 +49,7 @@ account.
 - Payment methods: allow updating. Invoice history: on.
 - Cancellations: allow, **at the end of the billing period**.
 - Subscriptions: allow switching plans, with proration. Add the products
-  MarketSlap +EV, Arbitrage and Sports Pro. They appear after the first test
+  MarketSlap Arbs and MarketSlap Pro. They appear after the first test
   checkout of each (step 6), so come back to this after it.
 - Business information: Terms `https://marketslap.com/terms`, Privacy
   `https://marketslap.com/privacy`.
@@ -68,13 +68,12 @@ Server-only. Never a `NEXT_PUBLIC_` variable.
 ## 6. Try it (test mode)
 
 Signed in as an allowlisted tester:
-- `/pricing` says "Test mode" and shows Subscribe buttons. Subscribe to
-  +EV with card `4242 4242 4242 4242`, any future date, any CVC.
-- You land on `/account` showing **+EV**. Stripe → Webhooks → the endpoint
+- `/pricing` says "Test mode" and shows the plan buttons. Get Arbs with
+  card `4242 4242 4242 4242`, any future date, any CVC.
+- You land on `/account` showing **Arbs**. Stripe → Webhooks → the endpoint
   should list deliveries with `200`.
-- `/sports` shows every +EV price; arbitrage is still locked.
-- **Manage billing** → switch to Sports Pro → back on `/account` it says
-  Sports Pro. Cancel → it stays until the period ends.
+- `/sports` shows every arb; +EV over +3% is still locked.
+- **Manage billing** → switch to Pro → back on `/account` it says Pro. Cancel → it stays until the period ends.
 - Buy a day pass: the account page shows when it ends. A second one adds 24
   hours.
 - Refund a payment from the Stripe dashboard: `payments.refunded_cents` fills in.

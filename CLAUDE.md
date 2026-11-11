@@ -450,11 +450,27 @@ migration is `0034` (`payments`). Billing needs accounts on as well, so in
 - **Prices live in `lib/billing/plans.js`, not in Stripe.**
   - Products (fixed ids `ms_ev`, `ms_arb`, `ms_pro`, `ms_pass`) and prices
     are created on first checkout, with prices found by a lookup key that
-    carries the amount (`ms_pro_5900`).
+    carries the amount (`ms_pro_4900`).
   - Changing an amount gives new buyers a new price and leaves every
     subscription on its old one: the founding-price lock comes free.
   - The pricing page reads the same file, so it cannot quote a price
     Stripe does not charge.
+- **What is sold (decided 2026-11-11):** Free; **Arbs** $29/month or
+  $249/year; **Pro** (Arbs + +EV, with alerts once built) $49/month or
+  $399/year; a $9 day pass (Pro for 24 hours). AVO is $88 a month with
+  near-instant odds and many more books, so the price sits well under it.
+  - **+EV is not sold on its own.** Its backtests lose after fees on the
+    exchanges, so it rides inside Pro as a tool with a published record,
+    never a profit claim. The `ev` plan stays in `CATALOG` with
+    `offered: false` (checkout refuses it) so a profile holding it still
+    reads.
+  - **Arbs is sold on pregame arbs**, which stay open minutes to hours and
+    suit a 5-minute scan. The median arb is ~0.5%, so any "covers the month
+    in a day" claim needs a bankroll stated beside it and recorded daily
+    totals behind it. Never AVO's "5-10% typical arbs".
+- **The account pages wear the sports app's look** (`components/AccountShell.js`):
+  dark by default, light on a light device, CSS variables rather than hex,
+  so a soft fill is its own token (`--good-soft`), never `${hex}12`.
 - **Plain HTTPS, no SDK, API version PINNED (`2024-06-20`).**
   - A webhook is read for its type and object id only; the object is
     re-fetched in the pinned version.

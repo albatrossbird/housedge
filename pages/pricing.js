@@ -1,27 +1,26 @@
 // Plans and prices. Amounts come from lib/billing/plans.js, the same list
 // checkout charges from, so the page cannot quote a price Stripe does not.
 //
-// Every button says what pressing it does right now: "Coming soon" while
-// billing is off, "Sign up" when signed out, "Current plan" for the one held,
-// "Manage billing" to switch from a paid plan (Stripe's portal prorates; a
-// second checkout would bill twice).
+// Arbs is the product sold on money; +EV rides inside Pro as a tool with a
+// published record, never as a profit claim (decided 2026-11-11). Every
+// button says what pressing it does right now: "Coming soon" while billing
+// is off, "Sign up" when signed out, "Current plan" for the one held, "Switch
+// plan" to move between paid plans (Stripe's portal prorates; a second
+// checkout would bill twice).
 import { useEffect, useState } from "react";
-import AccountShell, { ACCENT, T } from "../components/AccountShell.js";
+import AccountShell, { ACCENT, T, card } from "../components/AccountShell.js";
 import { CATALOG, dollars } from "../lib/billing/plans.js";
 import { FREE_EV_CAP } from "../lib/entitlements.js";
 
 const cap = `+${Math.round(FREE_EV_CAP * 100)}%`;
-const YEAR_SAVES = CATALOG.pro.amount * 12 - CATALOG.pro_year.amount;
 
 const PLANS = [
-  { id: "free", name: "Free", price: "$0", per: "", blurb: "See what MarketSlap finds.",
-    features: ["Kalshi and Polymarket prices side by side, with search", `Sports +EV prices under ${cap}`, "How many bigger edges and arbitrages there are, by sport"] },
-  { id: "ev", key: "ev", name: CATALOG.ev.name, price: dollars(CATALOG.ev.amount), per: "/month", blurb: "For betting value, game by game.",
-    features: [`Every +EV price on the sports board, not just those under ${cap}`, "Fair price, EV after fees, and the book's limit", "A link straight to each bet"] },
-  { id: "arb", key: "arb", name: CATALOG.arb.name, price: dollars(CATALOG.arb.amount), per: "/month", blurb: "For locking in both sides.",
-    features: ["Every arbitrage on the sports board", "Both legs, the return after fees, and the most you can stake", "A link to each leg"] },
-  { id: "pro", key: "pro", yearKey: "pro_year", name: CATALOG.pro.name, price: dollars(CATALOG.pro.amount), per: "/month", blurb: "Both boards.", best: true,
-    features: ["Everything in +EV", "Everything in Arbitrage"] },
+  { id: "free", name: "Free", blurb: "See what MarketSlap finds.",
+    features: ["Kalshi and Polymarket prices side by side, with search", `Sports +EV prices under ${cap}, with how picks like them have actually done`, "How many arbs are open right now, by sport"] },
+  { id: "arb", name: CATALOG.arb.name, blurb: "Pregame arbs, for steady side income.", month: "arb", year: "arb_year",
+    features: ["Every pregame arb we find across 17 sportsbooks and exchanges", "Returns after each venue's fees", "Stake calculator, with links that open the bet", "Filters for your books, kickoff window and bet types"] },
+  { id: "pro", name: CATALOG.pro.name, blurb: "Arbs and +EV, with alerts.", month: "pro", year: "pro_year", best: true,
+    features: ["Everything in Arbs", "Every +EV price, with quality flags and our published track record", ["Email alerts on your own conditions", "Soon"], ["A free 1:1 onboarding call", "Yearly"]] },
 ];
 
 async function post(url, body = {}) {
@@ -32,13 +31,16 @@ async function post(url, body = {}) {
 }
 
 const btn = (kind, disabled) => ({
-  display: "block", width: "100%", boxSizing: "border-box", textAlign: "center", textDecoration: "none", cursor: disabled ? "default" : "pointer",
-  border: kind === "primary" ? 0 : `1px solid ${T.border}`, borderRadius: 8, padding: "11px 12px", fontSize: 14, fontWeight: 600, fontFamily: "inherit",
-  color: kind === "primary" ? "#fff" : T.text, background: kind === "primary" ? ACCENT : T.surface, opacity: disabled ? 0.55 : 1,
+  display: "flex", alignItems: "center", justifyContent: "center", width: "100%", boxSizing: "border-box", minHeight: 46, padding: "0 16px",
+  borderRadius: 999, textDecoration: "none", cursor: disabled ? "default" : "pointer", fontSize: 15, fontWeight: 700, fontFamily: "inherit",
+  border: kind === "primary" ? 0 : `1px solid ${T.border}`, color: kind === "primary" ? T.onAccent : T.text,
+  background: kind === "primary" ? ACCENT : T.raised, opacity: disabled ? 0.55 : 1,
 });
+const tag = (bg, fg) => ({ fontSize: 11, fontWeight: 750, letterSpacing: ".04em", padding: "3px 8px", borderRadius: 999, background: bg, color: fg, whiteSpace: "nowrap" });
 
 export default function Pricing() {
   const [me, setMe] = useState(null);
+  const [period, setPeriod] = useState("month");
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   useEffect(() => { fetch("/api/me").then(r => r.json()).then(setMe).catch(() => setMe({ enabled: false })); }, []);
@@ -60,85 +62,112 @@ export default function Pricing() {
   const buy = key => go("/api/billing/checkout", { plan: key }, key);
   const manage = () => go("/api/billing/portal", {}, "manage");
 
-  // One button per plan, saying what it does now.
-  function Action({ plan, k = plan.key, label = "Subscribe", kind = "primary" }) {
-    if (!me) return <span style={btn(kind, true)}>&nbsp;</span>;
+  function Action({ plan }) {
+    const key = plan[period];
+    if (!me) return <span style={btn("secondary", true)}>&nbsp;</span>;
     if (plan.id === "free") {
       if (signedIn) return <span style={btn("secondary", true)}>{held === "free" ? "Current plan" : "Included"}</span>;
       return me.enabled ? <a href="/signup?next=/pricing" style={btn("secondary")}>Sign up free</a> : <a href="/" style={btn("secondary")}>Use it now</a>;
     }
+    const kind = plan.best ? "primary" : "secondary";
     if (!open) return <span style={btn(kind, true)}>Coming soon</span>;
     if (!signedIn) return <a href="/signup?next=/pricing" style={btn(kind)}>Sign up to subscribe</a>;
     if (held === plan.id && me?.hasBilling) return <button onClick={manage} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "manage" ? "Opening…" : "Current plan · Manage"}</button>;
-    if (held === plan.id || held === "pro") return <span style={btn("secondary", true)}>{held === plan.id ? "Current plan" : "Included in your plan"}</span>;
+    if (held === plan.id) return <span style={btn("secondary", true)}>Current plan</span>;
+    if (held === "pro") return <span style={btn("secondary", true)}>Included in Pro</span>;
     if (paidHeld) return <button onClick={manage} disabled={!!busy} style={btn(kind, !!busy)}>{busy === "manage" ? "Opening…" : "Switch plan"}</button>;
-    return <button onClick={() => buy(k)} disabled={!!busy} style={btn(kind, !!busy)}>{busy === k ? "Opening checkout…" : label}</button>;
+    return <button onClick={() => buy(key)} disabled={!!busy} style={btn(kind, !!busy)}>{busy === key ? "Opening checkout…" : `Get ${plan.name}`}</button>;
+  }
+
+  function Price({ plan }) {
+    if (!plan.month) return <div style={{ margin: "16px 0 2px" }}><span style={{ font: `800 34px/1 ${T.display}`, letterSpacing: "-0.02em" }}>$0</span><div style={{ fontSize: 13, color: T.muted, minHeight: 19, marginTop: 6 }}>Free for good</div></div>;
+    const m = CATALOG[plan.month].amount, y = CATALOG[plan.year].amount;
+    const yearly = period === "year";
+    return (
+      <div style={{ margin: "16px 0 2px" }}>
+        <span className="num" style={{ font: `800 34px/1 ${T.display}`, letterSpacing: "-0.02em" }}>{dollars(yearly ? y : m)}</span>
+        <span style={{ fontSize: 14, color: T.muted, marginLeft: 3 }}>{yearly ? "/year" : "/month"}</span>
+        <div className="num" style={{ fontSize: 13, color: yearly ? T.yes : T.muted, minHeight: 19, marginTop: 6 }}>
+          {yearly ? `${dollars(Math.round(y / 12))} a month, saving ${dollars(m * 12 - y)}` : `or ${dollars(y)} a year`}
+        </div>
+      </div>
+    );
   }
 
   const passCovered = held === "pro";
   const passRunning = Boolean(me?.plan?.passUntil);
+  const segBtn = on => ({ border: 0, borderRadius: 9, padding: "8px 16px", fontWeight: 650, fontSize: 14, fontFamily: "inherit", cursor: "pointer",
+    background: on ? T.surface : "transparent", color: on ? T.text : T.muted, boxShadow: on ? T.shadow : "none" });
 
   return (
     <AccountShell title="Pricing" wide>
-      <div style={{ textAlign: "center", maxWidth: 620, margin: "0 auto 28px" }}>
-        <h1 style={{ fontSize: "clamp(24px, 5vw, 32px)", margin: "0 0 8px" }}>Pricing</h1>
-        <p style={{ color: T.muted, fontSize: 15, margin: 0, lineHeight: 1.5 }}>
-          Prediction-market comparison stays free. Paid plans unlock the whole sports board. Cancel anytime.
+      <div style={{ textAlign: "center", maxWidth: 620, margin: "8px auto 22px", display: "grid", gap: 10, justifyItems: "center" }}>
+        <h1 style={{ font: `800 clamp(28px, 6vw, 38px)/1.1 ${T.display}`, letterSpacing: "-0.02em", margin: 0 }}>Pricing</h1>
+        <p style={{ color: T.muted, fontSize: 16, margin: 0, lineHeight: 1.5 }}>
+          Prediction-market comparison stays free. Paid plans unlock every sports arb and +EV price. Cancel anytime.
         </p>
-        {open && me?.billing?.test && <p style={{ fontSize: 13, color: T.no, margin: "10px 0 0" }}>Test mode: pay with card 4242 4242 4242 4242, any future date and any CVC. No real money moves.</p>}
+        {open && me?.billing?.test && <p style={{ ...tag(T.warnSoft, T.warn), fontSize: 13, fontWeight: 650, letterSpacing: 0, padding: "8px 14px", whiteSpace: "normal", margin: 0 }}>Test mode: pay with card 4242 4242 4242 4242, any future date and any CVC. No real money moves.</p>}
+        <div role="group" aria-label="Billing period" style={{ display: "inline-flex", background: T.raised, borderRadius: 12, padding: 3, gap: 2, marginTop: 4 }}>
+          <button type="button" aria-pressed={period === "month"} onClick={() => setPeriod("month")} style={segBtn(period === "month")}>Monthly</button>
+          <button type="button" aria-pressed={period === "year"} onClick={() => setPeriod("year")} style={segBtn(period === "year")}>Yearly</button>
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(230px, 100%), 1fr))", gap: 14, alignItems: "stretch" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 12, alignItems: "stretch" }}>
         {PLANS.map(plan => (
-          <div key={plan.id} style={{ background: T.surface, border: `${plan.best ? 2 : 1}px solid ${plan.best ? ACCENT : T.border}`, borderRadius: 12, padding: "20px 18px", display: "flex", flexDirection: "column", position: "relative" }}>
-            {plan.best && <span style={{ position: "absolute", top: -11, left: 18, background: ACCENT, color: "#fff", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", borderRadius: 99, padding: "3px 10px" }}>BEST VALUE</span>}
-            <div style={{ fontSize: 16, fontWeight: 700 }}>{plan.name}</div>
-            <div style={{ fontSize: 13, color: T.muted, marginTop: 2 }}>{plan.blurb}</div>
-            <div style={{ margin: "14px 0 4px" }}>
-              <span style={{ fontSize: 30, fontWeight: 800 }}>{plan.price}</span>
-              <span style={{ fontSize: 14, color: T.muted }}>{plan.per}</span>
-            </div>
-            {plan.yearKey
-              ? <div style={{ fontSize: 13, color: T.muted, minHeight: 20 }}>or {dollars(CATALOG.pro_year.amount)} a year, saving {dollars(YEAR_SAVES)}</div>
-              : <div style={{ minHeight: 20 }} />}
-            <ul style={{ listStyle: "none", padding: 0, margin: "14px 0 18px", display: "grid", alignContent: "start", gap: 8, fontSize: 14, lineHeight: 1.4, flex: 1 }}>
-              {plan.features.map(f => (
-                <li key={f} style={{ display: "flex", gap: 8 }}><span aria-hidden="true" style={{ color: T.yes, fontWeight: 700 }}>✓</span><span>{f}</span></li>
-              ))}
+          <section key={plan.id} aria-label={plan.name} style={{ ...card, padding: "20px 18px", display: "flex", flexDirection: "column", position: "relative", border: `${plan.best ? 2 : 1}px solid ${plan.best ? ACCENT : T.border}` }}>
+            {plan.best && <span style={{ ...tag(ACCENT, T.onAccent), position: "absolute", top: -11, left: 18 }}>BEST VALUE</span>}
+            <div style={{ font: `750 18px/1.2 ${T.display}` }}>{plan.name}</div>
+            <div style={{ fontSize: 14, color: T.muted, marginTop: 3 }}>{plan.blurb}</div>
+            <Price plan={plan} />
+            <ul style={{ listStyle: "none", padding: 0, margin: "16px 0 20px", display: "grid", alignContent: "start", gap: 10, fontSize: 14.5, lineHeight: 1.4, flex: 1 }}>
+              {plan.features.map(f => {
+                const [text, note] = Array.isArray(f) ? f : [f];
+                if (note === "Yearly" && period !== "year") return null;
+                return (
+                  <li key={text} style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+                    <span aria-hidden="true" style={{ color: T.yes, fontWeight: 800 }}>✓</span>
+                    <span style={{ flex: 1 }}>{text}</span>
+                    {note && <span style={tag(note === "Soon" ? T.raised : T.yesSoft, note === "Soon" ? T.muted : T.yes)}>{note}</span>}
+                  </li>
+                );
+              })}
             </ul>
-            <div style={{ display: "grid", gap: 8 }}>
-              <Action plan={plan} />
-              {plan.yearKey && open && signedIn && !paidHeld && held !== "pro" && <Action plan={plan} k={plan.yearKey} label={`Pay yearly · ${dollars(CATALOG.pro_year.amount)}`} kind="secondary" />}
-            </div>
-          </div>
+            <Action plan={plan} />
+          </section>
         ))}
       </div>
 
-      <div style={{ marginTop: 14, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "16px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+      <section aria-label="Day pass" style={{ ...card, marginTop: 12, padding: "16px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ flex: "999 1 260px" }}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>{CATALOG.pass.name} · {dollars(CATALOG.pass.amount)}</div>
-          <div style={{ fontSize: 14, color: T.muted, marginTop: 2 }}>Everything in Sports Pro for {CATALOG.pass.hours} hours. One payment, nothing renews. A good way to try it on a big game day.</div>
+          <div style={{ font: `750 17px/1.2 ${T.display}` }}>{CATALOG.pass.name} · <span className="num">{dollars(CATALOG.pass.amount)}</span></div>
+          <div style={{ fontSize: 14, color: T.muted, marginTop: 4, lineHeight: 1.45 }}>Everything in Pro for {CATALOG.pass.hours} hours. One payment, nothing renews. Try it on a big game day.</div>
         </div>
-        {/* The text takes the row's spare width; wrapped onto its own line on a phone, the button takes all of it. */}
         <div style={{ flex: "1 1 220px" }}>
           {!me ? <span style={btn("secondary", true)}>&nbsp;</span>
             : !open ? <span style={btn("secondary", true)}>Coming soon</span>
             : !signedIn ? <a href="/signup?next=/pricing" style={btn("secondary")}>Sign up to buy</a>
-            : passCovered ? <span style={btn("secondary", true)}>Included in your plan</span>
+            : passCovered ? <span style={btn("secondary", true)}>Included in Pro</span>
             : <button onClick={() => buy("pass")} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "pass" ? "Opening checkout…" : `${passRunning ? `Add ${CATALOG.pass.hours} hours` : "Buy a day pass"} · ${dollars(CATALOG.pass.amount)}`}</button>}
           {passRunning && !passCovered && <div style={{ fontSize: 12, color: T.muted, marginTop: 6, textAlign: "center" }}>Yours runs until {new Date(me.plan.passUntil).toLocaleString()}</div>}
         </div>
-      </div>
+      </section>
 
       {error && <p role="alert" style={{ color: T.no, fontSize: 14, textAlign: "center", margin: "14px 0 0" }}>{error}</p>}
 
-      <div style={{ maxWidth: 680, margin: "24px auto 0", fontSize: 13, color: T.muted, lineHeight: 1.6, textAlign: "center" }}>
-        <p style={{ margin: "0 0 8px" }}>
-          Prices in US dollars. Subscriptions renew automatically until you cancel; cancel anytime from your account and keep
-          access to the end of the period you paid for. Taxes may be added where required. Payments are handled by Stripe.
+      <div style={{ maxWidth: 700, margin: "26px auto 0", fontSize: 13, color: T.muted, lineHeight: 1.6, textAlign: "center", display: "grid", gap: 8 }}>
+        <p style={{ margin: 0 }}>
+          Arbs pay the same whichever side wins, but they carry real risks: prices move before both bets are in, sportsbooks can void a bet,
+          and they limit accounts that win. Returns are small per bet, usually under 1%.
         </p>
-        <p style={{ margin: "0 0 8px" }}>
-          MarketSlap shows information and takes no bets. Prices move and estimates can be wrong; no profit is guaranteed.
+        <p style={{ margin: 0 }}>
+          +EV is a tool, not a promise. It shows prices that beat the sportsbooks' consensus after fees, and we publish how picks like them have
+          actually done: on the exchanges they have lost after fees.
+        </p>
+        <p style={{ margin: 0 }}>
+          Prices in US dollars. Subscriptions renew automatically until you cancel; cancel anytime from your account and keep access to the end
+          of the period you paid for. Taxes may be added where required. Payments are handled by Stripe. MarketSlap shows information and takes
+          no bets.
         </p>
         <p style={{ margin: 0 }}><a href="/terms" style={{ color: T.muted }}>Terms</a> · <a href="/privacy" style={{ color: T.muted }}>Privacy</a></p>
       </div>

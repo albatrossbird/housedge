@@ -197,7 +197,7 @@ ok(testMode({ STRIPE_SECRET_KEY: "sk_test_1" }) && !testMode({ STRIPE_SECRET_KEY
 reset();
 const p1 = await ensurePrice("pro");
 const made = priceOf("pro");
-ok(made && made.unit_amount === 5900 && made.recurring?.interval === "month" && made.product === "ms_pro" && made.metadata.ms_key === "pro" && S.st.products.ms_pro, "the first use makes the product and the price from lib/billing/plans.js", JSON.stringify(made));
+ok(made && made.unit_amount === 4900 && made.recurring?.interval === "month" && made.product === "ms_pro" && made.metadata.ms_key === "pro" && S.st.products.ms_pro, "the first use makes the product and the price from lib/billing/plans.js", JSON.stringify(made));
 const callsBefore = S.st.calls.length;
 ok((await ensurePrice("pro")) === p1 && S.st.calls.length === callsBefore, "a second use is served from memory");
 await ensurePrice("pro_year");
@@ -211,6 +211,7 @@ ok((await run(checkout, { method: "GET", at: "AT1", body: { plan: "pro" } })).st
 ok((await run(checkout, { at: "AT1", origin: "https://evil.example", body: { plan: "pro" } })).statusCode === 403, "checkout: a cross-site POST is refused");
 ok((await run(checkout, { body: { plan: "pro" } })).statusCode === 401, "checkout: signed out is refused");
 ok((await run(checkout, { at: "AT1", body: { plan: "platinum" } })).statusCode === 400, "checkout: an unknown plan is refused");
+ok((await run(checkout, { at: "AT1", body: { plan: "ev" } })).statusCode === 400 && !Object.keys(S.st.sessions).length, "checkout: +EV on its own is not sold, though the plan still exists");
 process.env.ACCOUNTS_MODE = "off";
 ok((await run(checkout, { at: "AT1", body: { plan: "pro" } })).statusCode === 404, "checkout: nothing while accounts are off");
 process.env.ACCOUNTS_MODE = "on";
@@ -227,18 +228,18 @@ ok(cs.mode === "subscription" && cs.customer === cus1 && cs.client_reference_id 
 ok(cs.subscription_data?.metadata?.profile_id === "u1" && cs.success_url === "https://marketslap.com/account?checkout=done&session_id={CHECKOUT_SESSION_ID}" && cs.cancel_url === "https://marketslap.com/pricing", "checkout: returns to the account page with the session id, or to pricing");
 ok(prof("u1").plan === "free", "checkout grants nothing by itself");
 
-await run(checkout, { at: "AT1", body: { plan: "ev" } });
+await run(checkout, { at: "AT1", body: { plan: "arb" } });
 ok(Object.keys(S.st.customers).length === 1, "checkout: a second checkout reuses the customer");
 S.st.customers = {};
-await run(checkout, { at: "AT1", body: { plan: "ev" } });
+await run(checkout, { at: "AT1", body: { plan: "arb" } });
 ok(prof("u1").stripe_customer_id !== cus1 && S.st.customers[prof("u1").stripe_customer_id], "checkout: a stored customer Stripe no longer knows (a test one, once the key is live) is replaced");
 
 const before = prof("u1").stripe_customer_id;
 S.st.customers[before] = { id: before, deleted: true };     // how Stripe answers for a deleted customer: 200, not 404
-await run(checkout, { at: "AT1", body: { plan: "ev" } });
+await run(checkout, { at: "AT1", body: { plan: "arb" } });
 ok(prof("u1").stripe_customer_id !== before && !S.st.customers[prof("u1").stripe_customer_id].deleted, "checkout: a customer deleted in Stripe is replaced, not checked out as");
 
-prof("u1").plan = "ev"; prof("u1").plan_until = new Date(Date.now() + 86400000).toISOString();
+prof("u1").plan = "arb"; prof("u1").plan_until = new Date(Date.now() + 86400000).toISOString();
 r = await run(checkout, { at: "AT1", body: { plan: "pro" } });
 ok(r.statusCode === 409 && r.body.manage === true, "checkout: a second subscription is refused and sent to the portal", JSON.stringify(r.body));
 ok((await run(checkout, { at: "AT1", body: { plan: "pass" } })).statusCode === 200, "checkout: a day pass beside a single-board plan is allowed");
@@ -281,9 +282,9 @@ ok(prof("u1").plan === "arb", "webhook: a resubscription to another plan takes e
 
 // A checkout whose customer-id write was lost: the customer's metadata finds the profile.
 S.st.customers.cus_orphan = { id: "cus_orphan", email: "b@x.com", metadata: { profile_id: "u2" } };
-sub("cus_orphan", "ev");
+sub("cus_orphan", "arb");
 await deliver(ev("customer.subscription.created", { customer: "cus_orphan" }));
-ok(prof("u2").plan === "ev" && prof("u2").stripe_customer_id === "cus_orphan", "webhook: a customer not yet stored on a profile is found through its metadata, and stored");
+ok(prof("u2").plan === "arb" && prof("u2").stripe_customer_id === "cus_orphan", "webhook: a customer not yet stored on a profile is found through its metadata, and stored");
 S.st.customers.cus_dash = { id: "cus_dash", email: "c@x.com", metadata: {} };
 r = await deliver(ev("customer.subscription.created", { customer: "cus_dash" }));
 const r2 = await deliver(ev("customer.subscription.created", { customer: "cus_gone" }));
@@ -350,11 +351,11 @@ ok((await run(confirm, { at: "AT2", body: { session_id: mine.id } })).statusCode
 ok((await recordPassSession(mine.id, { forProfile: "u2" })).forbidden && !S.payments.length, "a pass session is applied only to the profile it belongs to, even if a caller skipped its own check");
 r = await run(confirm, { at: "AT1", body: { session_id: mine.id } });
 ok(r.statusCode === 200 && prof("u1").pass_until, "confirm: the buyer's own pass applies at once, without waiting on the webhook", JSON.stringify(r.body));
-await run(checkout, { at: "AT2", body: { plan: "ev" } });
+await run(checkout, { at: "AT2", body: { plan: "arb" } });
 const subCs = Object.values(S.st.sessions).find(s => s.mode === "subscription");
-sub(prof("u2").stripe_customer_id, "ev");
+sub(prof("u2").stripe_customer_id, "arb");
 r = await run(confirm, { at: "AT2", body: { session_id: subCs.id } });
-ok(r.statusCode === 200 && prof("u2").plan === "ev", "confirm: a subscription applies at once too");
+ok(r.statusCode === 200 && prof("u2").plan === "arb", "confirm: a subscription applies at once too");
 
 // ---- portal and /api/me ----------------------------------------------------
 reset();

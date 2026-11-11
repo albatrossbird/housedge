@@ -66,7 +66,7 @@ export default function SignUp() {
   const google = () => window.location.assign(`/api/auth/google?agree=1&next=${encodeURIComponent(next)}`);
 
   if (me && !me.enabled) {
-    return <AccountShell title="Sign up"><h1 style={{ fontSize: 20, margin: 0 }}>Accounts are coming soon</h1>
+    return <AccountShell title="Sign up"><h1 style={{ font: "800 26px/1.15 var(--display)", letterSpacing: "-0.02em", margin: 0 }}>Accounts are coming soon</h1>
       <p style={{ color: T.muted, fontSize: 14, lineHeight: 1.5 }}>MarketSlap accounts are not open yet. Everything on the site is free to use in the meantime.</p></AccountShell>;
   }
 
@@ -74,7 +74,7 @@ export default function SignUp() {
     <AccountShell title="Sign up">
       {!sentTo ? (
         <>
-          <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>Create your free account</h1>
+          <h1 style={{ font: "800 26px/1.15 var(--display)", letterSpacing: "-0.02em", margin: "0 0 6px" }}>Create your free account</h1>
           <p style={{ margin: "0 0 22px", color: T.muted, fontSize: 14 }}>Already have one? The same buttons log you in.</p>
           <button type="button" onClick={google} style={{ ...secondary, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
             <GoogleMark /> Continue with Google
@@ -92,7 +92,7 @@ export default function SignUp() {
         </>
       ) : (
         <>
-          <h1 style={{ fontSize: 20, margin: "0 0 6px" }}>Check your email</h1>
+          <h1 style={{ font: "800 26px/1.15 var(--display)", letterSpacing: "-0.02em", margin: "0 0 6px" }}>Check your email</h1>
           <p style={{ margin: "0 0 18px", color: T.muted, fontSize: 14, lineHeight: 1.5 }}>
             We sent a link to <b style={{ color: T.text }}>{sentTo}</b>. Open it on this device, or type the code from the email here.
           </p>
