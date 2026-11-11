@@ -457,7 +457,16 @@ migration is `0034` (`payments`). Billing needs accounts on as well, so in
     Stripe does not charge.
 - **What is sold (decided 2026-11-11):** Free; **Arbs** $29/month or
   $249/year; **Pro** (Arbs + +EV, with alerts once built) $49/month or
-  $399/year; a $9 day pass (Pro for 24 hours). AVO is $88 a month with
+  $399/year; a $5 day pass (Pro for 24 hours); and a **$1 trial**: 3 days
+  of Pro that becomes Pro monthly unless cancelled.
+  - **The trial is a subscription with `trial_period_days`, plus the $1 as
+    a one-time line** on the first invoice. Checkout refuses it to any
+    customer who has EVER had a subscription (`status=all`), and to a paying
+    member; a day-pass buyer may still take it. No promotion codes on it.
+    The first invoice's plan is read from its RECURRING line, since the $1
+    names none.
+  - It is once per account, not per card: a new email gets a new trial.
+    Stripe's card fingerprint is the next step if that is abused. AVO is $88 a month with
   near-instant odds and many more books, so the price sits well under it.
   - **+EV is not sold on its own.** Its backtests lose after fees on the
     exchanges, so it rides inside Pro as a tool with a published record,

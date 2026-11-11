@@ -56,6 +56,7 @@ export default function Terms() {
         <li style={li}>Payments are processed by Stripe. We do not see or store your full card number.</li>
         <li style={li}>Subscriptions are billed in advance and renew automatically each period until you cancel. You can cancel at any time; access continues to the end of the period you have paid for.</li>
         <li style={li}>A day pass is a one-time purchase for the stated period and does not renew.</li>
+        <li style={li}>A trial costs the amount shown and lasts the stated number of days. When it ends it becomes a paid subscription at the regular price shown before you start, unless you cancel before it ends. Cancel anytime from your account. One trial per person.</li>
         <li style={li}>Except where the law requires otherwise, payments are not refundable, including for partly used periods. If something went wrong on our side, contact us and we will look at it.</li>
         <li style={li}>We may change prices. A change to a subscription you hold takes effect at your next renewal, and we will tell you in advance.</li>
         <li style={li}>Prices do not include taxes, which may be added where required.</li>

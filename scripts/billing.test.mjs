@@ -203,7 +203,7 @@ ok((await ensurePrice("pro")) === p1 && S.st.calls.length === callsBefore, "a se
 await ensurePrice("pro_year");
 ok(priceOf("pro_year").recurring.interval === "year" && Object.keys(S.st.products).length === 1, "the yearly price joins the existing product rather than failing on it");
 await ensurePrice("pass");
-ok(priceOf("pass").recurring == null && priceOf("pass").unit_amount === 900, "the day pass is a one-off price");
+ok(priceOf("pass").recurring == null && priceOf("pass").unit_amount === 500, "the day pass is a one-off price");
 
 // ---- checkout ------------------------------------------------------------
 reset();
@@ -254,6 +254,30 @@ ok(passCs.metadata.ms_key === "pass" && passCs.payment_intent_data.metadata.prof
 reset(); S.st.down = true;
 r = await run(checkout, { at: "AT1", body: { plan: "pro" } });
 ok(r.statusCode === 502 && /stripe down/.test(r.body.error), "checkout: a Stripe outage is a 502 naming it");
+
+// ---- the $1 trial ----------------------------------------------------------
+reset();
+r = await run(checkout, { at: "AT1", body: { plan: "trial" } });
+const tcs = Object.values(S.st.sessions)[0];
+const trialFee = S.st.prices.find(p => p.metadata.ms_key === "trial");
+ok(r.statusCode === 200 && tcs.mode === "subscription" && tcs.subscription_data?.trial_period_days === "3", "trial: a Pro subscription with a 3-day trial", JSON.stringify(tcs));
+ok(tcs.line_items.length === 2 && tcs.line_items[0].price === priceOf("pro").id && tcs.line_items[1].price === trialFee?.id, "trial: Pro's monthly price, plus the trial fee as a second line");
+ok(trialFee && trialFee.unit_amount === 100 && trialFee.recurring == null && trialFee.product === "ms_pro", "trial: the fee is a one-time $1 on the Pro product");
+ok(tcs.allow_promotion_codes === undefined && tcs.subscription_data?.metadata?.profile_id === "u1", "trial: no promotion codes on top, and the subscription names the profile");
+S.st.subs.push({ id: "sub_old", customer: prof("u1").stripe_customer_id, status: "canceled", items: { data: [{ price: priceOf("pro") }] }, current_period_end: 1 });
+r = await run(checkout, { at: "AT1", body: { plan: "trial" } });
+ok(r.statusCode === 409 && /new members/.test(r.body.error) && Object.keys(S.st.sessions).length === 1, "trial: refused to anyone who has ever had a subscription, even a cancelled one", JSON.stringify(r.body));
+await run(checkout, { at: "AT2", body: { plan: "pass" } });
+ok((await run(checkout, { at: "AT2", body: { plan: "trial" } })).statusCode === 200, "trial: a customer who only ever bought a day pass may still take it");
+prof("u2").plan = "arb"; prof("u2").plan_until = new Date(Date.now() + 86400000).toISOString();
+ok((await run(checkout, { at: "AT2", body: { plan: "trial" } })).statusCode === 409, "trial: refused to a paying member (they switch plans in the portal)");
+// The trial's first invoice: $1, the plan read from the recurring line.
+const tc = prof("u1").stripe_customer_id;
+S.st.invoices.in_t = { id: "in_t", customer: tc, status: "paid", amount_paid: 100, currency: "usd", payment_intent: "pi_t", livemode: false, status_transitions: { paid_at: 1794000000 },
+  lines: { data: [{ price: trialFee }, { price: priceOf("pro") }] } };
+S.st.subs.push({ id: "sub_t", customer: tc, status: "trialing", current_period_end: Math.floor(Date.now() / 1000) + 3 * 86400, items: { data: [{ price: priceOf("pro") }] } });
+await deliver({ id: "evt_t", type: "invoice.paid", data: { object: { id: "in_t", customer: tc } } });
+ok(S.payments.find(p => p.id === "in_t")?.plan === "pro" && S.payments.find(p => p.id === "in_t")?.amount_cents === 100 && prof("u1").plan === "pro", "trial: the $1 is recorded as a Pro payment and the account is Pro while trialing");
 
 // ---- webhook -------------------------------------------------------------
 reset();
