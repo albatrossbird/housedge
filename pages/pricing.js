@@ -4,7 +4,9 @@
 // Arbs is the product sold on money; +EV rides inside Pro as a tool with a
 // published record, never as a profit claim (decided 2026-11-11). Every
 // button says what pressing it does right now: "Coming soon" while billing
-// is off, "Sign up" when signed out, "Current plan" for the one held, "Switch
+// is off, "Sign up" when signed out, "Current plan" for the one held, the
+// $1 trial on Pro for anyone on the free plan (checkout enforces once per
+// account), "Switch
 // plan" to move between paid plans (Stripe's portal prorates; a second
 // checkout would bill twice).
 import { useEffect, useState } from "react";
@@ -19,7 +21,7 @@ const PLANS = [
     features: ["Kalshi and Polymarket prices side by side, with search", `Sports +EV prices under ${cap}, with how picks like them have actually done`, "How many arbs are open right now, by sport"] },
   { id: "arb", name: CATALOG.arb.name, blurb: "Pregame arbs, for steady side income.", month: "arb", year: "arb_year",
     features: ["Every pregame arb we find across 17 sportsbooks and exchanges", "Returns after each venue's fees", "Stake calculator, with links that open the bet", "Filters for your books, kickoff window and bet types"] },
-  { id: "pro", name: CATALOG.pro.name, blurb: "Arbs and +EV, with alerts.", month: "pro", year: "pro_year", best: true,
+  { id: "pro", name: CATALOG.pro.name, blurb: "Arbs and +EV, with alerts.", month: "pro", year: "pro_year", trial: "trial", best: true,
     features: ["Everything in Arbs", "Every +EV price, with quality flags and our published track record", ["Email alerts on your own conditions", "Soon"], ["A free 1:1 onboarding call", "Yearly"]] },
 ];
 
@@ -71,11 +73,26 @@ export default function Pricing() {
     }
     const kind = plan.best ? "primary" : "secondary";
     if (!open) return <span style={btn(kind, true)}>Coming soon</span>;
-    if (!signedIn) return <a href="/signup?next=/pricing" style={btn(kind)}>Sign up to subscribe</a>;
+    // The $1 trial, on the monthly view only (it becomes the monthly plan).
+    const t = plan.trial && period === "month" && CATALOG[plan.trial];
+    const trialNote = t && <div style={{ fontSize: 12.5, color: T.muted, textAlign: "center", lineHeight: 1.45 }}>{dollars(t.amount)} today, then {dollars(CATALOG[t.converts].amount)}/month after {t.trialDays} days. Cancel before then and you pay nothing more. One trial per account.</div>;
+    if (!signedIn) {
+      if (t) return <div style={{ display: "grid", gap: 8 }}><a href="/signup?next=/pricing" style={btn(kind)}>Sign up to try {t.trialDays} days for {dollars(t.amount)}</a>{trialNote}</div>;
+      return <a href="/signup?next=/pricing" style={btn(kind)}>Sign up to subscribe</a>;
+    }
     if (held === plan.id && me?.hasBilling) return <button onClick={manage} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "manage" ? "Opening…" : "Current plan · Manage"}</button>;
     if (held === plan.id) return <span style={btn("secondary", true)}>Current plan</span>;
     if (held === "pro") return <span style={btn("secondary", true)}>Included in Pro</span>;
     if (paidHeld) return <button onClick={manage} disabled={!!busy} style={btn(kind, !!busy)}>{busy === "manage" ? "Opening…" : "Switch plan"}</button>;
+    if (t && held === "free") {
+      return (
+        <div style={{ display: "grid", gap: 8 }}>
+          <button onClick={() => buy(plan.trial)} disabled={!!busy} style={btn(kind, !!busy)}>{busy === plan.trial ? "Opening checkout…" : `Try ${t.trialDays} days for ${dollars(t.amount)}`}</button>
+          <button onClick={() => buy(key)} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === key ? "Opening checkout…" : `Or start ${plan.name} now`}</button>
+          {trialNote}
+        </div>
+      );
+    }
     return <button onClick={() => buy(key)} disabled={!!busy} style={btn(kind, !!busy)}>{busy === key ? "Opening checkout…" : `Get ${plan.name}`}</button>;
   }
 

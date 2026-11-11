@@ -76,6 +76,13 @@ Signed in as an allowlisted tester:
 - **Manage billing** → switch to Pro → back on `/account` it says Pro. Cancel → it stays until the period ends.
 - Buy a day pass: the account page shows when it ends. A second one adds 24
   hours.
+- With a fresh account, **Try 3 days for $1**:
+  - Checkout shows $1 today and $49 a month from the trial's end. The account
+    page says Pro.
+  - In the Stripe dashboard the subscription is "Trialing".
+  - Test clocks (Billing → Test clocks) can move time forward to see it
+    convert, or cancel it to see it end.
+  - A second trial on the same account is refused.
 - Refund a payment from the Stripe dashboard: `payments.refunded_cents` fills in.
 
 ## 7. Going live
