@@ -1,10 +1,10 @@
-// POST { plan: "ev" | "arb" | "pro" | "pro_year" | "pass" } -> { url } of a
+// POST { plan: "arb" | "arb_year" | "pro" | "pro_year" | "pass" } -> { url } of a
 // Stripe Checkout page. Nothing here grants anything: the plan changes only
 // when Stripe says it was paid (the webhook, or /api/billing/confirm).
 import { buyer } from "../../../lib/billing/buyer.js";
 import { stripe, ensurePrice } from "../../../lib/billing/stripe.js";
 import { ensureCustomer } from "../../../lib/billing/sync.js";
-import { CATALOG, isSubscription } from "../../../lib/billing/plans.js";
+import { CATALOG, isSubscription, isOffered } from "../../../lib/billing/plans.js";
 import { entitlementsOf } from "../../../lib/entitlements.js";
 
 export default async function handler(req, res) {
@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     const b = await buyer(req, res);
     if (b.error) return res.status(b.status).json({ error: b.error });
     const item = CATALOG[req.body?.plan];
-    if (!item) return res.status(400).json({ error: "unknown plan" });
+    if (!isOffered(item)) return res.status(400).json({ error: "unknown plan" });
     const { profile, site } = b;
     const ent = entitlementsOf(profile);
     // One subscription per account: a second would bill twice for what the
@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
     // A pass beside a running pass is allowed: they stack (lib/billing/sync.js).
     if (!isSubscription(item) && ent.plan === "pro") {
-      return res.status(409).json({ error: "Sports Pro already includes everything a day pass unlocks." });
+      return res.status(409).json({ error: "Pro already includes everything a day pass unlocks." });
     }
     const customer = await ensureCustomer(profile);
     const price = await ensurePrice(item.key);

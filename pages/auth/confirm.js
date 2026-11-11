@@ -27,7 +27,7 @@ export default function Confirm() {
 
   return (
     <AccountShell title="Continue to MarketSlap">
-      <h1 style={{ fontSize: 20, margin: "0 0 6px" }}>Almost there</h1>
+      <h1 style={{ font: "800 26px/1.15 var(--display)", letterSpacing: "-0.02em", margin: "0 0 6px" }}>Almost there</h1>
       {router.isReady && !tokenHash ? (
         <p style={{ color: T.muted, fontSize: 14 }}>This link is incomplete. <a href="/signup">Request a new one.</a></p>
       ) : (

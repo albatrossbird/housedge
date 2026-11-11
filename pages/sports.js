@@ -221,8 +221,9 @@ export default function Sports() {
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px clamp(12px, 4vw, 24px) 32px" }}>
         <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>Prices that beat the books</h1>
         <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.5 }}>
-          Each price is compared with a fair price built from the sportsbooks' consensus, after the venue's fee.
-          Picks like these have won about 2 points less often than the consensus said, so treat anything under +2% as no edge.
+          Each price is compared with a fair price built from the sportsbooks' consensus, after the venue's fee. Every +EV tool shows this
+          number; we also say what it has been worth. Picks like these have won about 2 points less often than the consensus said, so treat
+          anything under +2% as no edge, and exchange picks have lost after fees in our backtests.
         </p>
         <div style={{ marginTop: 10, fontSize: 12, color: ageSec != null && ageSec > 900 ? T.arb : T.muted }}>
           {board ? `Scanned ${ago(ageSec)}${ageSec > 900 ? " — the scanner may be behind" : ""}` : error ? "" : "Loading…"}
@@ -259,8 +260,8 @@ export default function Sports() {
           {tab === "arb" && locked?.arb && (
             <LockedCard signedIn={!!me?.user}
               title={lockedArb ? `${lockedArb} arbitrage ${lockedArb === 1 ? "pair" : "pairs"} right now` : "No arbitrage right now"}
-              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with the Arbitrage plan or Sports Pro.`
-                : "Arbitrage is rare and short-lived. The Arbitrage plan or Sports Pro shows every pair the moment it appears."} />
+              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with Arbs or Pro.`
+                : "Arbs or Pro shows every pair as soon as a scan finds it."} />
           )}
           {list.slice(0, shown).map((x, i) => tab === "ev" ? <EvCard key={i} r={x} /> : <ArbCard key={i} a={x} />)}
           {list.length > shown && (
@@ -271,7 +272,7 @@ export default function Sports() {
           {tab === "ev" && locked?.ev && lockedEv > 0 && (
             <LockedCard signedIn={!!me?.user}
               title={`${lockedEv} more ${lockedEv === 1 ? "price" : "prices"} at +${Math.round(locked.ev.cap * 100)}% EV or better`}
-              detail={`Free shows edges under +${Math.round(locked.ev.cap * 100)}%. The +EV plan or Sports Pro shows all of them.`} />
+              detail={`Free shows edges under +${Math.round(locked.ev.cap * 100)}%. Pro shows all of them.`} />
           )}
         </div>
 

@@ -58,8 +58,8 @@ export default function Account() {
 
   return (
     <AccountShell title="Account">
-      <h1 style={{ fontSize: 20, margin: "0 0 12px" }}>Your account</h1>
-      {notice && <p role="status" style={{ background: `${T.yes}12`, color: T.yes, borderRadius: 8, padding: "10px 12px", fontSize: 14, margin: "0 0 8px" }}>{notice}</p>}
+      <h1 style={{ font: "800 26px/1.15 var(--display)", letterSpacing: "-0.02em", margin: "0 0 12px" }}>Your account</h1>
+      {notice && <p role="status" style={{ background: T.yesSoft, color: T.yes, borderRadius: 12, padding: "10px 12px", fontSize: 14, margin: "0 0 8px" }}>{notice}</p>}
       <div style={row}><span style={{ color: T.muted }}>Email</span><span style={{ overflowWrap: "anywhere", textAlign: "right" }}>{me.user?.email}</span></div>
       <div style={row}>
         <span style={{ color: T.muted }}>Plan</span>
@@ -73,7 +73,7 @@ export default function Account() {
       {me.billing?.enabled
         ? (
           <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            {free && <a href="/pricing" style={{ ...primary, flex: 1, textAlign: "center", textDecoration: "none", boxSizing: "border-box" }}>See plans</a>}
+            {free && <a href="/pricing" style={{ ...primary, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", boxSizing: "border-box" }}>See plans</a>}
             {me.hasBilling && <button onClick={manage} disabled={busy} style={{ ...secondary, flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Opening…" : "Manage billing"}</button>}
           </div>
         )
