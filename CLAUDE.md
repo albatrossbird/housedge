@@ -921,6 +921,16 @@ late-favourite rules on them (`source: archive`, `strategy=paper`) after
 `m15ArchiveFolder` (readers) in `lib/m15.js` decide the folder;
 `scripts/m15-stream.test.mjs` pins all three.
 
+**Measured 2026-11-12: the answer is no** (run 43313651201, recorded
+books 10-29..11-12, 10 contracts, the four paper rules unchanged plus the
+trader's p75, 75-97c at 15-45s). None of 20 coin/rule cells has an edge,
+and four lose at t <= -2 (ETH fav-15-60s -4.63c, SOL fav-60-120s -4.19c,
+XRP fav-15-60s -3.55c, DOGE fav-60-120s -3.06c). p75: ETH -2.65c, SOL
+-3.05c, XRP +1.41c (t 0.7), DOGE -2.15c. On ETH, SOL and DOGE the
+favourite won 2-4 points less often than its price plus fee needed. The
+same as the four-month trade tape: Bitcoin's late favourite does not
+travel to the other coins.
+
 - **Settlement prices, free** (`m15_settlements`, migration `0032`,
   written by the backfill): Kalshi's `expiration_value` on a settled
   market IS Pyth's price at that close, beside `floor_strike`. **This
@@ -1496,6 +1506,15 @@ $0.21 from Kalshi's strike (p90 $0.68).
     then. Two positive months after two negative ones is a shape, not
     an edge. **The test that decides it** is SOL's recorded book (m15c/,
     from 2026-10-30) on the days after 11-02.
+  - **November did not confirm SOL (measured 2026-11-12, run
+    43313697548, tape, 11-02..11-11, 1bp, SOL's own index rebuilt 951 of
+    952 windows on Kalshi's side).** 272 orders, 170 filled, +0.18c, t
+    0.05, halves -6.06c / +6.87c, -0.83c at 1c worse. Misses again beat
+    fills (55.7% against 48.8%). 2bp read +3.71c (t 1.72), reference
+    only. The KXBTC15M control through the same tape made +5.80c (t 1.90,
+    both halves positive); less the tape's ~0.9c, about +4.9c. SOL
+    sharp-move is dropped. A recorded-book version of this test would
+    need the decider run on m15c/ books, which no script does yet.
   - **Cost:** the trade tape is read only around events
     (`decideOnTape`). Kalshi holds a runner to ~5 requests a second, so
     two coins fit a 150-minute run, about 90 minutes each pair.
