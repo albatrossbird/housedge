@@ -1372,6 +1372,16 @@ $0.21 from Kalshi's strike (p90 $0.68).
   +3.92c / +5.09c / +1.41c: the middle bucket changes sign. The rule stays
   as it is at 10 contracts. Next review is at 300 settled: stop at t <= -1
   or a $100 drawdown.
+  **A wider limit does not pay, and size does not cause the misses
+  (section D1, run 43350339910, 10-22..11-12, 489 1bp decisions, 20/40/80
+  contracts).** At +250ms the same 77.9% of orders fill at every size
+  (contracts filled of asked 77.7% / 77.3% / 76.9%), so a miss is the book
+  moving away before the order lands, not a thin book. Over seen +1c
+  (+3.90c / +4.12c / +4.24c a contract, t 2.0-2.2): +2c fills 29 more of
+  the ~108 empty orders and its added contracts made +5.3c to +6.4c, t
+  0.7-0.9; +3c fills 57 more, added contracts +0.4c to +2.6c, t <= 0.5.
+  Neither clears t 2. Latency matters more than the limit: at +100ms, +1c
+  fills 86.5% of orders at +4.6c to +5.2c.
   **Managing the position 15s before the close does nothing (section D3,
   `lib/sharpManage.js`).** The rule was fixed before the run: sell if our
   side's bid is 0.30 or less, buy 10 more if its ask is 0.75 or more.
