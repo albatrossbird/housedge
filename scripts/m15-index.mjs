@@ -79,7 +79,7 @@ const B2_TIMES = [600, 120, 60, 30];
 const B3_TIMES = [600, 300], B3_EDGES = [0, 25, 50, 75, 100, 150, 200];
 const B2_EDGES = [0, 5, 10, 15, 20, 30, 40, 60, 80, 100, 150];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
-const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }];
+const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }, { key: "+2c", c: 2 }, { key: "+3c", c: 3 }];
 // D2's narrower mid bands, each run as its own decider (a narrower band
 // skips an event and may act on a later one in the same window).
 const D_BANDS = [[0.20, 0.80], [0.25, 0.75], [0.30, 0.70], [0.35, 0.65]];
@@ -214,7 +214,7 @@ function finalize(ticker) {
           for (const size of SIZES) {
             const f = s2 ? walkFill(s2, side, Math.min(seen + l.c / 100, 0.99), size) : { n: 0, cost: 0, pq: 0 };
             const fee = f.n ? roundKalshiFee(0.07 * MULT * f.pq) : 0;
-            Ds.push({ size, thr, delay, limit: l.key, day, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen, cap: limit, mid: r.mid });
+            Ds.push({ size, thr, delay, limit: l.key, day, dec: ticker, n: f.n, won: side === result, cost: f.cost, fee, pnl: (side === result ? f.n : 0) - f.cost - fee, seen, cap: limit, mid: r.mid });
             if (thr === 1 && delay === 250 && l.key === "+1c" && size === SIZES[0] && f.n > 0) {
               // D3: the same filled position, managed at 15s out. Its own
               // cursor: the D cursor has moved past this decision's fill.
@@ -417,6 +417,32 @@ for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_
   const won = f.length ? f.filter(x => x.won).length / f.length : null, paid = ctrs ? f.reduce((s, x) => s + x.cost, 0) / ctrs : null;
   console.log(`   ${`${thr}bp`.padEnd(5)} ${`+${delay}ms`.padStart(6)}  ${l.key.padEnd(5)} ${String(xs.length).padStart(8)} ${pct(xs.length ? f.length / xs.length : null).padStart(7)} ${String(ctrs).padStart(5)}  ${pct(xs.length ? ctrs / (xs.length * size) : null).padStart(9)}  ${pct(won).padStart(7)}  ${(paid == null ? "—" : paid.toFixed(3)).padStart(9)}  ${(S.pnl >= 0 ? "+$" : "-$") + Math.abs(S.pnl).toFixed(2).padStart(6)}  ${cents(S.perCtr).padStart(8)} ${tt(S.t).padStart(6)}  ${cents(S.earlyPerCtr).padStart(8)} ${cents(S.latePerCtr).padStart(8)}`);
 }
+}
+
+{
+  // D1. Does a wider limit buy back the misses for less than it costs?
+  // The same 1bp decisions at +250ms, limit seen +2c / +3c against seen +1c.
+  // A wider limit pays the same for every contract +1c already reached and
+  // adds only contracts on levels above it, so the difference IS the added
+  // contracts: how many, on how many orders, how often they won, and what
+  // they made a contract after the fee (t on the daily difference).
+  console.log("\nD1. WIDER LIMITS (1bp, +250ms): what +2c / +3c add over seen +1c, on the same decisions");
+  console.log("   size  limit   orders filled  ctrs/asked   added: orders  ctrs  won   per added ctr  t(day)    all: per ctr  t(day)");
+  for (const size of SIZES) {
+    const at = key => new Map(Ds.filter(x => x.size === size && x.thr === 1 && x.delay === 250 && x.limit === key).map(x => [x.dec, x]));
+    const base = at("+1c");
+    for (const key of ["+1c", "+2c", "+3c"]) {
+      const m = at(key), xs = [...m.values()], f = xs.filter(x => x.n > 0), ctrs = f.reduce((a, x) => a + x.n, 0);
+      const all = dayStats(xs.map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl })));
+      const diff = xs.map(x => { const b = base.get(x.dec); return { day: x.day, ctrs: x.n - (b?.n ?? 0), pnl: x.pnl - (b?.pnl ?? 0), won: x.won, newOrder: !(b?.n > 0) && x.n > 0 }; });
+      const added = diff.filter(d => d.ctrs > 0), D = dayStats(diff.map(({ day, ctrs, pnl }) => ({ day, ctrs, pnl })));
+      const addWon = added.length ? added.filter(d => d.won).length / added.length : null;
+      const extra = key === "+1c" ? "                     —" : `${String(added.filter(d => d.newOrder).length).padStart(6)}/${String(added.length).padEnd(4)} ${String(D.ctrs).padStart(5)} ${pct(addWon).padStart(6)}   ${cents(D.perCtr).padStart(9)}  ${tt(D.t).padStart(6)}`;
+      console.log(`   ${String(size).padStart(4)}  ${key.padEnd(5)} ${String(xs.length).padStart(7)} ${pct(xs.length ? f.length / xs.length : null).padStart(6)}  ${pct(xs.length ? ctrs / (xs.length * size) : null).padStart(9)}   ${extra}    ${cents(all.perCtr).padStart(8)}  ${tt(all.t).padStart(6)}`);
+    }
+  }
+  console.log("   added: orders = orders +1c left EMPTY that now fill / orders that gain any contract. A wider limit is worth it");
+  console.log("   only if 'per added ctr' is positive with t near 2, since every added contract is bought above the price seen.");
 }
 
 {
