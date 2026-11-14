@@ -123,6 +123,30 @@ is on `/markets/<ticker>/orderbook`, or the WebSocket) to measure how
 long each gap lasts. Stop if the median gap lasts under 50ms: only a
 co-located bot gets those. That step gets its own written plan first.
 
+## Note, 2026-11-14 (before any data was read)
+
+Asked the session that wrote the brief where the $10 a day came from.
+The answers, recorded so the bars are fixed before the run:
+
+- **$10 a day is a round number, a screen, not a cost.** Below it,
+  nothing is worth recording. Passing the tape step justifies step 2
+  (recorded books) only, never a build. The tape bar above is unchanged:
+  $140 over 14 days, with at least 7 of the 14 days at $5 or more.
+- **It is a tape figure, an upper bound.** Assume a bot that is not
+  co-located captures at most 20% of it until a recorded book shows
+  otherwise. So $10 a day on the tape is about $2 a day captured.
+- **Legging is not scored at the tape step**, since the tape cannot
+  show it. At the recorded-book step: send both legs at our latency
+  (+250ms, then +100ms), count a fill on one leg only as LEGGED, and
+  price it both unwound at the bid and held to settlement, reporting
+  both.
+- **The bar to build is about $10 a day captured, after legging costs,
+  across 2+ weeks.**
+- **Gaps under ~50ms are a hard stop for research.** Co-location is a
+  spending decision for the user. Report the figure and the gap
+  lifetimes, but do not recommend it unless captured edge at co-located
+  latency is about $100 a day or more, sustained out of sample.
+
 ## Where it runs
 
 Its own script (`scripts/ladder-tape.mjs`, with the pure parts in
