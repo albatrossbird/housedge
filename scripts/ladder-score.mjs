@@ -25,7 +25,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
-import { implicationPairs, contradictionCandidates, allocate, seriesOfTicker } from "../lib/ladder.js";
+import { implicationPairs, contradictionCandidates, allocate, seriesOfTicker, reviveEvent } from "../lib/ladder.js";
 import { parseTrade } from "../lib/m15Tape.js";
 import { kalshiTakerFee } from "../lib/fees.js";
 
@@ -49,6 +49,7 @@ const PASS_TOTAL = 140, PASS_DAY = 5, PASS_DAYS = 7;
 const BOT_MS = 50;
 
 const sp = JSON.parse(readFileSync(join(CACHE, "size-pass.json"), "utf8"));
+for (const m of sp.markets) m.ev = reviveEvent(m.ev); // JSON turned the infinities into null
 const SINCE = Date.parse(`${sp.since}T00:00:00Z`);
 const DAYS = Math.round((Date.parse(`${sp.until}T00:00:00Z`) - SINCE) / 86400000) + 1;
 

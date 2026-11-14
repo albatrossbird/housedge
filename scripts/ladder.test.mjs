@@ -7,7 +7,7 @@
 // fixtures shaped to the code have passed here before while the code was
 // wrong (docs/research/m15.md, the yes_bid_size story).
 
-import { settlementIndex, eventOf, implies, groupKey, implicationPairs, contradictionCandidates, allocate } from "../lib/ladder.js";
+import { settlementIndex, eventOf, implies, groupKey, implicationPairs, contradictionCandidates, allocate, reviveEvent } from "../lib/ladder.js";
 import { kalshiTakerFee } from "../lib/fees.js";
 
 let bad = 0;
@@ -61,6 +61,12 @@ const dogeLow = {"ticker":"KXDOGE-26NOV1218-T0.0100000","strike_type":"custom","
 ok(eventOf(doge)?.lo === 0.2449999 && eventOf(doge)?.loIn === false && eventOf(doge)?.hi === Infinity, "Dogecoin's custom strike reads as above 0.2449999");
 ok(eventOf(dogeLow)?.hi === 0.01 && eventOf(dogeLow)?.lo === -Infinity, "and its low tail as below 0.01");
 ok(!implies(eventOf(dogeLow), eventOf(doge)), "the two Dogecoin tails do not imply each other");
+
+console.log("events survive the cache");
+const viaJson = e => JSON.parse(JSON.stringify(e));
+ok(!implies(viaJson(ev("KXBTC-26NOV1317-B64250")), viaJson(ev("KXBTCD-26NOV1317-T63999.99"))), "raw JSON loses the infinities (the bug this guards)");
+ok(implies(reviveEvent(viaJson(ev("KXBTC-26NOV1317-B64250"))), reviveEvent(viaJson(ev("KXBTCD-26NOV1317-T63999.99")))), "revived, the bucket implies above 63,999.99 again");
+ok(reviveEvent(viaJson(ev("KXBTC-26NOV1317-T64000"))).lo === -Infinity, "and below 64,000 is open below again");
 
 console.log("pairs within a group");
 const g = LIVE.filter(m => groupKey(m) === groupKey(by["KXBTC-26NOV1317-B64250"])).map(m => ({ ticker: m.ticker, ev: eventOf(m) }));
