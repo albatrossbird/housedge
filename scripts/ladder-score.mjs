@@ -22,7 +22,7 @@
 //
 // No verdict is printed while any needed tape is missing.
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { implicationPairs, contradictionCandidates, allocate, seriesOfTicker, reviveEvent } from "../lib/ladder.js";
@@ -119,7 +119,10 @@ if (READ) {
         cursor = page.cursor || "";
       } while (cursor);
       out.sort((a, b) => a[0] - b[0]);
-      writeFileSync(tapePath(t), gzipSync(JSON.stringify(out)));
+      // Written whole or not at all: a container restart mid-write must not
+      // leave a cut-short tape that a resumed read would skip as done.
+      writeFileSync(`${tapePath(t)}.tmp`, gzipSync(JSON.stringify(out)));
+      renameSync(`${tapePath(t)}.tmp`, tapePath(t));
       trades += out.length;
     } catch (e) {
       failed.push(`${t}: ${e.message}`);
