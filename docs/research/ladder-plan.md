@@ -155,3 +155,49 @@ responses), from this branch. It reads only Kalshi, so it can run from
 this session if the sandbox reaches the Kalshi API, or else as a manual
 workflow on the `m15-analysis` queue, one at a time with the other
 analysis runs.
+
+## Size pass, 2026-11-14 (markets only: no tape, no candles, no prices)
+
+`node scripts/ladder-tape.mjs --size-pass`, run from this session's
+sandbox (it reaches the Kalshi API), 921 requests. Window 10-30..11-12,
+all inside the live tier (cutoff 2026-09-13).
+
+**Series in scope**, found from `/series?category=Crypto` (302 series,
+61 hourly, daily or 15-minute): the above/below and range ladders on
+BTC, ETH, SOL, XRP, BNB, HYPE and DOGE (hourly), SHIB (daily), and
+every 15-minute coin. Every one settles on a 60-second CF Benchmarks
+average before its close. Fee `quadratic x1` on all of them, with no fee
+change in or near the window. Left out: the 15-minute coin race
+(KXCRYPTOLEAD15M, a comparison, not a strike); daily series with no
+market in the window (the old non-KX ones, AVAX, BCH, DOT, LINK, LTC,
+XLM).
+
+**Two reader fixes, made before any price was read.** Kalshi words the
+settlement rule three ways ("sixty seconds", "60 seconds", "a 60 second
+average"), and lists Dogecoin and Shiba as `strike_type: custom` with
+the real strikes inside `custom_strike`. The first run excluded both
+coins on that alone. `scripts/ladder.test.mjs` pins all three wordings
+and the custom shape, mutation-checked.
+
+**The 15-minute markets join the hourly groups exactly.** A window's
+`floor_strike` equals the previous window's settlement average on 11,925
+of 11,925 consecutive windows (largest gap 9e-7, float noise), so a
+15-minute market closing on the hour is "at least X" on the same number
+as the ladders.
+
+| | |
+|---|---|
+| groups (index + close) with 2+ markets | 2,310 |
+| implication pairs | 100.6M |
+| pairs with both legs traded | 359,821 (130,857 across two series) |
+| ladder contracts a day (hourly + daily) | 35.3M |
+| markets the tape step must read | 36,305, 1.57B contracts traded |
+| candle requests | ~1,341 (13.4M market-minutes) |
+| tape requests | at least 36,305, plus one per 1,000 trades |
+
+Largest sources of live pairs: KXBTCD within itself (120,703), KXBTC
+against KXBTCD at the same strikes and close (75,568), KXETHD within
+itself (43,236), KXBTC15M against KXBTCD (8,160).
+
+**Early stop: not triggered** (35.3M ladder contracts a day against the
+1,000 floor). The tape step is next.
