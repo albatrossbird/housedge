@@ -22,7 +22,15 @@ The measurements behind everything here are in `docs/research/m15.md`.
   Handoffs carry rules and measurements, never code from their box or
   keys.
 
-## Live state (2026-11-13)
+## Live state (2026-11-14)
+
+**Both rules are STOPPED** since 2026-11-14 19:31 UTC: p75's edge stop
+fired (302 settled, -0.43c), and by the trader's daily figures
+sharp-move's $100 drawdown stop had fired too. We recommended retiring
+p75 from live and not restarting sharp-move at 40. Both backtests lost
+on the same windows (m15.md "2026-11-14"). Nothing restarts without a
+rule change from us. What follows is the state as it stood before the
+stop.
 
 On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
 - **p75:** the favourite at 75-97c, decided once a second 45s to 15s
