@@ -32,7 +32,7 @@ const CANDLES_PER_REQUEST = 10000;
 const TRADES_PER_PAGE = 1000;
 
 if (!process.argv.includes("--size-pass")) {
-  console.error("Only --size-pass exists so far. The tape read is written after its size is shown (see the plan).");
+  console.error("pass --size-pass. The tape read and the verdict are scripts/ladder-score.mjs.");
   process.exit(2);
 }
 if (!(SINCE < UNTIL)) { console.error("::error::--since must be before --until"); process.exit(2); }

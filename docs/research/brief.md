@@ -85,9 +85,11 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
 
 ## Open tasks, in order
 
-1. **Ladder consistency (first task). In progress:** plan and bars fixed
-   in `docs/research/ladder-plan.md`; size pass done 2026-11-14 (early
-   stop not triggered); the tape read is next. The question: do Kalshi's hourly
+1. **Ladder consistency (first task). Tape step PASSED 2026-11-14**
+   ($48k over 14 days at 1s, $21k at 100ms, $10k on pairs printed
+   within 50ms; a competing bot visibly takes both legs). Step 2,
+   recording the books, needs its own written plan first. See
+   `docs/research/ladder-plan.md` and m15.md "Ladder consistency". The question: do Kalshi's hourly
    and daily crypto strike ladders ever trade at prices that contradict
    each other by more than the fees? Two examples of a contradiction:
    - "above a higher strike" priced over "above a lower one";
