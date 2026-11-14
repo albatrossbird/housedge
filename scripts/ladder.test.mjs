@@ -7,7 +7,8 @@
 // fixtures shaped to the code have passed here before while the code was
 // wrong (docs/research/m15.md, the yes_bid_size story).
 
-import { settlementIndex, eventOf, implies, groupKey, implicationPairs } from "../lib/ladder.js";
+import { settlementIndex, eventOf, implies, groupKey, implicationPairs, contradictionCandidates, allocate } from "../lib/ladder.js";
+import { kalshiTakerFee } from "../lib/fees.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -68,6 +69,59 @@ ok(pairs.length === 3, `three implications among the five 5pm markets (${pairs.j
 ok(pairs.includes("KXBTC-26NOV1317-B64750 > KXBTCD-26NOV1317-T63999.99"), "the second bucket implies the above/below strike too");
 const twin = implicationPairs([{ ticker: "A", ev: eventOf(gt) }, { ticker: "B", ev: eventOf(gt) }]);
 ok(twin.length === 2, "the same event in two series pairs in both directions");
+
+console.log("scoring the tape");
+{
+  // X: the 64,000-64,499.99 bucket, which implies Y: above 63,999.99.
+  // Prints are synthetic here on purpose: this is arithmetic, and the
+  // trade shape itself is pinned by scripts/m15-tape.test.mjs.
+  const members = [
+    { ticker: "X", ev: ev("KXBTC-26NOV1317-B64250") },
+    { ticker: "Y", ev: ev("KXBTCD-26NOV1317-T63999.99") },
+  ];
+  const fee = (p, n) => kalshiTakerFee(p, n, 1, 0.0001);
+  const feeCent = (p, n) => kalshiTakerFee(p, n, 1, 0.01);
+  const opts = { maxWindowMs: 5000, fee };
+  const T = 1_800_000_000_000;
+  const tapes = new Map([
+    ["X", [{ t: T, side: "no", price: 0.30, count: 10 }]],      // X's YES bid was 0.70
+    ["Y", [{ t: T + 500, side: "yes", price: 0.60, count: 4 }]], // Y's YES ask was 0.60
+  ]);
+  const c = contradictionCandidates(members, tapes, opts);
+  ok(c.length === 1 && c[0].x === "X" && c[0].y === "Y", "a bid on the narrower event above the ask on the wider one is a candidate");
+  const a = allocate(c, { windowMs: 1000, fee });
+  // 4 contracts: 4 x (1 - 0.30 - 0.60) = 0.40, fees 4 x 0.07 x 0.21 = 0.0588 and 4 x 0.07 x 0.24 = 0.0672.
+  ok(a.length === 1 && a[0].size === 4 && Math.abs(a[0].edge - 0.274) < 1e-9, `priced at the smaller print, after both fees ($${a[0]?.edge?.toFixed(4)})`);
+
+  const late = new Map([["X", tapes.get("X")], ["Y", [{ t: T + 2000, side: "yes", price: 0.60, count: 4 }]]]);
+  const cl = contradictionCandidates(members, late, opts);
+  ok(allocate(cl, { windowMs: 1000, fee }).length === 0 && allocate(cl, { windowMs: 5000, fee }).length === 1, "two seconds apart counts at the 5s window, not at 1s");
+
+  const wrongWay = new Map([["Y", [{ t: T, side: "no", price: 0.30, count: 10 }]], ["X", [{ t: T, side: "yes", price: 0.60, count: 10 }]]]);
+  ok(contradictionCandidates(members, wrongWay, opts).length === 0, "the wider event priced above the narrower one is no contradiction");
+
+  const fair = new Map([["X", [{ t: T, side: "no", price: 0.45, count: 10 }]], ["Y", [{ t: T, side: "yes", price: 0.55, count: 10 }]]]);
+  ok(contradictionCandidates(members, fair, opts).length === 0, "costs summing to exactly $1 are no edge");
+
+  const feeEaten = new Map([["X", [{ t: T, side: "no", price: 0.49, count: 10 }]], ["Y", [{ t: T, side: "yes", price: 0.49, count: 10 }]]]);
+  ok(contradictionCandidates(members, feeEaten, opts).length === 0, "2c under $1 at 50/50 is eaten by 3.5c of fees");
+
+  const small = new Map([["X", [{ t: T, side: "no", price: 0.05, count: 1 }]], ["Y", [{ t: T, side: "yes", price: 0.93, count: 1 }]]]);
+  const cs = contradictionCandidates(members, small, opts);
+  ok(allocate(cs, { windowMs: 1000, fee }).length === 1 && allocate(cs, { windowMs: 1000, fee: feeCent }).length === 0, "one contract at 2c under $1 survives fees rounded to $0.0001 but not to the cent");
+
+  // One YES print on Y (5 contracts) against two NO prints on X and one on
+  // a second bucket: Y's contracts are used once in total.
+  const three = [...members, { ticker: "X2", ev: ev("KXBTC-26NOV1317-B64750") }];
+  const shared = new Map([
+    ["X", [{ t: T, side: "no", price: 0.30, count: 5 }, { t: T + 100, side: "no", price: 0.25, count: 5 }]],
+    ["X2", [{ t: T + 200, side: "no", price: 0.20, count: 5 }]],
+    ["Y", [{ t: T + 50, side: "yes", price: 0.60, count: 5 }]],
+  ]);
+  const as = allocate(contradictionCandidates(three, shared, opts), { windowMs: 1000, fee });
+  ok(Math.abs(as.reduce((s, x) => s + x.size, 0) - 5) < 1e-9, "a print's contracts are counted once across all its partners");
+  ok(as[0].x === "X2" && as[0].noPrice === 0.20, "and go to the best edge first");
+}
 
 if (bad) { console.error(`\n${bad} failed`); process.exit(1); }
 console.log("\nall ok");
