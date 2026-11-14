@@ -43,4 +43,5 @@ __pycache__/
 
 # Kalshi trade-tape and Binance caches from the m15 tape scripts: recorded data, never committed.
 .tape-cache/
+.ladder-cache/
 .binance-sharp/
