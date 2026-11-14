@@ -201,3 +201,18 @@ itself (43,236), KXBTC15M against KXBTCD (8,160).
 
 **Early stop: not triggered** (35.3M ladder contracts a day against the
 1,000 floor). The tape step is next.
+
+## Tape step result, 2026-11-14
+
+**PASS on the plan's rule**: $48,172 over 14 days at the 1-second
+window, 14 of 14 days at $5+. Full write-up, with the window sensitivity
+and the hand checks, in `docs/research/m15.md` ("Ladder consistency").
+Two things qualify it:
+- The 1-second figure is inflated by pairing prices across fast moves
+  near the close; the 100ms window gives $21,113, and pairs printed
+  within 50ms of each other $9,980.
+- A competing bot visibly takes both legs at the same millisecond with
+  matched sizes, at a 100ms cadence.
+
+Next is step 2, which gets its own written plan before anything is
+recorded.
