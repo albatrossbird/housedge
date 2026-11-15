@@ -148,6 +148,7 @@ function writeHealth(now) {
   health.lowMem = h.memMB != null && h.memMB < MEM_STOP_MB ? health.lowMem + 1 : 0;
   if (health.slow >= LAG_STOP_RUNS) loadStop = `receive lag p99 ${h.lagP99}ms, over ${LAG_STOP_MS}ms for ${health.slow} checks in a row`;
   if (health.lowMem >= MEM_STOP_RUNS) loadStop = `${h.memMB}MB of memory available, under ${MEM_STOP_MB}MB for ${health.lowMem} checks in a row`;
+  health.last = h;
   health.lags = []; health.frames = 0;
 }
 
@@ -263,7 +264,7 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
 function printStats() {
-  log(`frames=${stats.frames} deltas=${stats.deltas} fulls=${stats.fulls} trades=${stats.trades} gaps=${stats.gaps} reconnects=${stats.reconnects} errors=${stats.errors} closes=${stats.closes} skipped=${stats.skipped} lines=${archive.stats.lines} uploads=${archive.stats.uploads} uploadFails=${archive.stats.uploadFails} backlog=${archive.backlog()} diskFreeGB=${archive.diskFreeGB()} memMB=${memAvailableMB()}`);
+  log(`frames=${stats.frames} deltas=${stats.deltas} fulls=${stats.fulls} trades=${stats.trades} gaps=${stats.gaps} reconnects=${stats.reconnects} errors=${stats.errors} closes=${stats.closes} skipped=${stats.skipped} lines=${archive.stats.lines} uploads=${archive.stats.uploads} uploadFails=${archive.stats.uploadFails} backlog=${archive.backlog()} diskFreeGB=${archive.diskFreeGB()} memMB=${memAvailableMB()} lagP50=${health.last?.lagP50 ?? "-"}ms lagP99=${health.last?.lagP99 ?? "-"}ms`);
 }
 
 setInterval(() => {

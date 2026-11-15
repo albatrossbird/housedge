@@ -184,3 +184,34 @@ another's lag.
 **Still to build, before day 3:** `lib/ladderBook.js` and
 `scripts/ladder-gaps.mjs` (gap lifetimes and the fill replay). They read
 the archive, so they cannot change what is recorded.
+
+## First close recorded, 2026-11-15 06:00 UTC
+
+The user started the recorder on the box at 05:49:05 UTC, inside the
+05:44-06:00 window, so the first record is 11 of 16 minutes (marked
+late in its `sel` line). Read from the archive by run 43683996581
+(`source: laddersizes`) and from the box's journal:
+
+| | |
+|---|---|
+| markets | 66 (65 ladder strikes within 2.5% of 64,699.99, plus KXBTC15M), of 376 listed |
+| book changes | 906,370: KXBTC15M 431,718, KXBTCD 337,508, KXBTC 137,144 |
+| trades | 41,656 |
+| gaps, errors, reconnects | none |
+| receive lag (the stop is p99 over 1,000ms) | p50 12ms, p99 20ms typical, worst p99 31ms, worst single frame 72ms |
+| event loop | 10.5% busy at most |
+| memory available on the box (the stop is 100MB) | never under 213MB; 275MB before, 283MB after |
+| recorder memory | 91MB |
+| `marketslap-m15-stream` | active, no BEHIND line |
+| file | 10.7MB for 11 minutes |
+
+**The load stops are nowhere near.** No load reason to stop.
+
+**Size and egress:** about 15.6MB for a full 16 minutes, so roughly
+375MB a day and **about 5.2GB over 14 days**. Reading it all back once
+for the analysis is 5.2GB of Storage egress; the day-3 read is about
+1.1GB.
+
+**Seen once, for the analysis to expect:** the count of full books
+doubled at the close with no reconnect, so Kalshi appears to send a
+snapshot per market when it closes. Harmless to the record.
