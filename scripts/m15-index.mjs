@@ -586,8 +586,12 @@ if (LIST) {
   // Bitcoin's trailing 2-hour volatility from Kalshi's KXBTC15M settlements
   // (public API, no key). Same code as p75's (lib/volFlagReport.js). Only
   // scored when the span holds 10+ days on each side of the plan's split.
-  const split = Date.parse(`${process.env.VOL_FLAG_SPLIT || "2026-10-23"}T00:00:00Z`);
+  // The split is the first day of the later half of the decision days
+  // read (the plan's note of 2026-11-15: the script reads at most 30 days
+  // back), unless VOL_FLAG_SPLIT names a day.
   const filled = Dlist.filter(x => x.n > 0).map(x => ({ t: x.t, open: x.t + x.secs * 1000 - 15 * 60000, pnl: x.pnl, ctrs: x.n }));
+  const dayList = [...new Set(filled.map(x => new Date(x.t).toISOString().slice(0, 10)))].sort();
+  const split = Date.parse(`${process.env.VOL_FLAG_SPLIT || dayList[Math.floor(dayList.length / 2)] || "2026-10-23"}T00:00:00Z`);
   const daysOf = xs => new Set(xs.map(x => new Date(x.t).toISOString().slice(0, 10))).size;
   const before = filled.filter(x => x.t < split), after = filled.filter(x => x.t >= split);
   console.log("\nD6. THE VOLATILITY FLAG ON SHARP-MOVE (1bp, +250ms, seen +1c; flag = trailing 2h vol in the train half's top third)");

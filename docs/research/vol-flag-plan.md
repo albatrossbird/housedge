@@ -101,3 +101,18 @@ candidate, scored on days after 11-14.
    15:45-16:45 UTC. It reads 45 days of recorded BRTI from Storage, as
    earlier index runs have.
 5. Score, record in m15.md with the run ids, report.
+
+## Note, 2026-11-15 (before any sharp-move flag number was seen)
+
+`scripts/m15-index.mjs` reads at most 30 days back from the day it runs,
+so run 43673245348, asked for 10-01..11-15, held filled sharp-move
+decisions only from 10-16: 7 days before the 10-23 split and 23 after.
+Section D6 refused to score that, as written (it needs 10+ days on each
+side), so no flag number for sharp-move exists yet.
+
+**The change:** sharp-move's split moves to the midpoint of the
+decision days that can be read: the earlier half's days set the cutoff,
+and only the later half is scored. That is the intent of the original
+dates (the halves of 10-01..11-14), applied to the days that exist.
+D6 now takes the midpoint when `VOL_FLAG_SPLIT` is not set. The pass bar,
+the flag and p75's split are unchanged.
