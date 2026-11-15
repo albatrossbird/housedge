@@ -156,3 +156,31 @@ on the `m15-analysis` queue, one at a time, never 15:45-16:45 UTC.
    size. Report.
 4. Day 3: the early stop. Report.
 5. Day 14: the build bar. Recorded in m15.md with the run id.
+
+## Note, 2026-11-15 (before anything was recorded)
+
+**The scope check passed** (`scripts/ladder-scope.mjs`, m15.md "Ladder
+step 2: the scope check"): the scope keeps 82.2% of step 1's 100ms edge
+against the 80% bar, so it stands.
+
+**One change in how the reference price is found.** The plan said the
+ladder strikes are those within ±2.5% of the 15-minute window's strike.
+That strike is not known until the window opens, 15 minutes before the
+close, and the recorder has to choose a minute earlier. So the recorder
+reads the reference from the ladder itself: the "above X" market whose
+two-sided quote has its mid nearest 0.50 is at the money
+(`chooseLadderScope` in `lib/ladder.js`). The two differ by a minute of
+price movement, far inside the ±2.5% band. The scope check used the
+window's strike; nothing about the bars changes.
+
+**Built and merged:** `scripts/ladder-stream.mjs`, its unit
+`deploy/marketslap-ladder-stream.service`, the box steps in
+`deploy/README.md`, and `scripts/ladder-stream.test.mjs`, which drives
+the recorder end to end against the fake Kalshi, including both load
+stops. The load stop for `m15-stream`'s own lag is read from that
+recorder's journal after the first hour, since one process cannot see
+another's lag.
+
+**Still to build, before day 3:** `lib/ladderBook.js` and
+`scripts/ladder-gaps.mjs` (gap lifetimes and the fill replay). They read
+the archive, so they cannot change what is recorded.

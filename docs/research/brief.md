@@ -127,9 +127,12 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
 
 5. **Volatility flag: DONE 2026-11-15, FAILED on both rules**
    (m15.md "A volatility flag"). No flag goes to the trader.
-6. **Ladder step 2: the scope check passed** (82.2% kept). Next: build
-   the recorder in `ladder-step2-plan.md`; the user starts it on the
-   box.
+6. **Ladder step 2: the recorder is built and merged**
+   (`scripts/ladder-stream.mjs`, unit `marketslap-ladder-stream`; scope
+   check passed at 82.2%). The user starts it on the box (steps in
+   `deploy/README.md`) and pastes back the first hour's journal. Then:
+   build `lib/ladderBook.js` and `scripts/ladder-gaps.mjs` before day 3,
+   the early stop at day 3, the build bar at day 14.
 
 ## How to start
 

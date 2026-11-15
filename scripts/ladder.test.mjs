@@ -7,7 +7,7 @@
 // fixtures shaped to the code have passed here before while the code was
 // wrong (docs/research/m15.md, the yes_bid_size story).
 
-import { settlementIndex, eventOf, implies, groupKey, implicationPairs, contradictionCandidates, allocate, reviveEvent } from "../lib/ladder.js";
+import { settlementIndex, eventOf, implies, groupKey, implicationPairs, contradictionCandidates, allocate, reviveEvent, chooseLadderScope, strikeOf } from "../lib/ladder.js";
 import { kalshiTakerFee } from "../lib/fees.js";
 
 let bad = 0;
@@ -127,6 +127,35 @@ console.log("scoring the tape");
   const as = allocate(contradictionCandidates(three, shared, opts), { windowMs: 1000, fee });
   ok(Math.abs(as.reduce((s, x) => s + x.size, 0) - 5) < 1e-9, "a print's contracts are counted once across all its partners");
   ok(as[0].x === "X2" && as[0].noPrice === 0.20, "and go to the best edge first");
+}
+
+console.log("which markets the recorder records");
+{
+  // A ladder around 76,000: "above" strikes every 100 with mids falling as
+  // the strike rises, and 100-wide buckets. Field names as /markets sends
+  // them (strike_type, floor_strike, cap_strike, yes_bid_dollars,
+  // yes_ask_dollars as strings), per the live sample at the top.
+  const above = [], buckets = [];
+  for (let k = 70000; k <= 82000; k += 100) {
+    const mid = Math.min(0.98, Math.max(0.02, 0.5 - (k - 76000) / 4000));
+    above.push({ ticker: `KXBTCD-H-T${k - 0.01}`, strike_type: "greater", floor_strike: k - 0.01, yes_bid_dollars: (mid - 0.01).toFixed(4), yes_ask_dollars: (mid + 0.01).toFixed(4) });
+    buckets.push({ ticker: `KXBTC-H-B${k + 50}`, strike_type: "between", floor_strike: k, cap_strike: k + 99.99, yes_bid_dollars: "0.0100", yes_ask_dollars: "0.0300" });
+  }
+  const all = [...above, ...buckets];
+  const sc = chooseLadderScope(all, { m15: "KXBTC15M-H" });
+  ok(sc.ref === 75999.99, `the reference is the at-the-money "above" strike (${sc.ref})`);
+  ok(sc.tickers[0] === "KXBTC15M-H" && sc.tickers.length === 76 && sc.inBand === 75, `the 15-minute market plus everything within 2.5% (${sc.tickers.length})`);
+  ok(sc.tickers.every(t => t === "KXBTC15M-H" || Math.abs(strikeOf(eventOf(all.find(m => m.ticker === t))) / sc.ref - 1) <= 0.025), "nothing outside the band");
+  ok(!sc.tickers.includes("KXBTCD-H-T69999.99") && !sc.tickers.includes("KXBTC-H-B82050"), "the far tails are left out");
+  const capped = chooseLadderScope(all, { m15: "KXBTC15M-H", cap: 11 });
+  ok(capped.tickers.length === 11 && capped.inBand === 75, "a cap keeps the count, 15-minute market included");
+  ok(capped.tickers.slice(1).every(t => Math.abs(strikeOf(eventOf(all.find(m => m.ticker === t))) - capped.ref) <= 500), "and keeps the strikes nearest the money");
+  ok(chooseLadderScope(all).tickers.length === 75, "with no 15-minute market the ladder is still chosen");
+  const unquoted = all.map(m => ({ ...m, yes_bid_dollars: "0.0000", yes_ask_dollars: "1.0000" }));
+  ok(chooseLadderScope(unquoted, { m15: "KXBTC15M-H" }).tickers.length === 0, "a ladder nobody quotes selects nothing");
+  const oneSided = above.map(m => ({ ...m, yes_bid_dollars: "0.0000" }));
+  ok(chooseLadderScope(oneSided).ref === null, "one-sided quotes give no reference");
+  ok(strikeOf(eventOf({ strike_type: "between", floor_strike: 100, cap_strike: 200 })) === 150 && strikeOf(eventOf({ strike_type: "less", cap_strike: 90 })) === 90, "a bucket sits at its midpoint, a threshold at its strike");
 }
 
 if (bad) { console.error(`\n${bad} failed`); process.exit(1); }

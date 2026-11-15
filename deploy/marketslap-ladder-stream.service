@@ -1,0 +1,55 @@
+# The ladder recorder (scripts/ladder-stream.mjs): every book change and
+# trade on Bitcoin's hourly strike ladders in the final 16 minutes before
+# each hourly close. Research step 2 of docs/research/ladder-step2-plan.md.
+#
+# Runs BESIDE marketslap-m15-stream.service, never inside it: the live
+# research depends on that recorder, so this one yields to it (Nice=10)
+# and stops itself when it loads the box.
+#
+# NOT enabled by bootstrap or by the sync timer: starting a recorder is a
+# human decision. Steps in deploy/README.md.
+#
+# THE LOAD STOP is exit status 3, and systemd does not restart it
+# (RestartPreventExitStatus). The script exits 3 when its receive lag p99
+# stays over 1s, or the box has under 100MB of memory available. After a
+# load stop the unit stays down until a person looks:
+#   sudo journalctl -u marketslap-ladder-stream -n 30 --no-pager
+#
+# THE KALSHI KEY is the same READ-ONLY key m15-stream uses, handed over
+# by LoadCredential and never in an environment variable. This unit sends
+# no order.
+
+[Unit]
+Description=MarketSlap ladder recorder (BTC hourly ladders, final 16 minutes)
+After=network-online.target
+Wants=network-online.target
+# In [Unit] — systemd ignores these in [Service]. See marketslap-m15.service.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=marketslap
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+LoadCredential=kalshi.pem:/etc/marketslap/kalshi-read.pem
+# /var/lib/marketslap-ladder, owned by the service user. NOT under
+# /opt/marketslap, which the update timer resets to origin/main.
+StateDirectory=marketslap-ladder
+# Cycles hourly, between closes, so new code lands without cutting a record.
+Environment=LADDER_RUN_MINUTES=60
+ExecStart=/usr/bin/node scripts/ladder-stream.mjs
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=3
+# SIGTERM closes the current file cleanly and uploads it; give it time to.
+TimeoutStopSec=30
+Nice=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
