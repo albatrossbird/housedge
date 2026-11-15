@@ -110,7 +110,10 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
    sizes the book actually traded. Only if it passes, record a few days
    of those books to measure how long the gaps last. If they last under
    ~50ms, only a co-located bot gets them, and we stop.
-2. **What speed is worth.** Add +0, +25 and +50ms rows to section D of
+2. **DONE 2026-11-15: no speed project pays for sharp-move.** +0/+25/
+   +50ms each made $4-5 a day LESS than +100ms (m15.md "What speed is
+   worth"). Kept here for the record of what was asked:
+   **What speed is worth.** Add +0, +25 and +50ms rows to section D of
    `scripts/m15-index.mjs`, which has +100ms and +250ms today. If going
    below ~50ms adds little to sharp-move, no speed project pays (Rust,
    FIX, co-location, a faster BRTI feed).
@@ -121,6 +124,12 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
 4. **Resting orders on November.** Re-run the maker backtest
    (`source: archive`, `maker`). Makers pay no fee on the 15-minute
    series; read "won when filled" against "won when missed".
+
+5. **Volatility flag: DONE 2026-11-15, FAILED on both rules**
+   (m15.md "A volatility flag"). No flag goes to the trader.
+6. **Ladder step 2: the scope check passed** (82.2% kept). Next: build
+   the recorder in `ladder-step2-plan.md`; the user starts it on the
+   box.
 
 ## How to start
 
