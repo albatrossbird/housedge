@@ -48,6 +48,7 @@ import { atOrBefore } from "../lib/brtiLag.js";
 import { createSharpMove } from "../lib/sharpMove.js";
 import { MANAGE_SECS, MANAGE_DELAY_MS, decideManage, fillManage, managedPnl } from "../lib/sharpManage.js";
 import { settleAvg, estimateAvg, bucketOf, bucketLabel, buyPrice, dayStats } from "../lib/m15Index.js";
+import { kxbtc15mReturns, flagReport } from "../lib/volFlagReport.js";
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -79,7 +80,7 @@ const B2_TIMES = [600, 120, 60, 30];
 const B3_TIMES = [600, 300], B3_EDGES = [0, 25, 50, 75, 100, 150, 200];
 const B2_EDGES = [0, 5, 10, 15, 20, 30, 40, 60, 80, 100, 150];
 const C_TIMES = [45, 30, 20, 10], C_EDGES = [0, 5, 10, 25, 50];
-const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }, { key: "+2c", c: 2 }, { key: "+3c", c: 3 }];
+const D_THRESHOLDS = [1, 2, 4], D_DELAYS = [0, 25, 50, 100, 250], D_LIMITS = [{ key: "seen", c: 0 }, { key: "+1c", c: 1 }, { key: "+2c", c: 2 }, { key: "+3c", c: 3 }];
 // D2's narrower mid bands, each run as its own decider (a narrower band
 // skips an event and may act on a later one in the same window).
 const D_BANDS = [[0.20, 0.80], [0.25, 0.75], [0.30, 0.70], [0.35, 0.65]];
@@ -446,6 +447,30 @@ for (const thr of D_THRESHOLDS) for (const delay of D_DELAYS) for (const l of D_
 }
 
 {
+  // D5. What speed is worth (docs/research/speed-plan.md). The same 1bp
+  // decisions, limit seen +1c, first size, filled at each delay after the
+  // deciding CF stamp, paired against +100ms decision by decision. "per ctr
+  // asked" divides the difference by every contract asked for, so an order
+  // that fills only when faster counts its whole gain. The bars are in the
+  // plan; this prints the numbers they read.
+  const size = SIZES[0];
+  const nDays = new Set([...want.values()].map(m => m.day)).size || 1;
+  const at = delay => new Map(Ds.filter(x => x.size === size && x.thr === 1 && x.delay === delay && x.limit === "+1c").map(x => [x.dec, x]));
+  const base = at(100);
+  console.log(`\nD5. WHAT SPEED IS WORTH (1bp, seen +1c, ${size} contracts): each delay against +100ms on the same decisions, ${nDays} days`);
+  console.log("   delay   decided  filled  ctrs/asked   per ctr  t(day)    vs +100ms: $ total   $/day   per ctr asked  t(day)   earlier    later");
+  for (const delay of D_DELAYS) {
+    const m = at(delay), xs = [...m.values()], f = xs.filter(x => x.n > 0), ctrs = f.reduce((a, x) => a + x.n, 0);
+    const all = dayStats(xs.map(x => ({ day: x.day, ctrs: x.n, pnl: x.pnl })));
+    const diff = dayStats(xs.map(x => ({ day: x.day, ctrs: size, pnl: x.pnl - (base.get(x.dec)?.pnl ?? 0) })));
+    const vs = delay === 100 ? "                                   —" : `${((diff.pnl >= 0 ? "+$" : "-$") + Math.abs(diff.pnl).toFixed(2)).padStart(12)}  ${((diff.pnl >= 0 ? "+" : "-") + Math.abs(diff.pnl / nDays).toFixed(2)).padStart(6)}   ${cents(diff.perCtr).padStart(12)}  ${tt(diff.t).padStart(6)}  ${cents(diff.earlyPerCtr).padStart(8)} ${cents(diff.latePerCtr).padStart(8)}`;
+    console.log(`   ${`+${delay}ms`.padStart(6)}  ${String(xs.length).padStart(7)} ${pct(xs.length ? f.length / xs.length : null).padStart(7)}  ${pct(xs.length ? ctrs / (xs.length * size) : null).padStart(9)}  ${cents(all.perCtr).padStart(8)} ${tt(all.t).padStart(6)}  ${vs}`);
+  }
+  console.log("   $/day is the difference per recorded day at this size. A faster bot is worth building only if the gain clears the");
+  console.log("   plan's bar AND the rule is positive at that delay: speed cannot rescue a rule with no edge.");
+}
+
+{
   // A risk check refusing limits above 0.97: how many 1bp orders it meets,
   // and what the 10-contract, +250ms, +1c row is without them.
   const over = Dlimits.filter(x => x.limit > 0.97 + 1e-9), lims = Dlimits.map(x => x.limit);
@@ -553,6 +578,40 @@ if (LIST) {
   console.log("   ticker                       decided (UTC)             out(s)     bp  book         side  seen  filled  avg     result  P&L");
   for (const x of Dlist.sort((a, b) => a.t - b.t))
     console.log(`   ${x.ticker.padEnd(28)} ${new Date(x.t).toISOString().padEnd(25)} ${x.secs.toFixed(1).padStart(6)} ${x.bp.toFixed(2).padStart(6)}  ${`${x.bid}/${x.ask}`.padEnd(11)}  ${x.side.padEnd(4)}  ${x.seen.toFixed(3)}  ${String(x.n).padStart(6)}  ${x.avg == null ? "  —  " : x.avg.toFixed(3)}  ${x.result.padEnd(6)}  ${(x.pnl >= 0 ? "+" : "") + x.pnl.toFixed(2)}`);
+}
+
+if (LIST) {
+  // D6. The volatility flag on sharp-move (docs/research/vol-flag-plan.md):
+  // the listed 1bp decisions (+250ms, seen +1c) that filled, joined to
+  // Bitcoin's trailing 2-hour volatility from Kalshi's KXBTC15M settlements
+  // (public API, no key). Same code as p75's (lib/volFlagReport.js). Only
+  // scored when the span holds 10+ days on each side of the plan's split.
+  const split = Date.parse(`${process.env.VOL_FLAG_SPLIT || "2026-10-23"}T00:00:00Z`);
+  const filled = Dlist.filter(x => x.n > 0).map(x => ({ t: x.t, open: x.t + x.secs * 1000 - 15 * 60000, pnl: x.pnl, ctrs: x.n }));
+  const daysOf = xs => new Set(xs.map(x => new Date(x.t).toISOString().slice(0, 10))).size;
+  const before = filled.filter(x => x.t < split), after = filled.filter(x => x.t >= split);
+  console.log("\nD6. THE VOLATILITY FLAG ON SHARP-MOVE (1bp, +250ms, seen +1c; flag = trailing 2h vol in the train half's top third)");
+  if (daysOf(before) < 10 || daysOf(after) < 10) {
+    console.log(`   skipped: ${daysOf(before)} days before the split and ${daysOf(after)} after; the plan scores it only with 10+ on each side`);
+  } else {
+    const KB = "https://api.elections.kalshi.com/trade-api/v2";
+    let nextAt = 0;
+    const kget = async path => {
+      for (let i = 0; i < 6; i++) {
+        const wait = Math.max(0, nextAt - Date.now()); nextAt = Math.max(Date.now(), nextAt) + 220;
+        await new Promise(r => setTimeout(r, wait));
+        const r = await fetch(KB + path);
+        if (r.status === 429 || r.status >= 500) { await new Promise(res => setTimeout(res, 1500 * 2 ** i)); continue; }
+        if (!r.ok) throw new Error(`GET ${path.slice(0, 90)} -> ${r.status}`);
+        return r.json();
+      }
+      throw new Error(`GET ${path.slice(0, 90)}: still refused`);
+    };
+    const lo = Math.min(...filled.map(x => x.open)) - 2 * 86400000, hi = Math.max(...filled.map(x => x.open)) + 86400000;
+    const returns = await kxbtc15mReturns(kget, lo, hi);
+    console.log(`   returns: ${returns.length} KXBTC15M windows`);
+    for (const l of flagReport("sharp-move (recorded books, " + SIZES[0] + " contracts)", filled, returns, split).lines) console.log(`   ${l}`);
+  }
 }
 
 console.log(`
