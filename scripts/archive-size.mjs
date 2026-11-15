@@ -15,6 +15,39 @@ const reader = archiveReader({ url: URL, key: KEY });
 const now = Date.now(), from = now - HOURS * 3600000;
 const MB = b => (b / 1e6).toFixed(1);
 
+if (process.argv.includes("--ladder")) {
+  // The ladder recorder's folder (docs/research/ladder-step2-plan.md): the
+  // size per hour from the listing, and ONE file read for its health lines
+  // (receive lag, memory), its selections and what filled it. The newest
+  // file may still be the hour being written, so the one before is read.
+  const files = await reader.listRange("ladder", from, now);
+  const byHour = new Map();
+  for (const f of files) { const h = f.path.split("/").slice(1, 3).join(" "); byHour.set(h, (byHour.get(h) || 0) + (f.size || 0)); }
+  const bytes = files.reduce((s, f) => s + (f.size || 0), 0);
+  console.log(`LADDER ARCHIVE, last ${HOURS}h: ${files.length} files, ${MB(bytes)} MB over ${byHour.size} hours${byHour.size ? ` (${MB(bytes / byHour.size)} MB an hour, ~${MB(bytes / byHour.size * 24)} MB a day, ~${(bytes / byHour.size * 24 * 14 / 1e9).toFixed(1)} GB over 14 days)` : ""}`);
+  for (const [h, b] of [...byHour].slice(-8)) console.log(`  ${h}h  ${MB(b)} MB`);
+  const pick = files.filter(f => (f.size || 0) > 100000).at(-1) || files.at(-1);
+  if (pick) {
+    const kinds = {}, deltas = {}, health = [], sels = [], notes = [];
+    await reader.eachLine(pick.path, o => {
+      kinds[o.k] = (kinds[o.k] || 0) + 1;
+      if (o.k === "d") { const s = o.m.split("-")[0]; deltas[s] = (deltas[s] || 0) + 1; }
+      if (o.k === "health") health.push(o);
+      if (o.k === "sel") sels.push(o);
+      if (o.k === "gap" || o.k === "err" || (o.k === "conn" && o.ev !== "open" && o.ev !== "subscribed")) notes.push(o);
+    });
+    console.log(`\nread ${pick.path} (${MB(pick.size || 0)} MB)`);
+    console.log(`  lines by kind ${JSON.stringify(kinds)}`);
+    console.log(`  changes by series ${JSON.stringify(deltas)}`);
+    for (const s of sels) console.log(`  selection ${s.close}: ${s.n} markets, ref ${s.ref}, ${s.inBand} in band of ${s.listed} listed${s.late ? " (started late)" : ""}${s.why ? `, ${s.why}` : ""}`);
+    const busy = health.filter(h => h.frames > 0);
+    const mx = k => busy.length ? Math.max(...busy.map(h => h[k] ?? 0)) : null, md = k => { const v = busy.map(h => h[k]).filter(x => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
+    console.log(`  health, ${busy.length} busy minutes of ${health.length}: receive lag p50 median ${md("lagP50")}ms, p99 median ${md("lagP99")}ms, worst p99 ${mx("lagP99")}ms, worst max ${mx("lagMax")}ms; event loop busiest ${mx("elu")}; frames a minute median ${md("frames")}; memory available min ${health.length ? Math.min(...health.map(h => h.memMB ?? Infinity)) : "—"}MB; recorder RSS max ${health.length ? Math.max(...health.map(h => h.rssMB ?? 0)) : "—"}MB`);
+    console.log(`  gaps, errors, drops: ${notes.length ? notes.slice(0, 10).map(o => JSON.stringify(o)).join(" ") : "none"}`);
+  }
+  process.exit(0);
+}
+
 console.log(`STREAM ARCHIVE SIZES, last ${HOURS}h (from the listing; nothing downloaded but one file)`);
 const totals = {};
 const TOPS = ["m15", "m15x", "m15c", "pmus15"];
