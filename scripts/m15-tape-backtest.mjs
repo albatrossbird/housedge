@@ -37,6 +37,10 @@ const CONC = Math.max(1, Number(opt("conc", 1)));
 const RULE = { secsMin: 15, secsMax: 45, priceMin: 0.75, priceMax: 0.97 };
 const TOD = process.argv.includes("--tod"), LIVE = Date.parse(`${opt("live", "2026-10-19")}T00:00:00Z`);
 const GRID = process.argv.includes("--grid"), SPLIT = Date.parse(`${opt("split", "2026-09-01")}T00:00:00Z`);
+// --out=FILE writes every p75 trade (ticker, close, entry time, price, won,
+// contracts, P&L) as JSON, for analyses that join trades to other data
+// (docs/research/vol-flag-plan.md). It changes no decision.
+const OUT = opt("out", ""), outTrades = [];
 if (!(SINCE < UNTIL)) { console.error("::error::--since must be before --until"); process.exit(2); }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -283,9 +287,13 @@ for (const series of SERIES) {
     if (e.count >= SIZE) printedSize++;
     const fee = kalshiTakerFee(e.price, SIZE), worseFee = kalshiTakerFee(e.price + 0.01, SIZE);
     xs.push({ t: e.t, day: day(m.close), month: day(m.close).slice(0, 7), price: e.price, won: e.side === m.result, ctrs: SIZE,
-      pnl: tapePnl(e, m.result, SIZE, fee), worse: tapePnl({ ...e, price: e.price + 0.01 }, m.result, SIZE, worseFee) });
+      pnl: tapePnl(e, m.result, SIZE, fee), worse: tapePnl({ ...e, price: e.price + 0.01 }, m.result, SIZE, worseFee), ticker: m.ticker, close: m.close });
   }
   writeFileSync(cacheFile, JSON.stringify(cache));
+  if (OUT) {
+    for (const x of xs) outTrades.push({ series, ticker: x.ticker, close: x.close, t: x.t, price: x.price, won: x.won, ctrs: x.ctrs, pnl: x.pnl });
+    writeFileSync(OUT, JSON.stringify(outTrades));
+  }
   const row = (label, ys) => {
     if (!ys.length) return `  ${label.padEnd(14)} ${"0".padStart(6)}`;
     const S = dayStats(ys), W = dayStats(ys.map(x => ({ ...x, pnl: x.worse })));
