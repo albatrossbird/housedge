@@ -283,6 +283,57 @@ mint a read-only key and then deletes the full-access one.
        sudo systemctl enable --now marketslap-m15-stream.service
        sudo journalctl -u marketslap-m15-stream -n 25 --no-pager
 
+## The ladder recorder (`marketslap-ladder-stream.service`)
+
+Research, step 2 of `docs/research/ladder-step2-plan.md`. Records every
+book change and trade on Bitcoin's hourly strike ladders (KXBTCD, KXBTC
+and the KXBTC15M window closing on the hour) in the final 16 minutes
+before each hourly close, about 80 markets on one socket. Files go to
+`stream-archive` under `ladder/`. It uses the read-only Kalshi key that
+`marketslap-m15-stream` already uses; nothing new to create.
+
+It runs beside the 15-minute recorder and must not cost it anything. It
+stops itself, and stays stopped, if it falls behind its socket or the box
+runs short of memory.
+
+1. Wait for the code to land (the update timer pulls `main` every few
+   minutes), then check the unit file is there:
+
+       ls /etc/systemd/system/marketslap-ladder-stream.service
+
+2. Note the box's state BEFORE starting, to compare against:
+
+       free -m; uptime
+       sudo journalctl -u marketslap-m15-stream --since '10 min ago' --no-pager | grep -c 'BEHIND'
+
+3. Start it:
+
+       sudo systemctl enable --now marketslap-ladder-stream.service
+
+4. After the next hourly close (it records from :44 to :00), check both
+   recorders. Paste the output back to the research session:
+
+       sudo journalctl -u marketslap-ladder-stream --since '70 min ago' --no-pager | tail -30
+       sudo journalctl -u marketslap-m15-stream --since '70 min ago' --no-pager | grep -E 'BEHIND|warning' | tail -10
+       free -m; uptime
+       systemctl is-active marketslap-ladder-stream marketslap-m15-stream
+
+   Good looks like: one line per hour of the form `...: 78 markets (ref
+   76099.99, ...)`, a stats line with `gaps=0 errors=0`, and no `BEHIND`
+   from the 15-minute recorder.
+
+**If it stops itself** the journal ends with `LOAD STOP: ...` and the
+unit shows `failed`. That is the recorder protecting the box, not a
+crash. Leave it stopped and send the journal lines; do not restart it.
+
+**To stop it by hand** at any time:
+
+    sudo systemctl disable --now marketslap-ladder-stream.service
+
+`socket error 26` in its journal means Kalshi's per-subscription market
+limit was reached: add `LADDER_CAP=40` to `/etc/marketslap/env` and
+restart the unit.
+
 ## The Polymarket US recorder (`marketslap-pmus15-stream.service`)
 
 Records Polymarket US's 15-minute Bitcoin "Up or Down" books, beside the

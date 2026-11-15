@@ -33,6 +33,7 @@ export function installFakeKalshi({
   seqSkipAt = null,             // skip one seq number after this many frames on a sid
   dropSocketAfterMs = null,     // server closes the first socket after this long
   tickMs = 40, idxMs = 200,
+  marketFields = {},            // ticker -> extra /markets fields (strike_type, quotes, ...)
   ignoreYesPrice = false,       // CONTROL: serve legacy encoding whatever was asked
   tsLagMs = 0,                  // stamp ts_ms this far in the past: a recorder that is behind
   fallback = async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => [], text: async () => "[]" }),
@@ -95,6 +96,7 @@ export function installFakeKalshi({
         ticker: t, event_ticker: t.split("-").slice(0, 2).join("-"), status: statuses[t] || "active", floor_strike: 80000,
         close_time: closeTimes[t] || new Date(Date.now() + 600000).toISOString(),
         open_time: new Date(Date.now() - 300000).toISOString(),
+        ...(marketFields[t] || {}),
       })) });
     }
     if (path === "/series") {
