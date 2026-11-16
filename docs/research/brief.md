@@ -132,11 +132,11 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 - Resting orders for p75 on November: FAIL, dropped (`maker-plan.md`).
 
 **Candidates, not started**
-- **Market making where Kalshi pays for it** (liquidity incentive
-  programs on slow markets, none on crypto; makers pay no fee on
-  `quadratic` series). A free tape study first, with its own written
-  plan. Capital and the API write budget are the constraints, not
-  speed.
+- **Market making where Kalshi pays for it:** the study plan is written
+  (`mm-plan.md`, 2026-11-16). Part A (one sweep of every program
+  market's public order book: what share would $200 a market score?)
+  runs from the research sandbox once the four-month sharp-move run has
+  finished; Part B (fills against the tape) only if A passes.
 - **p75's 75-85c band:** its November re-test is spoiled through 11-14
   (it was printed). Fair test: days after 11-14.
 - **The BTC 2-minute underdog at 3-20c:** November re-test, to be fixed
