@@ -392,3 +392,25 @@ evidence, and stays at t 2.
 So the proposal is unchanged. The other-side trades lose only inside
 the evening and weekend windows the time filters already remove (77
 trades at -6.25c there); outside them they made +2.36c.
+
+### Sharp-move, midnight to 4am New York time, on all 45 days (2026-11-16)
+
+The user asked to skip this block "since it lost money overall". That
+was true of the 30 days in the table above (-3.13c). On the 45 days now
+in hand it made money:
+
+| period | 00-04h trades | per contract | at 10 contracts | the rest | t vs rest |
+|---|---|---|---|---|---|
+| 10-01..10-15 | 34 | +10.91c | +$37.11 | +8.70c | 0.31 |
+| 10-16..10-30 | 37 | -11.13c | -$40.14 | +5.22c | -2.18 |
+| 10-31..11-14 | 37 | +4.66c | +$17.26 | +2.48c | 0.30 |
+| all 45 days | 108 | +1.33c | +$14.23 | +5.40c | -1.02 |
+
+One bad fortnight out of three. Against the skip bar: t -1.02 passes
+the first test by a hair, but the skipped trades made money and two of
+three periods were better than the rest, so it fails the other two.
+Skipping it would have cost about $0.32 a day over the 45 days.
+
+Not in the trader message by default. A one-paragraph rule change is
+kept beside it for the user to send if they still want the skip; it is
+their call.
