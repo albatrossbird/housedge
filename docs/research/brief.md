@@ -134,6 +134,13 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
    build `lib/ladderBook.js` and `scripts/ladder-gaps.mjs` before day 3,
    the early stop at day 3, the build bar at day 14.
 
+8. **Restart proposal written 2026-11-16** (`restart-plan.md`):
+   sharp-move at 10 contracts with no time filter; p75 at 10 with two
+   candidate filters (skip 16:00-20:00 New York time, skip weekends),
+   the skipped windows scored on the tape for 8 weeks. The user
+   decides; the trader gets it only as a rule change. The 75-85c band's
+   November re-test is spoiled through 11-14 (it was printed); its fair
+   test is days after 11-14.
 7. **Candidate, not started: market making where Kalshi pays for it.**
    Looked at 2026-11-16 (web reading plus Kalshi's public
    `/incentive_programs`). Nothing we run is market making: the ladder
