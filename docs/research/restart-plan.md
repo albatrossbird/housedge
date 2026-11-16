@@ -302,10 +302,93 @@ The dollar-a-day figures are flattered: 10-01..10-15 is inside the
 period sharp-move was found on (it made +9c a contract there against
 +2.8c on the 30 days after).
 
-**Decision, by the rule fixed above: adopt A.** p75's same-side trades
+**Superseded by the correction below (do not adopt A).** As first written: **Decision, by the rule fixed above: adopt A.** p75's same-side trades
 do not make clearly more than its other trades (+1.34c, t 0.52), and A
 takes the largest single-window loss from about $18 to about $10 and
 the worst day from -$48 to -$31. With p75's time filters already on,
 the worst day is the same either way and A only caps the window. It
 costs about $1.60 a day of backtest average, which is the price of the
 cap. Review it at the 300-settled review with the live fills.
+
+### Correction, 2026-11-16: do NOT adopt A
+
+The user asked the right question: the table shows p75 doing WORST with
+sharp-move on the other side (-0.74c) and BEST with it on the same side
+(+3.52c), yet rule A skips the same side.
+
+A was a risk rule (cap the loss in one window), not a performance rule,
+and adopting it was a mistake in how the decision rule was written. "Not
+clearly better at t 2" was read as "no better", when the point estimate
+says the same-side trades are p75's best. With the two time filters on:
+
+| p75's trades (time filters on, 45 days) | trades | per contract | $ a day at 10 |
+|---|---|---|---|
+| all | 366 | +4.50c | $3.66 |
+| sharp-move on the same side (what A removes) | 122 | about +6.1c | $1.65 |
+| sharp-move on the other side | 137 | about +2.4c | $0.72 |
+| nothing held | 107 | +5.45c | $1.29 |
+
+- **A gives up 45% of p75's backtest profit** ($3.66 to $2.01 a day) to
+  take the worst single window from -$15 to -$10. The worst day is -$30
+  either way. That is a bad trade.
+- **Skipping the other side is not supported either.** It failed its
+  fixed test (t -1.32), and with the time filters on those trades made
+  about +2.4c: the losses on that side sit in the evening and weekend
+  windows the time filters already remove.
+
+**Revised: no cross-rule at restart.** p75 runs with its two time
+filters only. The doubled stake in one window is accepted at 10
+contracts: a worst window of about -$15 to -$18 sits inside one day's
+normal swing (about $19). Looked at again, with live fills, at the
+300-settled review.
+
+### The reverse rule, and the bar for a skip (2026-11-16)
+
+**Sharp-move skipping a window where p75 already holds: almost never
+applies.** Sharp-move decides 118s to 6s before the close and p75 at
+45s to 15s, so sharp-move is nearly always first. In 45 days, 24 of
+1,008 sharp-move decisions came after p75 had bought (9 filled), all
+14-45s out:
+
+| sharp-move, after p75 held | filled | won | sharp-move made | p75 made in those windows |
+|---|---|---|---|---|
+| the same side | 1 | 1 | +$3.34 | +$0.28 |
+| the other side | 8 | 5 | +$21.17 | -$42.43 |
+
+Skipping them would give up nine trades that made $24.51 (10
+contracts). No rule. What the row does show: when a sharp move goes
+against a favourite p75 already holds, p75 loses badly ($42 in 8
+windows). p75 cannot avoid that by skipping, since it has already
+bought, and selling out was tested and loses (m15.md, exits).
+
+**The user's bar for a SKIP: act at |t| >= 1, not 2.** Reasonable for a
+rule that only removes trades from a thin-edged strategy: a wrong skip
+gives up a little, a right one avoids losers. Two guards keep it from
+skipping on noise. About one cut in six clears t -1 by luck, and some
+forty cuts have been printed for these two rules.
+
+A skip is adopted when all three hold:
+1. the skipped trades are worse than the rest at **t <= -1**;
+2. the skipped trades **lose money** themselves (negative per contract),
+   not merely earn less;
+3. they are worse than the rest in **both halves** of the days.
+
+Every skipped window keeps being scored on the tape, and a skip is
+dropped if its windows turn out better than the traded ones. Adding
+size or trades on a t above +1 is NOT covered: that adds risk on thin
+evidence, and stays at t 2.
+
+**What passes today:**
+
+| cut | t vs rest | skipped trades made | both halves | verdict |
+|---|---|---|---|---|
+| p75, 16:00-20:00 New York | -1.95 | -1.42c | yes | skip (already proposed) |
+| p75, weekends | -1.54 | -0.27c | yes | skip (already proposed) |
+| p75, sharp-move on the other side, no time filters | -1.32 | -0.74c | yes | would pass |
+| p75, sharp-move on the other side, WITH the time filters | -0.69 | **+2.36c** (+2.12c / +2.59c) | | no: they make money |
+| sharp-move, 00:00-04:00 New York | -1.35 | -3.13c | no (-11.13c / +4.66c) | no |
+| sharp-move, buying NO | -1.36 | +0.39c | no | no: not losing |
+
+So the proposal is unchanged. The other-side trades lose only inside
+the evening and weekend windows the time filters already remove (77
+trades at -6.25c there); outside them they made +2.36c.
