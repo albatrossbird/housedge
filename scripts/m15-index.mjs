@@ -56,16 +56,22 @@ if (!URL || !KEY) { console.error("::error::SUPABASE_URL and SUPABASE_SERVICE_RO
 
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
 // --since=YYYY-MM-DD reads from that UTC day on (an out-of-sample re-test);
-// otherwise the last --days. Either way no more than 30 days.
+// otherwise the last --days. Either way no more than 30 days IN ONE RUN:
+// the cap is on the span read (memory and Storage egress), counted back
+// from --until, so an older period can be read on its own. It used to be
+// counted back from today, which silently moved a start older than 30
+// days forward (run 43673245348 asked for 10-01 and got 10-16).
 const SINCE = opt("since", null);
 if (SINCE != null && !/^\d{4}-\d{2}-\d{2}$/.test(SINCE)) { console.error(`::error::--since takes YYYY-MM-DD, not ${SINCE}`); process.exit(2); }
 const DAYS = Math.min(Number(opt("days", 14)), 30);
-const SINCE_MS = Math.max(SINCE != null ? Date.parse(`${SINCE}T00:00:00Z`) : Date.now() - DAYS * 86400000, Date.now() - 30 * 86400000);
 // --until=YYYY-MM-DD stops before that UTC day: a period that ended can be
 // read again on its own, without the days since mixed in.
 const UNTIL = opt("until", null);
 if (UNTIL != null && !/^\d{4}-\d{2}-\d{2}$/.test(UNTIL)) { console.error(`::error::--until takes YYYY-MM-DD, not ${UNTIL}`); process.exit(2); }
 const UNTIL_MS = UNTIL != null ? Date.parse(`${UNTIL}T00:00:00Z`) : Date.now();
+const ASKED_MS = SINCE != null ? Date.parse(`${SINCE}T00:00:00Z`) : Date.now() - DAYS * 86400000;
+const SINCE_MS = Math.max(ASKED_MS, UNTIL_MS - 30 * 86400000);
+if (SINCE_MS > ASKED_MS) console.log(`::warning::asked from ${new Date(ASKED_MS).toISOString().slice(0, 10)}, reading from ${new Date(SINCE_MS).toISOString().slice(0, 10)}: at most 30 days a run`);
 if (!(UNTIL_MS > SINCE_MS)) { console.error(`::error::--until must be after the start (${new Date(SINCE_MS).toISOString().slice(0, 10)})`); process.exit(2); }
 const SERIES = "KXBTC15M";
 const SIZES = String(opt("size", 10)).split(",").map(Number).filter(n => n > 0);

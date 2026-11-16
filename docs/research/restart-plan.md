@@ -190,3 +190,33 @@ same side in 121 (both lost in 13), opposite sides in 155. Opposite
 sides offset. The same side doubles the stake on one outcome. If both
 restart, the cost of "p75 skips a window where sharp-move already holds
 that side" is the next thing to measure.
+
+## Both rules in one window: the question, fixed before the numbers
+
+Written 2026-11-16 after only the counts above had been seen (276
+shared windows: 121 same side, 155 opposite; both lost in 13).
+
+**The question:** if both rules restart, should p75 skip a window in
+which sharp-move already holds a position?
+
+**Data:** p75's tape trades and sharp-move's recorded-book decisions
+(the 1bp decisions that filled at +250ms, seen +1c), joined on the
+window's ticker, over every day both exist. Sharp-move's list is being
+extended back to 10-01 (the index script now reads an older span on its
+own). Both at 10 contracts.
+
+**Three candidate rules,** beside doing nothing:
+- A: p75 skips a window where sharp-move holds the SAME side.
+- B: p75 skips any window where sharp-move holds a position.
+- C: p75 skips a window where sharp-move holds the OPPOSITE side.
+
+**How it is decided.** This is a risk rule, so it is judged on risk and
+on what it gives up, not on a t value for an edge:
+- Adopt A if p75's same-side trades do not make clearly more per
+  contract than its other trades (a gap under t 2 in their favour), and
+  A lowers the largest loss in a single window and the worst day. It
+  then costs nothing measurable and removes the doubled stake.
+- Keep both rules independent if the same-side trades are clearly
+  better (t >= 2): then the doubled stake is where p75's edge is.
+- B and C are reported for completeness. C is not expected to help:
+  buying the favourite while holding the underdog offsets the position.
