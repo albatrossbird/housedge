@@ -247,3 +247,65 @@ not exist yet; the run is about to be made):
   t <= -2 over all 45 days. Otherwise it stays a candidate.
 - Secondary, reported only: the same split using every sharp-move
   decision, filled or not (the signal rather than the position).
+
+### Result, 2026-11-16: the hypothesis FAILS, and it was mostly lookahead
+
+Sharp-move's decisions for 10-01..10-15 were made by run 43911164998
+(324 decisions, 254 filled), giving 45 days in all: 717 p75 tape trades,
+1,008 sharp-move decisions, 776 filled.
+
+**A correction first.** The first read above counted ANY sharp-move
+decision in the window, including ones made after p75 had already
+bought. A late move against the favourite is, of course, followed by
+the favourite losing; that is not something p75 could have acted on.
+`scripts/rule-overlap.mjs` now counts only what sharp-move had done
+before p75's entry. The -2.86c above was largely that lookahead.
+
+**The fixed hypothesis, done properly:**
+
+| | p75 trades with sharp-move on the other side | vs every other p75 trade | t |
+|---|---|---|---|
+| 10-01..10-15 (unseen) | 64, +0.71c | -4.03c | -0.93 |
+| all 45 days | 214, -0.74c | -3.46c | -1.32 |
+
+Negative on the unseen days, but t -1.32 over 45 days against the -2
+it needed. **Not confirmed.** By the signal (any earlier decision
+against p75's side) it is weaker still: -1.76c, t -0.73. No "against
+sharp-move" rule goes to the trader.
+
+**What the 45 days do show** (10 contracts each):
+
+| when p75 traded, sharp-move already held | p75 trades | won | per contract | halves |
+|---|---|---|---|---|
+| nothing | 297 | 90.6% | +2.17c | +2.83c / +1.44c |
+| the same side | 206 | 91.3% | +3.52c | +7.52c / -1.44c |
+| the other side | 214 | 86.9% | -0.74c | +0.51c / -1.83c |
+
+- **The two rules are independent day to day:** the correlation of
+  their daily P&L is -0.02. Running both spreads risk; it does not
+  stack it.
+- **Inside one window they can stack.** In the 206 same-side windows
+  both won 188 times and both lost 18 times, at an average of -$13.36
+  for the pair and a worst of -$17.78.
+
+**The risk rules, both rules together:**
+
+| rule for p75 | p75 trades | both, $ a day | sd | worst day | worst window | windows losing $10+ |
+|---|---|---|---|---|---|---|
+| none | 717 | $10.98 | $20.7 | -$48 | -$17.78 | 16 |
+| A: skip sharp-move's same side | 511 | $9.37 | $17.1 | -$31 | -$9.72 | 0 |
+| B: skip any sharp-move window | 297 | $9.72 | $19.2 | -$37 | -$9.72 | 0 |
+| with p75's two time filters, no rule | 366 | $11.95 | $19.1 | -$30 | -$15.17 | 7 |
+| with the two time filters, and A | 244 | $10.30 | $17.8 | -$30 | -$9.72 | 0 |
+
+The dollar-a-day figures are flattered: 10-01..10-15 is inside the
+period sharp-move was found on (it made +9c a contract there against
++2.8c on the 30 days after).
+
+**Decision, by the rule fixed above: adopt A.** p75's same-side trades
+do not make clearly more than its other trades (+1.34c, t 0.52), and A
+takes the largest single-window loss from about $18 to about $10 and
+the worst day from -$48 to -$31. With p75's time filters already on,
+the worst day is the same either way and A only caps the window. It
+costs about $1.60 a day of backtest average, which is the price of the
+cap. Review it at the 300-settled review with the live fills.

@@ -34,7 +34,11 @@ const p75 = JSON.parse(readFileSync(opt("p75"), "utf8")).filter(x => x.t >= Date
   .map(x => ({ ticker: x.ticker, t: x.t, price: x.price, won: x.won, pnl: x.pnl * SIZE / x.ctrs, ctrs: SIZE }));
 const sBy = new Map(sharp.map(x => [x.ticker, x]));
 for (const p of p75) {
-  const s = sBy.get(p.ticker);
+  // Only what sharp-move had done BEFORE p75's own entry counts: a rule
+  // for p75 cannot use a decision that had not been made yet. (+250ms: the
+  // fill delay this list was made at.)
+  const s0 = sBy.get(p.ticker), s = s0 && s0.t + 250 < p.t ? s0 : null;
+  if (s0 && !s) p.sharpLater = true;
   p.cls = !s ? "none" : (s.side === s.result) === p.won ? "same" : "opposite";
   p.sharpPnl = s ? s.pnl : 0;
   p.filtered = blockOf(p.t) === 16 || etParts(p.t).weekend;   // the restart plan's two p75 filters
@@ -58,7 +62,8 @@ for (const k of ["none", "same", "opposite"]) {
 // Secondary: the SIGNAL rather than the position. Every sharp-move
 // decision, filled or not, against p75's side in that window.
 console.log("\nthe same split by sharp-move's DECISION, filled or not (the signal, not the position):");
-for (const p of p75) { const s = sharpAll.get(p.ticker); p.sig = !s ? "none" : (s.side === s.result) === p.won ? "same" : "opposite"; }
+for (const p of p75) { const s0 = sharpAll.get(p.ticker), s = s0 && s0.t < p.t ? s0 : null; p.sig = !s ? "none" : (s.side === s.result) === p.won ? "same" : "opposite"; }
+console.log(`  (${p75.filter(x => x.sharpLater).length} p75 trades came BEFORE sharp-move's fill in their window; they count as "nothing held")`);
 const noSig = p75.filter(x => x.sig === "none");
 for (const k of ["none", "same", "opposite"]) {
   const xs = p75.filter(x => x.sig === k), A = xs.filter(x => day(x.t) < mid), B = xs.filter(x => day(x.t) >= mid);
@@ -92,12 +97,23 @@ profile("no rule (both independent)", () => true);
 profile("A: p75 skips sharp-move's SAME side", x => x.cls !== "same");
 profile("B: p75 skips any sharp-move window", x => x.cls === "none");
 profile("C: p75 skips sharp-move's OTHER side", x => x.cls !== "opposite");
+profile("S: p75 skips when sharp-move DECIDED against", x => x.sig !== "opposite");
+profile("S+A: also skips sharp-move's same side", x => x.sig !== "opposite" && x.cls !== "same");
 const f = p75.filter(x => !x.filtered);
 console.log(`\nthe same, with p75's two filters on (no 16-20h New York, no weekends):`);
 profile("no rule", () => true, f);
 profile("A: p75 skips sharp-move's SAME side", x => x.cls !== "same", f);
 profile("B: p75 skips any sharp-move window", x => x.cls === "none", f);
 profile("C: p75 skips sharp-move's OTHER side", x => x.cls !== "opposite", f);
+profile("S: p75 skips when sharp-move DECIDED against", x => x.sig !== "opposite", f);
+profile("S+A: also skips sharp-move's same side", x => x.sig !== "opposite" && x.cls !== "same", f);
+{
+  // What the "decided against" skip removes, inside and outside p75's two filters.
+  const ag = p75.filter(x => x.sig === "opposite");
+  console.log(`\n"decided against" trades: ${ag.length} in all (${c(per(ag))}); ${ag.filter(x => !x.filtered).length} outside the two filters (${c(per(ag.filter(x => !x.filtered)))}), ${ag.filter(x => x.filtered).length} inside them (${c(per(ag.filter(x => x.filtered)))})`);
+  const byPrice = [[0.75, 0.85], [0.85, 0.92], [0.92, 0.98]].map(([lo, hi]) => { const xs = ag.filter(x => x.price >= lo && x.price < hi); return `${lo}-${hi}: ${xs.length}, ${c(per(xs))}`; });
+  console.log(`  by p75's price: ${byPrice.join("; ")}`);
+}
 // Sharp-move alone and p75 alone, and how their days move together.
 const dS = new Map(days.map(d => [d, 0])), dP = new Map(days.map(d => [d, 0]));
 for (const s of sharp) dS.set(day(s.t), dS.get(day(s.t)) + s.pnl);
