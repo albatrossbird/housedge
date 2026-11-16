@@ -134,6 +134,32 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
    build `lib/ladderBook.js` and `scripts/ladder-gaps.mjs` before day 3,
    the early stop at day 3, the build bar at day 14.
 
+7. **Candidate, not started: market making where Kalshi pays for it.**
+   Looked at 2026-11-16 (web reading plus Kalshi's public
+   `/incentive_programs`). Nothing we run is market making: the ladder
+   work and both live rules TAKE; the resting-order backtest is one bid
+   on one side.
+   - **Crypto is the wrong place.** The 66 ladder markets changed
+     ~1,470 times a second in our first recorded hour, and sharp-move's
+     taker edge is the makers' loss there. A maker has to pull quotes
+     before a BRTI move is traded on, from 12ms away. No crypto price
+     series is in the liquidity incentive program.
+   - **The slow markets are where a small maker is paid.** 6,122 active
+     liquidity programs across 394 series that day, a median of about
+     $14 a day per market (`period_reward` is in centi-cents) for
+     resting about 1,000 contracts on BOTH sides near the price, shared
+     by score among everyone quoting. Makers pay no fee on `quadratic`
+     series.
+   - **A free study before any money:** on a sample of program markets,
+     replay a quote at the touch against the public trade tape: what
+     fills it would have taken, what the price did after each fill, and
+     what share of the pool its resting size would have scored. The
+     site's matched Polymarket price is a possible fair-value reference
+     for the Kalshi quote. Needs its own written plan first.
+   - Speed and language are not the constraint for this; capital for
+     inventory and the API write budget are (ask the trader for
+     `GET /account/limits`).
+
 ## How to start
 
 Read this file, then the sections of `docs/research/m15.md` a task
