@@ -133,3 +133,60 @@ otherwise, and called confirmed only at t >= 2.
 live p75 fills the same way (16-20h or weekend, against the rest). If
 the live skipped fills did better than the rest, do not restart p75 on
 this proposal.
+
+## Sharp-move: tweaks checked, 2026-11-16
+
+Asked whether anything could improve its performance or risk. Same 30
+days (10-16..11-14, run 43676630129, 684 1bp decisions, 522 filled at
++250ms; 40 contracts unless said). Every row is a cut read off this
+data, so a "better" row is a candidate at most.
+
+**Settings: the current ones are at or near the best row.**
+
+| lever | result | verdict |
+|---|---|---|
+| move threshold | 1bp +3.33c (t 2.02) at +100ms; 2bp +1.06c (t 0.44); 4bp +9.11c on 53 decisions with halves +29c / -4c | keep 1bp |
+| limit, at +100ms (live runs ~82ms) | seen +3.21c, **+1c +3.33c**, +2c +2.66c, +3c +2.71c | keep +1c |
+| limit, at +250ms | +2c fills 83% against 76% and its added contracts made +7.81c (t 1.46) | only matters if fills get slow |
+| mid band | 0.15-0.85 +2.79c; 0.20-0.80 +2.10c; 0.25-0.75 +0.93c; 0.30-0.70 -0.66c | narrowing hurts |
+| seconds to the close | 90-118s +1.95c (392 fills), 60-90s +4.99c (109), halves disagree | nothing |
+| move size | 1-1.25bp +2.23c, 1.25-1.5bp +5.33c, 1.5-2bp -0.48c, 2bp+ +5.22c | no pattern |
+| side bought | YES +5.28c (both halves positive), NO +0.39c; t 1.36 | watch, do not act |
+| take profit 5/10/15c | costs 3.4-4.8c a contract, t -3.1 to -3.9 | never |
+| stop loss 10c | -0.74c a contract (t -0.56) | no |
+| sell or add at 15s out | each costs about 5c a contract traded | no |
+
+**Missed orders are the better ones.** The 162 orders that did not fill
+went on to win 52.5% at an average 0.455; the 522 that filled won 48.7%
+at 0.456. Fills are the trades nobody else wanted quite as much. Neither
+speed (m15.md "What speed is worth") nor a wider limit at 82ms gets them
+back profitably.
+
+**Risk, at 10 contracts** (backtest mean +$4.83 a day, sd $17.2, worst
+day -$30, deepest drawdown $31):
+
+| rule | mean a day | sd | worst day | largest single loss |
+|---|---|---|---|---|
+| 10 contracts, as it is | +$4.83 | $17.2 | -$30 | -$8.70 |
+| 5 contracts | +$2.42 | $8.6 | -$15 | -$4.35 |
+| stop for the day at -$30 | +$4.76 | $17.4 | -$32 | |
+| stop for the day at -$20 | +$4.28 | $17.8 | -$25 | |
+| stop for the day at -$15 | +$3.26 | $18.1 | -$19 | |
+| at most 8 trades a day | +$2.66 | $11.2 | -$18 | |
+| stop after 4 losses in a row | +$2.50 | $15.4 | -$19 | |
+| equal dollars a trade ($4.50 / price) | +$3.62 | $21.3 | -$30 | -$5.06 |
+
+- **Size is the only lever that cuts risk without cutting the edge per
+  dollar at risk.** Halving the size halves everything.
+- Daily stops and trade caps trim the worst day a little and give up
+  more in average than they save; the trades are close to independent,
+  so stopping after losses skips trades that are as good as any other.
+- Equal dollars a trade is worse: it puts the most contracts on the
+  cheapest underdogs, where the edge per contract is thinnest.
+
+**The two rules in one window.** Since 10-16, 276 of p75's 460 tape
+trades fell in a window where sharp-move also held a position: the
+same side in 121 (both lost in 13), opposite sides in 155. Opposite
+sides offset. The same side doubles the stake on one outcome. If both
+restart, the cost of "p75 skips a window where sharp-move already holds
+that side" is the next thing to measure.
