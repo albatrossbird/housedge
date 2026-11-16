@@ -133,3 +133,179 @@ otherwise, and called confirmed only at t >= 2.
 live p75 fills the same way (16-20h or weekend, against the rest). If
 the live skipped fills did better than the rest, do not restart p75 on
 this proposal.
+
+## Sharp-move: tweaks checked, 2026-11-16
+
+Asked whether anything could improve its performance or risk. Same 30
+days (10-16..11-14, run 43676630129, 684 1bp decisions, 522 filled at
++250ms; 40 contracts unless said). Every row is a cut read off this
+data, so a "better" row is a candidate at most.
+
+**Settings: the current ones are at or near the best row.**
+
+| lever | result | verdict |
+|---|---|---|
+| move threshold | 1bp +3.33c (t 2.02) at +100ms; 2bp +1.06c (t 0.44); 4bp +9.11c on 53 decisions with halves +29c / -4c | keep 1bp |
+| limit, at +100ms (live runs ~82ms) | seen +3.21c, **+1c +3.33c**, +2c +2.66c, +3c +2.71c | keep +1c |
+| limit, at +250ms | +2c fills 83% against 76% and its added contracts made +7.81c (t 1.46) | only matters if fills get slow |
+| mid band | 0.15-0.85 +2.79c; 0.20-0.80 +2.10c; 0.25-0.75 +0.93c; 0.30-0.70 -0.66c | narrowing hurts |
+| seconds to the close | 90-118s +1.95c (392 fills), 60-90s +4.99c (109), halves disagree | nothing |
+| move size | 1-1.25bp +2.23c, 1.25-1.5bp +5.33c, 1.5-2bp -0.48c, 2bp+ +5.22c | no pattern |
+| side bought | YES +5.28c (both halves positive), NO +0.39c; t 1.36 | watch, do not act |
+| take profit 5/10/15c | costs 3.4-4.8c a contract, t -3.1 to -3.9 | never |
+| stop loss 10c | -0.74c a contract (t -0.56) | no |
+| sell or add at 15s out | each costs about 5c a contract traded | no |
+
+**Missed orders are the better ones.** The 162 orders that did not fill
+went on to win 52.5% at an average 0.455; the 522 that filled won 48.7%
+at 0.456. Fills are the trades nobody else wanted quite as much. Neither
+speed (m15.md "What speed is worth") nor a wider limit at 82ms gets them
+back profitably.
+
+**Risk, at 10 contracts** (backtest mean +$4.83 a day, sd $17.2, worst
+day -$30, deepest drawdown $31):
+
+| rule | mean a day | sd | worst day | largest single loss |
+|---|---|---|---|---|
+| 10 contracts, as it is | +$4.83 | $17.2 | -$30 | -$8.70 |
+| 5 contracts | +$2.42 | $8.6 | -$15 | -$4.35 |
+| stop for the day at -$30 | +$4.76 | $17.4 | -$32 | |
+| stop for the day at -$20 | +$4.28 | $17.8 | -$25 | |
+| stop for the day at -$15 | +$3.26 | $18.1 | -$19 | |
+| at most 8 trades a day | +$2.66 | $11.2 | -$18 | |
+| stop after 4 losses in a row | +$2.50 | $15.4 | -$19 | |
+| equal dollars a trade ($4.50 / price) | +$3.62 | $21.3 | -$30 | -$5.06 |
+
+- **Size is the only lever that cuts risk without cutting the edge per
+  dollar at risk.** Halving the size halves everything.
+- Daily stops and trade caps trim the worst day a little and give up
+  more in average than they save; the trades are close to independent,
+  so stopping after losses skips trades that are as good as any other.
+- Equal dollars a trade is worse: it puts the most contracts on the
+  cheapest underdogs, where the edge per contract is thinnest.
+
+**The two rules in one window.** Since 10-16, 276 of p75's 460 tape
+trades fell in a window where sharp-move also held a position: the
+same side in 121 (both lost in 13), opposite sides in 155. Opposite
+sides offset. The same side doubles the stake on one outcome. If both
+restart, the cost of "p75 skips a window where sharp-move already holds
+that side" is the next thing to measure.
+
+## Both rules in one window: the question, fixed before the numbers
+
+Written 2026-11-16 after only the counts above had been seen (276
+shared windows: 121 same side, 155 opposite; both lost in 13).
+
+**The question:** if both rules restart, should p75 skip a window in
+which sharp-move already holds a position?
+
+**Data:** p75's tape trades and sharp-move's recorded-book decisions
+(the 1bp decisions that filled at +250ms, seen +1c), joined on the
+window's ticker, over every day both exist. Sharp-move's list is being
+extended back to 10-01 (the index script now reads an older span on its
+own). Both at 10 contracts.
+
+**Three candidate rules,** beside doing nothing:
+- A: p75 skips a window where sharp-move holds the SAME side.
+- B: p75 skips any window where sharp-move holds a position.
+- C: p75 skips a window where sharp-move holds the OPPOSITE side.
+
+**How it is decided.** This is a risk rule, so it is judged on risk and
+on what it gives up, not on a t value for an edge:
+- Adopt A if p75's same-side trades do not make clearly more per
+  contract than its other trades (a gap under t 2 in their favour), and
+  A lowers the largest loss in a single window and the worst day. It
+  then costs nothing measurable and removes the doubled stake.
+- Keep both rules independent if the same-side trades are clearly
+  better (t >= 2): then the doubled stake is where p75's edge is.
+- B and C are reported for completeness. C is not expected to help:
+  buying the favourite while holding the underdog offsets the position.
+
+### First read, 10-16..11-14 (30 days), and a hypothesis fixed for new days
+
+`scripts/rule-overlap.mjs`, 10 contracts each, 459 p75 tape trades and
+522 filled sharp-move decisions:
+
+| sharp-move already held | p75 trades | won | per contract | halves | vs nothing held |
+|---|---|---|---|---|---|
+| nothing | 183 | 91.3% | +3.14c | +5.31c / +0.74c | |
+| the same side | 121 | 89.3% | +0.96c | +4.10c / -2.35c | -2.18c, t -0.63 |
+| the other side | 155 | 84.5% | **-2.86c** | -3.10c / -2.66c | **-5.99c, t -1.70** |
+
+**Not what the plan above expected.** The doubled stake (same side) is
+not where p75 loses. It loses when it buys the favourite AGAINST a
+sharp move from the last two minutes: the favourite then won 84.5% at
+0.866 paid, under what its price needs. A move toward the strike late
+in the window is a reason the favourite is less safe than it looks.
+
+That was read off these 30 days, so it is a candidate. **Fixed now,
+before 10-01..10-15 is read** (sharp-move's decisions for those days do
+not exist yet; the run is about to be made):
+- **Hypothesis:** p75's trades in a window where sharp-move holds the
+  other side make less per contract than p75's other trades.
+- **Confirmed** if the gap is negative on 10-01..10-15 alone AND reaches
+  t <= -2 over all 45 days. Otherwise it stays a candidate.
+- Secondary, reported only: the same split using every sharp-move
+  decision, filled or not (the signal rather than the position).
+
+### Result, 2026-11-16: the hypothesis FAILS, and it was mostly lookahead
+
+Sharp-move's decisions for 10-01..10-15 were made by run 43911164998
+(324 decisions, 254 filled), giving 45 days in all: 717 p75 tape trades,
+1,008 sharp-move decisions, 776 filled.
+
+**A correction first.** The first read above counted ANY sharp-move
+decision in the window, including ones made after p75 had already
+bought. A late move against the favourite is, of course, followed by
+the favourite losing; that is not something p75 could have acted on.
+`scripts/rule-overlap.mjs` now counts only what sharp-move had done
+before p75's entry. The -2.86c above was largely that lookahead.
+
+**The fixed hypothesis, done properly:**
+
+| | p75 trades with sharp-move on the other side | vs every other p75 trade | t |
+|---|---|---|---|
+| 10-01..10-15 (unseen) | 64, +0.71c | -4.03c | -0.93 |
+| all 45 days | 214, -0.74c | -3.46c | -1.32 |
+
+Negative on the unseen days, but t -1.32 over 45 days against the -2
+it needed. **Not confirmed.** By the signal (any earlier decision
+against p75's side) it is weaker still: -1.76c, t -0.73. No "against
+sharp-move" rule goes to the trader.
+
+**What the 45 days do show** (10 contracts each):
+
+| when p75 traded, sharp-move already held | p75 trades | won | per contract | halves |
+|---|---|---|---|---|
+| nothing | 297 | 90.6% | +2.17c | +2.83c / +1.44c |
+| the same side | 206 | 91.3% | +3.52c | +7.52c / -1.44c |
+| the other side | 214 | 86.9% | -0.74c | +0.51c / -1.83c |
+
+- **The two rules are independent day to day:** the correlation of
+  their daily P&L is -0.02. Running both spreads risk; it does not
+  stack it.
+- **Inside one window they can stack.** In the 206 same-side windows
+  both won 188 times and both lost 18 times, at an average of -$13.36
+  for the pair and a worst of -$17.78.
+
+**The risk rules, both rules together:**
+
+| rule for p75 | p75 trades | both, $ a day | sd | worst day | worst window | windows losing $10+ |
+|---|---|---|---|---|---|---|
+| none | 717 | $10.98 | $20.7 | -$48 | -$17.78 | 16 |
+| A: skip sharp-move's same side | 511 | $9.37 | $17.1 | -$31 | -$9.72 | 0 |
+| B: skip any sharp-move window | 297 | $9.72 | $19.2 | -$37 | -$9.72 | 0 |
+| with p75's two time filters, no rule | 366 | $11.95 | $19.1 | -$30 | -$15.17 | 7 |
+| with the two time filters, and A | 244 | $10.30 | $17.8 | -$30 | -$9.72 | 0 |
+
+The dollar-a-day figures are flattered: 10-01..10-15 is inside the
+period sharp-move was found on (it made +9c a contract there against
++2.8c on the 30 days after).
+
+**Decision, by the rule fixed above: adopt A.** p75's same-side trades
+do not make clearly more than its other trades (+1.34c, t 0.52), and A
+takes the largest single-window loss from about $18 to about $10 and
+the worst day from -$48 to -$31. With p75's time filters already on,
+the worst day is the same either way and A only caps the window. It
+costs about $1.60 a day of backtest average, which is the price of the
+cap. Review it at the 300-settled review with the live fills.

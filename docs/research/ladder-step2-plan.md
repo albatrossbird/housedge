@@ -215,3 +215,26 @@ for the analysis is 5.2GB of Storage egress; the day-3 read is about
 **Seen once, for the analysis to expect:** the count of full books
 doubled at the close with no reconnect, so Kalshi appears to send a
 snapshot per market when it closes. Harmless to the record.
+
+## Pipeline test on the first recorded day, 2026-11-16 (not a verdict)
+
+Run 43911171647 (`source: laddergaps`, 11-15 only: 28 files, 276MB
+read). It proves `scripts/ladder-gaps.mjs` end to end on real data. The
+plan's early stop needs 3 days; nothing below changes any parameter.
+
+- 19 closes, **52 qualifying gaps**, all KXBTC against KXBTCD.
+- **Median lifetime 6ms** (p10 1ms, p90 18ms); 98% under 50ms; 49 of 52
+  closed by a trade on one of the legs.
+- Fill replay, 36 attempts: at +0ms both legs filled 15 times (40
+  contracts); at +25ms and later, **never**. One-legged fills unwound
+  lose at every delay from +25ms (-$29 at +100ms, 40 contracts).
+- No sequence gaps; every settlement found.
+
+One day, so it decides nothing. It points the same way as step 1's
+hand checks: the gaps are real, small in number once measured on books
+rather than prints, and taken within milliseconds.
+
+The recorder's first full day (run 43889262589): files of 14-18MB an
+hour and 32MB in the busiest (14:00 UTC: 2.86M changes); receive lag
+p99 typically 21ms, worst minute 186ms; never under 193MB available.
+At that rate the 14 days are nearer 6GB than the 5.2GB first estimated.
