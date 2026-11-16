@@ -57,3 +57,29 @@ with its own review, and only if p75 is restarted at all.
 Sharp-move is not in this run: its decisions live in
 `scripts/m15-index.mjs`, which has no resting-order replay. Its edge is
 being quick after a move, so a resting bid is a different trade.
+
+## Result, 2026-11-16: FAIL. Resting entries are dropped for p75
+
+Run 43926277824 (`source: archive`, `maker`), 10-31 18:00 UTC to 11-16,
+212 p75 decisions on the recorded book, 10 contracts:
+
+| | filled | P&L | per contract | won when filled / not filled |
+|---|---|---|---|---|
+| taker | 212 | -$49.63 | -2.36c | |
+| join (back of the queue) | 196 (92.7%) | -$33.61 | -1.72c | 85.2% / 100% |
+| front (first in line) | 205 | -$27.24 | -1.35c | 85.9% / 100% |
+| improve (a cent inside) | 198 | -$34.82 | -1.77c | 85.4% / 100% |
+
+Against the bar:
+1. join beats the taker in total: yes (it saves the fee and spread).
+2. join is positive: **no**.
+3. selection: **fails**. Every one of the 16 decisions the resting bid
+   missed went on to win; the ones it filled won 85.2%.
+
+That is the selection the plan warned about, in its plainest form: a
+resting bid on the favourite gets filled when someone wants out, and
+misses exactly the windows where nobody does. Saving about 0.6c a
+contract does not pay for it. Stop.
+
+On these 16 days p75 itself lost 2.36c a contract as a taker on the
+recorded book (the tape had November at -1.32c through 11-14).

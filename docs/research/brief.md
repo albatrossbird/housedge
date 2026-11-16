@@ -91,81 +91,56 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
 - Do not name, in the repo or anything published, the vendors whose
   strategies are researched.
 
-## Open tasks, in order
+## Open tasks (rewritten 2026-11-16)
 
-1. **Ladder consistency (first task). Tape step PASSED 2026-11-14**
-   ($48k over 14 days at 1s, $21k at 100ms, $10k on pairs printed
-   within 50ms; a competing bot visibly takes both legs). Step 2,
-   recording the books, needs its own written plan first. See
-   `docs/research/ladder-plan.md` and m15.md "Ladder consistency". The question: do Kalshi's hourly
-   and daily crypto strike ladders ever trade at prices that contradict
-   each other by more than the fees? Two examples of a contradiction:
-   - "above a higher strike" priced over "above a lower one";
-   - outcome sets that should sum to 100% summing to less after fees.
+**Waiting on the user**
+- **Restart decision** (`restart-plan.md`). Proposal: sharp-move at 10
+  contracts, no filter, $100 drawdown stop; p75 at 10 contracts with two
+  time filters (no order 16:00-19:59 New York time, none on Saturday or
+  Sunday), $75 stop; both reviewed at 300 settled (stop if t <= -1). No
+  rule linking the two. The paste-ready trader block is in the session;
+  the trader first splits its 302 live p75 fills by the two filters.
+- **From the trader:** sharp-move's live totals since it started, and
+  `GET /account/limits`.
 
-   Start from the public trade tape and one-minute candles (no box, no
-   new recorder). Find the series from `/series?category=Crypto`; do not
-   assume names. Write the stop rule before the run. Suggested: stop if
-   two weeks of tape show under about $10 a day of after-fee edge at
-   sizes the book actually traded. Only if it passes, record a few days
-   of those books to measure how long the gaps last. If they last under
-   ~50ms, only a co-located bot gets them, and we stop.
-2. **DONE 2026-11-15: no speed project pays for sharp-move.** +0/+25/
-   +50ms each made $4-5 a day LESS than +100ms (m15.md "What speed is
-   worth"). Kept here for the record of what was asked:
-   **What speed is worth.** Add +0, +25 and +50ms rows to section D of
-   `scripts/m15-index.mjs`, which has +100ms and +250ms today. If going
-   below ~50ms adds little to sharp-move, no speed project pays (Rust,
-   FIX, co-location, a faster BRTI feed).
-3. **November re-tests, each fixed before scoring:**
-   - p75's 75-85c band;
-   - the BTC 2-minute underdog at 3-20c;
-   - p75 weekday against weekend, scored on days after 11-10 only.
-4. **Resting orders on November.** Re-run the maker backtest
-   (`source: archive`, `maker`). Makers pay no fee on the 15-minute
-   series; read "won when filled" against "won when missed".
+**Running**
+- **Ladder step 2** (`ladder-step2-plan.md`). The recorder
+  (`marketslap-ladder-stream`) has run on the box since 2026-11-15
+  05:49 UTC, healthy. **Early stop on 11-18** (a follow-up is scheduled
+  for 00:30 UTC: `laddergaps` over 11-15..11-18); build bar on 11-29.
+  The first day alone, a pipeline test, showed 52 qualifying gaps with a
+  median life of 6ms and no two-legged fill from +25ms: it points to
+  STOP. If it stops, the user turns the recorder off on the box.
+- **p75's filters, scored on the tape** from the restart day for 8
+  weeks, if p75 restarts.
 
-5. **Volatility flag: DONE 2026-11-15, FAILED on both rules**
-   (m15.md "A volatility flag"). No flag goes to the trader.
-6. **Ladder step 2: the recorder is built and merged**
-   (`scripts/ladder-stream.mjs`, unit `marketslap-ladder-stream`; scope
-   check passed at 82.2%). The user starts it on the box (steps in
-   `deploy/README.md`) and pastes back the first hour's journal. Then:
-   build `lib/ladderBook.js` and `scripts/ladder-gaps.mjs` before day 3,
-   the early stop at day 3, the build bar at day 14.
+**The bar for a skip rule** (the user's, 2026-11-16): t <= -1 against
+the rest, the skipped trades losing money themselves, and worse in both
+halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 
-8. **Restart proposal written 2026-11-16** (`restart-plan.md`):
-   sharp-move at 10 contracts with no time filter; p75 at 10 with two
-   candidate filters (skip 16:00-20:00 New York time, skip weekends),
-   the skipped windows scored on the tape for 8 weeks. The user
-   decides; the trader gets it only as a rule change. The 75-85c band's
-   November re-test is spoiled through 11-14 (it was printed); its fair
-   test is days after 11-14.
-7. **Candidate, not started: market making where Kalshi pays for it.**
-   Looked at 2026-11-16 (web reading plus Kalshi's public
-   `/incentive_programs`). Nothing we run is market making: the ladder
-   work and both live rules TAKE; the resting-order backtest is one bid
-   on one side.
-   - **Crypto is the wrong place.** The 66 ladder markets changed
-     ~1,470 times a second in our first recorded hour, and sharp-move's
-     taker edge is the makers' loss there. A maker has to pull quotes
-     before a BRTI move is traded on, from 12ms away. No crypto price
-     series is in the liquidity incentive program.
-   - **The slow markets are where a small maker is paid.** 6,122 active
-     liquidity programs across 394 series that day, a median of about
-     $14 a day per market (`period_reward` is in centi-cents) for
-     resting about 1,000 contracts on BOTH sides near the price, shared
-     by score among everyone quoting. Makers pay no fee on `quadratic`
-     series.
-   - **A free study before any money:** on a sample of program markets,
-     replay a quote at the touch against the public trade tape: what
-     fills it would have taken, what the price did after each fill, and
-     what share of the pool its resting size would have scored. The
-     site's matched Polymarket price is a possible fair-value reference
-     for the Kalshi quote. Needs its own written plan first.
-   - Speed and language are not the constraint for this; capital for
-     inventory and the API write budget are (ask the trader for
-     `GET /account/limits`).
+**Done**
+- Ladder step 1, the tape: passed its screen (m15.md "Ladder
+  consistency").
+- What speed is worth: nothing below 100ms for sharp-move (m15.md).
+- Volatility flag: fails on both rules (m15.md).
+- Time of day: no filter for sharp-move; two candidates for p75.
+- Both rules in one window: independent day to day (correlation
+  -0.02); no cross-rule. An "against sharp-move" skip failed once
+  lookahead was removed.
+- Sharp-move tweaks: current settings at or near the best row; size is
+  the only clean risk lever.
+- Resting orders for p75 on November: FAIL, dropped (`maker-plan.md`).
+
+**Candidates, not started**
+- **Market making where Kalshi pays for it** (liquidity incentive
+  programs on slow markets, none on crypto; makers pay no fee on
+  `quadratic` series). A free tape study first, with its own written
+  plan. Capital and the API write budget are the constraints, not
+  speed.
+- **p75's 75-85c band:** its November re-test is spoiled through 11-14
+  (it was printed). Fair test: days after 11-14.
+- **The BTC 2-minute underdog at 3-20c:** November re-test, to be fixed
+  before scoring.
 
 ## How to start
 
