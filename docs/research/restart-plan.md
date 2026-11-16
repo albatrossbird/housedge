@@ -220,3 +220,30 @@ on what it gives up, not on a t value for an edge:
   better (t >= 2): then the doubled stake is where p75's edge is.
 - B and C are reported for completeness. C is not expected to help:
   buying the favourite while holding the underdog offsets the position.
+
+### First read, 10-16..11-14 (30 days), and a hypothesis fixed for new days
+
+`scripts/rule-overlap.mjs`, 10 contracts each, 459 p75 tape trades and
+522 filled sharp-move decisions:
+
+| sharp-move already held | p75 trades | won | per contract | halves | vs nothing held |
+|---|---|---|---|---|---|
+| nothing | 183 | 91.3% | +3.14c | +5.31c / +0.74c | |
+| the same side | 121 | 89.3% | +0.96c | +4.10c / -2.35c | -2.18c, t -0.63 |
+| the other side | 155 | 84.5% | **-2.86c** | -3.10c / -2.66c | **-5.99c, t -1.70** |
+
+**Not what the plan above expected.** The doubled stake (same side) is
+not where p75 loses. It loses when it buys the favourite AGAINST a
+sharp move from the last two minutes: the favourite then won 84.5% at
+0.866 paid, under what its price needs. A move toward the strike late
+in the window is a reason the favourite is less safe than it looks.
+
+That was read off these 30 days, so it is a candidate. **Fixed now,
+before 10-01..10-15 is read** (sharp-move's decisions for those days do
+not exist yet; the run is about to be made):
+- **Hypothesis:** p75's trades in a window where sharp-move holds the
+  other side make less per contract than p75's other trades.
+- **Confirmed** if the gap is negative on 10-01..10-15 alone AND reaches
+  t <= -2 over all 45 days. Otherwise it stays a candidate.
+- Secondary, reported only: the same split using every sharp-move
+  decision, filled or not (the signal rather than the position).
