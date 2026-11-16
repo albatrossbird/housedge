@@ -302,10 +302,42 @@ The dollar-a-day figures are flattered: 10-01..10-15 is inside the
 period sharp-move was found on (it made +9c a contract there against
 +2.8c on the 30 days after).
 
-**Decision, by the rule fixed above: adopt A.** p75's same-side trades
+**Superseded by the correction below (do not adopt A).** As first written: **Decision, by the rule fixed above: adopt A.** p75's same-side trades
 do not make clearly more than its other trades (+1.34c, t 0.52), and A
 takes the largest single-window loss from about $18 to about $10 and
 the worst day from -$48 to -$31. With p75's time filters already on,
 the worst day is the same either way and A only caps the window. It
 costs about $1.60 a day of backtest average, which is the price of the
 cap. Review it at the 300-settled review with the live fills.
+
+### Correction, 2026-11-16: do NOT adopt A
+
+The user asked the right question: the table shows p75 doing WORST with
+sharp-move on the other side (-0.74c) and BEST with it on the same side
+(+3.52c), yet rule A skips the same side.
+
+A was a risk rule (cap the loss in one window), not a performance rule,
+and adopting it was a mistake in how the decision rule was written. "Not
+clearly better at t 2" was read as "no better", when the point estimate
+says the same-side trades are p75's best. With the two time filters on:
+
+| p75's trades (time filters on, 45 days) | trades | per contract | $ a day at 10 |
+|---|---|---|---|
+| all | 366 | +4.50c | $3.66 |
+| sharp-move on the same side (what A removes) | 122 | about +6.1c | $1.65 |
+| sharp-move on the other side | 137 | about +2.4c | $0.72 |
+| nothing held | 107 | +5.45c | $1.29 |
+
+- **A gives up 45% of p75's backtest profit** ($3.66 to $2.01 a day) to
+  take the worst single window from -$15 to -$10. The worst day is -$30
+  either way. That is a bad trade.
+- **Skipping the other side is not supported either.** It failed its
+  fixed test (t -1.32), and with the time filters on those trades made
+  about +2.4c: the losses on that side sit in the evening and weekend
+  windows the time filters already remove.
+
+**Revised: no cross-rule at restart.** p75 runs with its two time
+filters only. The doubled stake in one window is accepted at 10
+contracts: a worst window of about -$15 to -$18 sits inside one day's
+normal swing (about $19). Looked at again, with live fills, at the
+300-settled review.
