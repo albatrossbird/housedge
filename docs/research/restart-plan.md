@@ -414,3 +414,25 @@ Skipping it would have cost about $0.32 a day over the 45 days.
 Not in the trader message by default. A one-paragraph rule change is
 kept beside it for the user to send if they still want the skip; it is
 their call.
+
+### Sharp-move, midnight to 4am, back to July: the test, fixed before the run
+
+The user asked what the block looks like over four months. Recorded
+books start 2026-09-30, so July to September can only come from the
+stand-in (`scripts/m15-binance-sharp.mjs`: Binance trades for the
+index, Kalshi's tape for the book and fill). It reads about 2.4c high
+and misses a quarter of BRTI's decisions (m15.md), so it is used here
+for the COMPARISON between hours, not for the level.
+
+Run: `--since=2026-07-01 --until=2026-11-15 --size=10 --tod --list`,
+from the research sandbox. About 2GB of Binance daily files and one
+Kalshi tape request a window.
+
+Judged by the skip bar already agreed, on the 1bp decisions that
+filled, 00:00-03:59 New York time against every other hour:
+1. t <= -1 against the rest;
+2. the block's trades lose money themselves;
+3. worse than the rest in both halves (07-01..09-07 and 09-08..11-14).
+
+July to September is independent of the 45 recorded days; October and
+November overlap them and are shown apart.
