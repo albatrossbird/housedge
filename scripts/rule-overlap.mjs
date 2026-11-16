@@ -55,6 +55,23 @@ for (const k of ["none", "same", "opposite"]) {
   const t = k === "none" ? null : welchT(pc(xs), pc(none));
   console.log(`  ${({ none: "nothing", same: "the same side", opposite: "the other side" })[k].padEnd(18)} ${String(xs.length).padStart(6)}  ${(100 * xs.filter(x => x.won).length / xs.length).toFixed(1).padStart(5)}%  ${(xs.reduce((s, x) => s + x.price, 0) / xs.length).toFixed(3)}  ${c(per(xs)).padStart(8)}   ${c(per(A)).padStart(8)} / ${c(per(B)).padStart(8)}   ${k === "none" ? "" : `${c(per(xs) - per(none)).padStart(8)}  ${(t ?? NaN).toFixed(2).padStart(6)}`}`);
 }
+// Secondary: the SIGNAL rather than the position. Every sharp-move
+// decision, filled or not, against p75's side in that window.
+console.log("\nthe same split by sharp-move's DECISION, filled or not (the signal, not the position):");
+for (const p of p75) { const s = sharpAll.get(p.ticker); p.sig = !s ? "none" : (s.side === s.result) === p.won ? "same" : "opposite"; }
+const noSig = p75.filter(x => x.sig === "none");
+for (const k of ["none", "same", "opposite"]) {
+  const xs = p75.filter(x => x.sig === k), A = xs.filter(x => day(x.t) < mid), B = xs.filter(x => day(x.t) >= mid);
+  const t = k === "none" ? null : welchT(pc(xs), pc(noSig));
+  console.log(`  ${({ none: "no decision", same: "for p75's side", opposite: "against p75's side" })[k].padEnd(18)} ${String(xs.length).padStart(6)}  ${(100 * xs.filter(x => x.won).length / xs.length).toFixed(1).padStart(5)}%  ${(xs.reduce((s, x) => s + x.price, 0) / xs.length).toFixed(3)}  ${c(per(xs)).padStart(8)}   ${c(per(A)).padStart(8)} / ${c(per(B)).padStart(8)}   ${k === "none" ? "" : `${c(per(xs) - per(noSig)).padStart(8)}  ${(t ?? NaN).toFixed(2).padStart(6)}`}`);
+}
+{
+  const against = p75.filter(x => x.sig === "opposite"), rest = p75.filter(x => x.sig !== "opposite");
+  console.log(`  against, vs every other p75 trade: ${c(per(against) - per(rest))}, t ${(welchT(pc(against), pc(rest)) ?? NaN).toFixed(2)}`);
+  const pos = p75.filter(x => x.cls === "opposite"), posRest = p75.filter(x => x.cls !== "opposite");
+  console.log(`  POSITION on the other side, vs every other p75 trade (the fixed hypothesis): ${c(per(pos) - per(posRest))}, t ${(welchT(pc(pos), pc(posRest)) ?? NaN).toFixed(2)}, ${pos.length} trades`);
+}
+
 const same = p75.filter(x => x.cls === "same");
 console.log(`\nin the ${same.length} same-side windows: both won ${same.filter(x => x.won).length}, both lost ${same.filter(x => !x.won).length}; the two losses together averaged $${(same.filter(x => !x.won).reduce((s, x) => s + x.pnl + x.sharpPnl, 0) / Math.max(1, same.filter(x => !x.won).length)).toFixed(2)} a window`);
 const opp = p75.filter(x => x.cls === "opposite");
