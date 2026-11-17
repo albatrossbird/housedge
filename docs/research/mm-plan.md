@@ -240,8 +240,8 @@ while writing the replay):
   "Under 3 days in a week" counts quoted minutes.
 - **The ended sample's quote** is the join quote: S = $200 / (bid + 1 -
   ask) a side at the first two-sided candle of its window, resting at
-  the candle's bid and ask. Window: the earlier of its programs' start
-  and 14 days before close, to close. Its share is the median sweep-1
+  the candle's bid and ask. Window: the later of its programs' start
+  and 14 days before close, to close (at most 14 days, as above). Its share is the median sweep-1
   JOIN share per side in its series (over markets where a join quote
   existed), else the overall median.
 - Markets whose quote does not exist in sweep 1 (cost $0) are not in
