@@ -256,3 +256,42 @@ excuse after: many of the richest markets are WEEKLY (Panama and
 Hormuz transit counts, for example), born a few days into week 1, so the
 best 25 may have few markets with 3 quoted days in week 1. The bar is
 left as fixed; the count left out is printed beside it.
+
+## Part B, run 1 (2026-11-17, 5,268 requests): FAIL, but on a bug in the cap
+
+As written, the replay capped the position in CONTRACTS, fixed at the
+price the quote was sized at. The plan's own reason for the cap ("without
+a cap, $200 of capital is fiction") says it is meant in dollars, and the
+contract cap broke it: an ended market first quoted at 1c / 99c sized
+"$200" as 9,999 contracts a side, and when the price moved the same
+contracts put $1,284 at risk. 12 of the 900 markets had over $400 at
+risk; between them they lost $4,905 (ended 8 markets -$2,689, richest 4
+-$2,216).
+
+Run 1's figures, recorded as they came out (back bound):
+
+| sample | markets | reward | fills | net | net > 0 |
+|---|---|---|---|---|---|
+| richest, counted | 227 | $15,839 | -$5,071 | +$10,768 | 200 |
+| richest, supply under 5c (apart) | 73 | $3,627 | -$3,805 | -$178 | 60 |
+| random | 300 | $3,269 | -$2,130 | +$1,138 | 251 |
+| ended (to settlement) | 282 | $2,124 | -$7,307 | -$5,183 | 191 |
+
+Bar: positive on 200 of 227 (pass); best 25 week 1 $145.74 a day on
+$1,398 (7 markets, 18 left out), week 2 $246.06 a day on $3,194 (pass);
+ended -$5,183 (FAIL). In the ended sample the worst 30 markets lost
+$6,731 and the other 252 made $1,548; 117 ended holding the losing side
+of the settlement.
+
+**The fix, before run 2:** each side has a dollar budget, the dollars
+sweep 1's quote put on it (S x its price; for the ended sample S x the
+first candle's bid and one minus its ask). A side posts what its budget
+buys at the current price, less what its unpaired holding has already
+cost (average cost; Kalshi nets YES against NO, so the other side's
+fills close a holding). It never averages down past its budget. The
+reward credits min(1, posted / the size the share was measured at).
+Tested by hand (`scripts/mm-replay.test.mjs`) and mutation-checked.
+
+**Run 2 is the result the bar is applied to.** The tape is cached, so
+it reads the same trades and candles; only the cap changes. Both runs
+are reported.

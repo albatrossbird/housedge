@@ -56,6 +56,27 @@ console.log("the position cap");
   ok(short.no === 200 && short.yes === 200, "a short position does not let the other side post more than its size");
 }
 
+console.log("the cap in dollars");
+{
+  // A quote sized at a 1c/99c book: $100 a side is 10,000 contracts at 1c.
+  // The book then moves to 80/82 and a seller comes through.
+  const q = { quotes: [[0, 0.01, 0.99], [2 * MIN, 0.80, 0.82]], trades: [T(3, 0.79, 50000, "no")], from: 0, to: 10 * MIN, sizeYes: 10000, sizeNo: 10000, mode: "back" };
+  ok(replay(q).yes === 10000, "a cap in contracts buys 10,000 at 80c: $8,000 on a $100 side (the bug)");
+  const d = replay({ ...q, budgetYes: 100, budgetNo: 100 });
+  ok(d.yes === 125 && near(d.maxCost, 100), `a cap in dollars buys what $100 buys at 80c (${d.yes})`);
+  // Bought 250 at 40c ($100); the price falls to 10c; another seller comes through: no averaging down.
+  const b = { quotes: [[0, 0.40, 0.44], [3 * MIN, 0.10, 0.14]], trades: [T(2, 0.35, 250, "no"), T(4, 0.05, 5000, "no")], from: 0, to: 10 * MIN, sizeYes: 250, sizeNo: 178, budgetYes: 100, budgetNo: 100, mode: "back" };
+  ok(replay(b).yes === 250, "a side whose holding already cost its budget posts nothing more, however far the price falls");
+  // Hold 250 YES that cost $100; a buyer takes 100 from our ask: that closes 100 and frees $40 of the budget.
+  const c = replay({ quotes: [[0, 0.40, 0.44]], trades: [T(2, 0.35, 250, "no"), T(3, 0.50, 100, "yes"), T(4, 0.30, 5000, "no")], from: 0, to: 10 * MIN, sizeYes: 250, sizeNo: 178, budgetYes: 100, budgetNo: 100, mode: "back" });
+  ok(c.yes === 350 && c.no === 100, `closing part of a holding frees that part of the budget (${c.yes} yes, ${c.no} no)`);
+  // Long 250 YES, the NO side posts what would close it plus its own $100: 250 + 178.
+  const e = replay({ quotes: [[0, 0.40, 0.44]], trades: [T(2, 0.35, 250, "no"), T(3, 0.50, 5000, "yes")], from: 0, to: 10 * MIN, sizeYes: 250, sizeNo: 178, budgetYes: 100, budgetNo: 100, mode: "back" });
+  ok(e.no === 428, `the other side posts enough to close the holding and open its own $100 (${e.no})`);
+  const r = replay({ quotes: [[0, 0.40, 0.44]], trades: [], from: 0, to: 10 * MIN, sizeYes: 200, sizeNo: 400, budgetYes: 100, budgetNo: 100, shareYes: 0.5, shareNo: 0.5, poolRate: () => 0.01 });
+  ok(near(r.reward, 10 * 0.01 * (0.5 * 1 + 0.5 * 178 / 400) / 2), "the reward credits posted / the size the share was measured at, never above 1");
+}
+
 console.log("the reward");
 {
   const poolRate = () => 0.01;   // $14.40 a day

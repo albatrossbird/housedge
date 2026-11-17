@@ -48,7 +48,9 @@ const pick = r => {
   const useS = (r.supply?.perDay?.lenient || 0) > (r.join?.perDay?.lenient || 0), q = useS ? r.supply : r.join;
   const sizeYes = useS ? q.sizeYes : q.S, sizeNo = useS ? q.sizeNo : q.S;
   const suppliedPrice = useS && q.supplied ? Math.min(r.join.refYes == null ? q.priceYes : 1, r.join.refNo == null ? q.priceNo : 1) : null;
-  return { ticker: r.ticker, series: r.series, model: useS ? "supply" : "join", pay: q.perDay.lenient, cost: q.cost, sizeYes, sizeNo, shareYes: q.shareYes, shareNo: q.shareNo, supplyEmpty: useS, cheap: suppliedPrice != null && suppliedPrice < 0.05 };
+  // The dollars the quote puts on each side: the cap in the replay (mm-plan.md, run 1's bug).
+  const budgetYes = sizeYes * (useS ? q.priceYes : q.refYes), budgetNo = sizeNo * (useS ? q.priceNo : q.refNo);
+  return { ticker: r.ticker, series: r.series, model: useS ? "supply" : "join", pay: q.perDay.lenient, cost: q.cost, sizeYes, sizeNo, budgetYes, budgetNo, shareYes: q.shareYes, shareNo: q.shareNo, supplyEmpty: useS, cheap: suppliedPrice != null && suppliedPrice < 0.05 };
 };
 const quotes = sweep.rows.map(pick).filter(q => q.cost > 0 && q.sizeYes > 0 && q.sizeNo > 0);
 const byRichness = quotes.filter(q => q.pay > 0).sort((a, b) => b.pay / b.cost - a.pay / a.cost);
@@ -156,9 +158,10 @@ for (const [name, sample] of [["richest", richest], ["random", random], ["ended"
       if (!first) { drop(name, "never two-sided"); continue; }
       q.sizeYes = q.sizeNo = Math.floor((sweep.capital || 200) / (first[1] + 1 - first[2]));
       q.cost = q.sizeYes * (first[1] + 1 - first[2]);
+      q.budgetYes = q.sizeYes * first[1]; q.budgetNo = q.sizeNo * (1 - first[2]);
     }
     const rate = poolRateFor(programs.get(q.ticker) || []);
-    const args = { quotes: tp.candles, trades: tp.trades, from: q.from, to: q.to, sizeYes: q.sizeYes, sizeNo: q.sizeNo, shareYes: q.shareYes, shareNo: q.shareNo, fee: (p, c) => kalshiMakerFee(p, c, fee.mult, fee.type), poolRate: rate, quoteWhen: t => rate(t) > 0, supplyEmpty: q.supplyEmpty, boundary: q.boundary, settle: q.settle ?? null };
+    const args = { quotes: tp.candles, trades: tp.trades, from: q.from, to: q.to, sizeYes: q.sizeYes, sizeNo: q.sizeNo, budgetYes: q.budgetYes, budgetNo: q.budgetNo, shareYes: q.shareYes, shareNo: q.shareNo, fee: (p, c) => kalshiMakerFee(p, c, fee.mult, fee.type), poolRate: rate, quoteWhen: t => rate(t) > 0, supplyEmpty: q.supplyEmpty, boundary: q.boundary, settle: q.settle ?? null };
     const back = replay({ ...args, mode: "back" }), front = replay({ ...args, mode: "front" });
     if (!back.quoted) { drop(name, "no paid minute with a quote"); continue; }
     results[name].push({ ...q, back, front, days: (q.to - q.from) / DAY, trades: tp.trades.length });
