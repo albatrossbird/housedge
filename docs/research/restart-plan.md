@@ -477,3 +477,57 @@ the rest; -4.42c then +0.05c by half) and 20-24h -1.05c (t -1.17;
 a rule, and the run's own pre-fixed prediction (16-20h better, scored
 before 10-21) also failed at t 1.39. Four months agree with the 45
 recorded days: sharp-move has no time-of-day filter worth having.
+
+## The message sent to the trader (final, 2026-11-17)
+
+Replaces every earlier draft. The midnight-4am sharp-move skip is left
+out: it failed all three skip tests over four months (above).
+
+```
+RESEARCH → TRADER: restart at small size (2026-11-17, replaces earlier drafts)
+
+Before restarting p75, one check: split your 302 live p75 fills into
+(a) decided 16:00-19:59 New York time, or on a Saturday or Sunday (New
+York date), and (b) everything else. Send count, won, and mean per
+contract for each. If (a) did better than (b), do not restart p75.
+
+RULE CHANGE, sharp-move: restart at 10 contracts. No other change, and
+no time filter. Stop at a $100 drawdown from the restart's peak. Review
+at 300 settled: stop if t <= -1. No size increase without a rule change
+from us.
+
+RULE CHANGE, p75 (only if the check above agrees): restart at 10
+contracts with two filters. Place no order when the decision time in
+America/New_York is 16:00-19:59, and none on Saturday or Sunday (New
+York date). Everything else unchanged. Stop at a $75 drawdown from the
+restart's peak. Review at 300 settled: stop if t <= -1.
+
+The two rules stay independent: p75 trades a window whether or not
+sharp-move holds a position in it.
+
+Unchanged for both: the step back on slow fills, the fee check, the
+KILL behaviour.
+
+Why, in short:
+- Both backtests lost on 11-14 on the same windows you traded: it was
+  the market, not execution.
+- Sharp-move's problem was size. At 40 contracts a day swings about
+  $96; at 10, about $17.
+- Sharp-move has no time of day worth skipping. Midnight-4am New York
+  looked bad on 30 days; over four months (Jul-Nov) it made +3.47c a
+  contract against +1.80c for the rest of the day.
+- Faster than ~100ms does not help sharp-move, and neither do
+  take-profits, stop-losses, daily loss stops or a volatility flag.
+  All were tested.
+- p75's two filters are the only cuts that lost in both halves of 4.5
+  months. They are not proven; we score the skipped windows on the
+  public tape for 8 weeks and drop a filter that turns out wrong.
+- Tested and dropped, no action for you: resting orders for p75 (every
+  order the resting bid missed went on to win) and market making for
+  Kalshi's liquidity rewards (markets lost more at their settlement
+  than the rewards paid).
+
+Please also send: sharp-move's live totals since it started (settled
+count, mean per contract, t), and your account's order limits (Kalshi's
+GET /account/limits).
+```
