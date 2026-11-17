@@ -171,3 +171,173 @@ quotes on each market) and 300 from the rest, drawn by a hash of the
 ticker so the draw can be repeated. The file is not in the repository
 (downloaded Kalshi data stays out); if the sandbox loses it, the
 samples are re-drawn the same way from the next sweep and that is said.
+
+## Part B: details fixed 2026-11-17, before any tape is read
+
+The plan above left these open. They are fixed here, and only ever make
+the test harder.
+
+**A third sample, because the first two cannot see the end of a
+market.** Both samples are markets still open at sweep 1, replayed over
+the 14 days before it. A market that jumps on one piece of news does
+most of its damage to a resting quote at the END of its life, and an
+open market has not got there yet. Kalshi lists past programs
+(`/incentive_programs?status=paid_out`), so:
+- **ended:** 300 markets drawn by a hash of the ticker from programs
+  that ended in the 14 days before sweep 1 and whose market has since
+  settled. Each is replayed from its program's start (at most 14 days)
+  to the market's close and its inventory is marked to SETTLEMENT.
+  There is no past book to score a share from, so its share is the
+  median sweep-1 share in the same series (the overall median where the
+  series is not in the sweep). That is an assumption and is said beside
+  every figure that uses it.
+- **A pass on the bar that the ended sample contradicts is not a
+  pass.** If the ended sample's reward plus fills is negative in total
+  under the back bound, Part B fails whatever the richest 300 say.
+
+**The quote.** On each market the better-paying of sweep 1's two quotes,
+with its sizes. Each minute it rests at the last candle's closing bid
+and ask (carried forward through minutes with no candle); a supply
+quote on an empty side rests one tick inside the other side's implied
+price. **Position cap:** the net position never exceeds the quote's
+size on either side; a side that is full posts nothing until the other
+side trades it down. Without a cap, $200 of capital is fiction.
+
+**Fills.** A taker trade against our side at our price or worse for the
+taker's counterparty fills us AT OUR PRICE, up to what is posted:
+front = at or through our price; back = strictly through it. Maker fees
+by the series' `fee_type` (`kalshiMakerFee`); a series whose schedule we
+cannot read is dropped and counted.
+
+**P&L of the fills** = cash paid and received, plus inventory at the
+end: at settlement where settled, else long YES at the last bid and
+long NO at one minus the last ask (never the mid). Marks to the mid 1,
+10 and 60 minutes after each fill are printed as a diagnosis and do not
+enter the bar.
+
+**Reward** = the pools Kalshi actually listed for that market over the
+replayed minutes (active, closed and paid-out programs) x the sweep-1
+share of each side / 2, for each minute that side is posted with the
+market two-sided, in proportion to the size posted. An upper bound: it
+assumes the snapshot always counted and that nobody answered our quote.
+
+**The best 25 are chosen BEFORE the replay:** the 25 highest by sweep-1
+reward per dollar among the richest 300, leaving out any supply quote
+whose supplied side is priced under 5c. Shown beside it, not as the
+bar: the 25 best on week 1's net, scored on week 2.
+
+**Weeks:** week 1 is days 14 to 8 before sweep 1, week 2 days 7 to 1.
+A market with under 3 days of history in a week is left out of that
+week's count and the number left out is printed.
+
+**Two more details, fixed 2026-11-17 before any tape is read** (found
+while writing the replay):
+- **The quote rests only in minutes when a program is paying for that
+  market.** Nobody would quote a one-news-event market for nothing, and
+  most current programs started days ago, so quoting all 14 days would
+  charge the replay with fills nobody would take. Inventory bought
+  while paid is still held, and marked at the end or at settlement.
+  "Under 3 days in a week" counts quoted minutes.
+- **The ended sample's quote** is the join quote: S = $200 / (bid + 1 -
+  ask) a side at the first two-sided candle of its window, resting at
+  the candle's bid and ask. Window: the later of its programs' start
+  and 14 days before close, to close (at most 14 days, as above). Its share is the median sweep-1
+  JOIN share per side in its series (over markets where a join quote
+  existed), else the overall median.
+- Markets whose quote does not exist in sweep 1 (cost $0) are not in
+  the random draw; a quote that cannot be posted cannot be replayed.
+- A market whose trade tape runs past 200 pages (200,000 trades) in its
+  window is dropped and counted rather than replayed on part of it.
+
+**Trial of the script, 2026-11-17** (4 markets a sample, to check the
+plumbing; not read against the bar): it runs end to end. One structural
+fact it showed, recorded before the full run so it cannot be used as an
+excuse after: many of the richest markets are WEEKLY (Panama and
+Hormuz transit counts, for example), born a few days into week 1, so the
+best 25 may have few markets with 3 quoted days in week 1. The bar is
+left as fixed; the count left out is printed beside it.
+
+## Part B, run 1 (2026-11-17, 5,268 requests): FAIL, but on a bug in the cap
+
+As written, the replay capped the position in CONTRACTS, fixed at the
+price the quote was sized at. The plan's own reason for the cap ("without
+a cap, $200 of capital is fiction") says it is meant in dollars, and the
+contract cap broke it: an ended market first quoted at 1c / 99c sized
+"$200" as 9,999 contracts a side, and when the price moved the same
+contracts put $1,284 at risk. 12 of the 900 markets had over $400 at
+risk; between them they lost $4,905 (ended 8 markets -$2,689, richest 4
+-$2,216).
+
+Run 1's figures, recorded as they came out (back bound):
+
+| sample | markets | reward | fills | net | net > 0 |
+|---|---|---|---|---|---|
+| richest, counted | 227 | $15,839 | -$5,071 | +$10,768 | 200 |
+| richest, supply under 5c (apart) | 73 | $3,627 | -$3,805 | -$178 | 60 |
+| random | 300 | $3,269 | -$2,130 | +$1,138 | 251 |
+| ended (to settlement) | 282 | $2,124 | -$7,307 | -$5,183 | 191 |
+
+Bar: positive on 200 of 227 (pass); best 25 week 1 $145.74 a day on
+$1,398 (7 markets, 18 left out), week 2 $246.06 a day on $3,194 (pass);
+ended -$5,183 (FAIL). In the ended sample the worst 30 markets lost
+$6,731 and the other 252 made $1,548; 117 ended holding the losing side
+of the settlement.
+
+**The fix, before run 2:** each side has a dollar budget, the dollars
+sweep 1's quote put on it (S x its price; for the ended sample S x the
+first candle's bid and one minus its ask). A side posts what its budget
+buys at the current price, less what its unpaired holding has already
+cost (average cost; Kalshi nets YES against NO, so the other side's
+fills close a holding). It never averages down past its budget. The
+reward credits min(1, posted / the size the share was measured at).
+Tested by hand (`scripts/mm-replay.test.mjs`) and mutation-checked.
+
+**Run 2 is the result the bar is applied to.** The tape is cached, so
+it reads the same trades and candles; only the cap changes. Both runs
+are reported.
+
+## Part B, run 2 (2026-11-17, dollar cap, same tape): FAIL. The study stops
+
+Back bound unless stated:
+
+| sample | markets | reward | fills | net | net > 0 | fills vs mid +10m / +60m |
+|---|---|---|---|---|---|---|
+| richest, counted | 227 | $11,283 | -$2,973 | +$8,310 | 192 | -1.30c / -1.79c |
+| richest, supply under 5c (apart) | 73 | $1,811 | -$482 | +$1,329 | 62 | +1.07c / +0.23c |
+| random (control) | 300 | $2,659 | -$911 | +$1,748 | 258 | -1.05c / -1.28c |
+| **ended, to settlement** | 282 | $1,459 | **-$6,019** | **-$4,560** | 186 | -0.84c / -0.85c |
+
+(Front bound: richest +$5,341, random +$1,328, ended -$6,009.)
+
+The bar:
+1. Positive on 192 of 227 richest: pass.
+2. Best 25, fixed before the replay: week 1 $128.04 a day on $1,398
+   (7 markets with 3+ quoted days, 18 left out), week 2 $217.40 a day on
+   $3,194 (16, 9 left out): pass, on thin week-1 coverage.
+3. **Ended sample -$4,560 over 282 markets: FAIL.** By the rule fixed
+   before the run, Part B fails whatever the richest 300 say.
+
+**Why, and why it is not the share assumption.** The ended median
+market made +$1.24; the worst 30 lost $5,149. 118 ended holding the
+losing side of the settlement. The ended sample's share was assumed
+small (the overall median, 4.5%), so as a check (diagnosis only, not
+the bar) its 70 markets in series that also appear among the richest
+were re-scored at the RICHEST sample's share for their series: reward
+$383 -> $1,848, fills -$3,640, net still **-$1,793**.
+
+The clearest case is Rotten Tomatoes (`KXRT`): the 32 open markets in
+the richest sample earned $4,350 of reward against $514 of fills over
+the two weeks before release; the 10 that ended lost $2,267 on fills,
+mostly as the score moved through the strikes while reviews arrived.
+**The rich pools are rich because their endings are dangerous.** An
+open market's replay cannot see its own ending, which is why the
+richest sample looks so good, and why the ended sample was added.
+
+Not tested and not claimed: a quote that stops before the outcome is
+known (for example, before a film's reviews). That is a different
+strategy with its own risk (knowing when to stop is the whole edge),
+and it would need its own plan and an out-of-sample test. Kept as a
+candidate in the brief, not started.
+
+Sweeps 2 and 3 of Part A are cancelled: they only mattered if Part B
+passed. The study stops here.
