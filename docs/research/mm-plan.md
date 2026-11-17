@@ -295,3 +295,49 @@ Tested by hand (`scripts/mm-replay.test.mjs`) and mutation-checked.
 **Run 2 is the result the bar is applied to.** The tape is cached, so
 it reads the same trades and candles; only the cap changes. Both runs
 are reported.
+
+## Part B, run 2 (2026-11-17, dollar cap, same tape): FAIL. The study stops
+
+Back bound unless stated:
+
+| sample | markets | reward | fills | net | net > 0 | fills vs mid +10m / +60m |
+|---|---|---|---|---|---|---|
+| richest, counted | 227 | $11,283 | -$2,973 | +$8,310 | 192 | -1.30c / -1.79c |
+| richest, supply under 5c (apart) | 73 | $1,811 | -$482 | +$1,329 | 62 | +1.07c / +0.23c |
+| random (control) | 300 | $2,659 | -$911 | +$1,748 | 258 | -1.05c / -1.28c |
+| **ended, to settlement** | 282 | $1,459 | **-$6,019** | **-$4,560** | 186 | -0.84c / -0.85c |
+
+(Front bound: richest +$5,341, random +$1,328, ended -$6,009.)
+
+The bar:
+1. Positive on 192 of 227 richest: pass.
+2. Best 25, fixed before the replay: week 1 $128.04 a day on $1,398
+   (7 markets with 3+ quoted days, 18 left out), week 2 $217.40 a day on
+   $3,194 (16, 9 left out): pass, on thin week-1 coverage.
+3. **Ended sample -$4,560 over 282 markets: FAIL.** By the rule fixed
+   before the run, Part B fails whatever the richest 300 say.
+
+**Why, and why it is not the share assumption.** The ended median
+market made +$1.24; the worst 30 lost $5,149. 118 ended holding the
+losing side of the settlement. The ended sample's share was assumed
+small (the overall median, 4.5%), so as a check (diagnosis only, not
+the bar) its 70 markets in series that also appear among the richest
+were re-scored at the RICHEST sample's share for their series: reward
+$383 -> $1,848, fills -$3,640, net still **-$1,793**.
+
+The clearest case is Rotten Tomatoes (`KXRT`): the 32 open markets in
+the richest sample earned $4,350 of reward against $514 of fills over
+the two weeks before release; the 10 that ended lost $2,267 on fills,
+mostly as the score moved through the strikes while reviews arrived.
+**The rich pools are rich because their endings are dangerous.** An
+open market's replay cannot see its own ending, which is why the
+richest sample looks so good, and why the ended sample was added.
+
+Not tested and not claimed: a quote that stops before the outcome is
+known (for example, before a film's reviews). That is a different
+strategy with its own risk (knowing when to stop is the whole edge),
+and it would need its own plan and an out-of-sample test. Kept as a
+candidate in the brief, not started.
+
+Sweeps 2 and 3 of Part A are cancelled: they only mattered if Part B
+passed. The study stops here.

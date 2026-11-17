@@ -130,17 +130,19 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 - Sharp-move tweaks: current settings at or near the best row; size is
   the only clean risk lever.
 - Resting orders for p75 on November: FAIL, dropped (`maker-plan.md`).
+- Market making where Kalshi pays for it (`mm-plan.md`): Part A passed
+  (sweep 1: $200 a market paid a median $0.62-0.76 a day before fills);
+  Part B FAILED on the ended sample: 282 settled markets lost $4,560
+  with reward included, still -$1,793 at the richest share. Rich pools
+  sit on markets whose endings run a resting quote over. Stopped.
 - Sharp-move midnight to 4am New York time, over four months on the
   stand-in: +3.47c a contract on 188 fills against +1.80c for the rest
   (t +0.48). Fails all three skip tests; no skip (`restart-plan.md`).
 
 **Candidates, not started**
-- **Market making where Kalshi pays for it:** the study plan is written
-  (`mm-plan.md`, 2026-11-16). Part A (one sweep of every program
-  market's public order book: what share would $200 a market score?)
-  is running from the research sandbox: three sweeps at different
-  hours, the first on 2026-11-17. Part B (fills against the tape) only
-  if A passes.
+- **Quoting a liquidity-reward market only until its outcome starts to
+  arrive** (from the market-making study's FAIL): untested. Knowing
+  when to stop is the whole edge; it needs its own plan.
 - **p75's 75-85c band:** its November re-test is spoiled through 11-14
   (it was printed). Fair test: days after 11-14.
 - **The BTC 2-minute underdog at 3-20c:** November re-test, to be fixed
