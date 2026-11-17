@@ -248,3 +248,11 @@ while writing the replay):
   the random draw; a quote that cannot be posted cannot be replayed.
 - A market whose trade tape runs past 200 pages (200,000 trades) in its
   window is dropped and counted rather than replayed on part of it.
+
+**Trial of the script, 2026-11-17** (4 markets a sample, to check the
+plumbing; not read against the bar): it runs end to end. One structural
+fact it showed, recorded before the full run so it cannot be used as an
+excuse after: many of the richest markets are WEEKLY (Panama and
+Hormuz transit counts, for example), born a few days into week 1, so the
+best 25 may have few markets with 3 quoted days in week 1. The bar is
+left as fixed; the count left out is printed beside it.
