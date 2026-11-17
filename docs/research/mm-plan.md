@@ -94,3 +94,26 @@ Capital for inventory, an account eligible for the program (regular
 U.S. members are; FCM customers are not), and an order budget large
 enough to re-quote: ask the trader for `GET /account/limits`. Speed and
 language are not the constraint.
+
+## Note, 2026-11-17 (after a 25-market trial of the script, before the first sweep)
+
+The trial showed something the plan missed. In 15 of the 25 markets one
+side held under a fifth of the target, so there was no reference price
+to join and the plan's quote scored nothing. But a small account can
+SUPPLY that side: post enough at its best bid to bring it to Target
+Size. Bids on a thin side are often a few cents, so 1,000 contracts can
+cost $20-40, and whoever supplies a side scores most of it.
+
+So Part A scores two quotes on every market, with the same $200:
+- **join:** the plan's quote, both sides at the reference price;
+- **supply:** each side first brought up to the target (at its best
+  bid, or a tick under the other side's implied ask where it is empty),
+  the rest of the money split evenly.
+
+**Part A stops only if BOTH fail the bar.** Part B's "300 richest"
+are taken from whichever quote pays more on each market.
+
+What supply cannot show, and Part B must: a bid resting alone on a thin
+side is the first thing hit when the market moves that way. A cheap side
+is cheap because the outcome is unlikely; being filled on it means
+holding the long shot.

@@ -9,12 +9,14 @@
 // ~5 requests a second. Each sweep is saved under --out (gitignored) so
 // three sweeps at different hours can be compared.
 //
-// The plan's stop: the median market pays the quote under $0.50 a day AND
-// fewer than 50 markets pay it $2 a day or more.
+// Two quotes are scored (lib/lip.js): JOIN both sides at the reference
+// price, and SUPPLY what a thin side is missing. The plan's stop applies
+// only if BOTH fail: the median market pays the quote under $0.50 a day
+// AND fewer than 50 markets pay it $2 a day or more.
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { quoteReward, poolPerDay } from "../lib/lip.js";
+import { join as pathJoin } from "node:path";
+import { quoteReward, supplyReward, poolPerDay } from "../lib/lip.js";
 
 const B = "https://api.elections.kalshi.com/trade-api/v2";
 const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : dflt; };
@@ -55,47 +57,49 @@ let markets = [...byMarket.values()];
 if (LIMIT) markets = markets.slice(0, LIMIT);
 console.log(`LIQUIDITY INCENTIVE SWEEP ${new Date(t0).toISOString()}: ${programs.length} active programs, ${byMarket.size} markets, ${new Set(programs.map(p => p.series_ticker)).size} series; quote $${CAPITAL} a market`);
 
-const rows = [], why = {};
+const rows = [], why = { join: {}, supply: {} };
+const tally = (o, k) => { const key = k.replace(/\$\d+/, "$N"); o[key] = (o[key] || 0) + 1; };
 let missing = 0;
 for (const m of markets) {
   const d = await get(`/markets/${encodeURIComponent(m.ticker)}/orderbook`);
   const ob = d?.orderbook_fp || d?.orderbook;
   if (!ob) { missing++; continue; }
-  const q = quoteReward({ yes: ob.yes_dollars || [], no: ob.no_dollars || [], target: m.target, discount: m.discount, poolPerDay: m.pool, capital: CAPITAL });
-  rows.push({ ...m, ...q });
-  if (q.why) why[q.why] = (why[q.why] || 0) + 1;
+  const args = { yes: ob.yes_dollars || [], no: ob.no_dollars || [], target: m.target, discount: m.discount, poolPerDay: m.pool, capital: CAPITAL };
+  const join = quoteReward(args), supply = supplyReward(args);
+  rows.push({ ...m, join, supply });
+  if (join.why) tally(why.join, join.why);
+  if (supply.why) tally(why.supply, supply.why);
   if (rows.length % 1000 === 0) console.error(`  ${rows.length}/${markets.length} books, ${requests} requests, ${Math.round((Date.now() - t0) / 1000)}s`);
 }
 
 const $ = v => `$${v.toFixed(2)}`;
 const med = a => a.length ? [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)] : 0;
-const totalPool = rows.reduce((s, r) => s + r.pool, 0);
 console.log(`\n${rows.length} books read (${missing} missing), ${requests} requests (${refused} refused and retried), ${Math.round((Date.now() - t0) / 60000)} minutes`);
-console.log(`pools: ${$(totalPool)} a day in all; a median market ${$(med(rows.map(r => r.pool)))} a day; target size median ${med(rows.map(r => r.target))}; discount factor median ${med(rows.map(r => r.discount))}`);
-for (const k of ["lenient", "strict"]) {
-  const pay = rows.map(r => r.perDay[k]), counting = rows.filter(r => r.counts[k]);
-  const live = rows.filter(r => r.perDay[k] > 0).sort((a, b) => b.perDay[k] - a.perDay[k]);
-  console.log(`\n${k === "lenient" ? "TARGET SIZE READ AS PLAIN RESTING SIZE (lenient)" : "TARGET SIZE READ AS SCORE NEAR THE PRICE (strict)"}`);
-  console.log(`  snapshot would count with our quote added: ${counting.length} of ${rows.length} markets, holding ${$(counting.reduce((s, r) => s + r.pool, 0))} a day of pools`);
-  console.log(`  our $${CAPITAL} would be paid: median market ${$(med(pay))} a day (median of the paying ones ${$(med(live.map(r => r.perDay[k])))}); $2+ a day on ${pay.filter(v => v >= 2).length} markets, $0.50+ on ${pay.filter(v => v >= 0.5).length}`);
-  console.log(`  median share of a side where it counts: ${(100 * med(counting.map(r => (r.shareYes + r.shareNo) / 2))).toFixed(1)}%`);
-  const top = live.slice(0, 25), topCost = top.reduce((s, r) => s + r.cost, 0), topPay = top.reduce((s, r) => s + r.perDay[k], 0);
-  console.log(`  the best 25: ${$(topPay)} a day on ${$(topCost)} resting (${topCost ? (100 * topPay / topCost).toFixed(2) : "0"}% a day BEFORE any loss on fills)`);
-  if (k === "lenient") {
-    console.log("  market                                   pool/day  target  disc   S    cost   yes share  no share   $/day");
-    for (const r of top.slice(0, 15)) console.log(`  ${r.ticker.padEnd(40)} ${$(r.pool).padStart(8)}  ${String(r.target).padStart(6)}  ${r.discount.toFixed(2)}  ${String(r.S).padStart(4)}  ${$(r.cost).padStart(7)}  ${(100 * r.shareYes).toFixed(1).padStart(8)}%  ${(100 * r.shareNo).toFixed(1).padStart(7)}%  ${$(r.perDay[k]).padStart(6)}`);
+console.log(`pools: ${$(rows.reduce((s, r) => s + r.pool, 0))} a day in all; a median market ${$(med(rows.map(r => r.pool)))} a day; target size median ${med(rows.map(r => r.target))}; discount factor median ${med(rows.map(r => r.discount))}`);
+const fails = {};
+for (const [model, title] of [["join", "JOIN: rest at each side's reference price"], ["supply", "SUPPLY: also fill a thin side to the target ourselves"]]) {
+  console.log(`\n${title}`);
+  const q = r => r[model];
+  for (const k of ["lenient", "strict"]) {
+    const pay = rows.map(r => q(r).perDay[k]), counting = rows.filter(r => q(r).counts[k]);
+    const live = rows.filter(r => q(r).perDay[k] > 0).sort((x, y) => q(y).perDay[k] - q(x).perDay[k]);
+    const top = live.slice(0, 25), topCost = top.reduce((s, r) => s + q(r).cost, 0), topPay = top.reduce((s, r) => s + q(r).perDay[k], 0);
+    console.log(`  target size read as ${k === "lenient" ? "plain resting size" : "score near the price"}: counts on ${counting.length} of ${rows.length} markets; our $${CAPITAL} is paid a median ${$(med(pay))} a day (${$(med(live.map(r => q(r).perDay[k])))} where it pays); $2+ on ${pay.filter(v => v >= 2).length}, $0.50+ on ${pay.filter(v => v >= 0.5).length}; best 25: ${$(topPay)} a day on ${$(topCost)} (${topCost ? (100 * topPay / topCost).toFixed(2) : "0"}% a day before any loss on fills)`);
+    if (k !== "lenient") continue;
+    fails[model] = med(pay) < 0.5 && pay.filter(v => v >= 2).length < 50;
+    console.log("    market                                   pool/day  target  disc     cost  yes share  no share   $/day  sides supplied");
+    for (const r of top.slice(0, 12)) console.log(`    ${r.ticker.padEnd(40)} ${$(r.pool).padStart(8)}  ${String(r.target).padStart(6)}  ${r.discount.toFixed(2)}  ${$(q(r).cost).padStart(7)}  ${(100 * q(r).shareYes).toFixed(1).padStart(8)}%  ${(100 * q(r).shareNo).toFixed(1).padStart(7)}%  ${$(q(r).perDay[k]).padStart(6)}  ${q(r).supplied ?? 0}`);
     const bySeries = new Map();
-    for (const r of live) { const s = bySeries.get(r.series) || { n: 0, pay: 0 }; s.n++; s.pay += r.perDay[k]; bySeries.set(r.series, s); }
-    console.log(`  by series (top 10 by what our quotes would be paid): ${[...bySeries].sort((a, b) => b[1].pay - a[1].pay).slice(0, 10).map(([s, v]) => `${s} ${$(v.pay)}/${v.n}`).join("; ")}`);
+    for (const r of live) { const v = bySeries.get(r.series) || { n: 0, pay: 0 }; v.n++; v.pay += q(r).perDay[k]; bySeries.set(r.series, v); }
+    console.log(`    by series, top 8 by what our quotes would be paid: ${[...bySeries].sort((x, y) => y[1].pay - x[1].pay).slice(0, 8).map(([t, v]) => `${t} ${$(v.pay)}/${v.n}`).join("; ")}`);
   }
+  console.log(`  why a quote earns nothing: ${Object.entries(why[model]).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} (${v})`).join("; ") || "—"}`);
 }
-console.log(`\nwhy a quote would earn nothing: ${Object.entries(why).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} (${v})`).join("; ") || "—"}`);
-const L = rows.map(r => r.perDay.lenient);
-const stop = med(L) < 0.5 && L.filter(v => v >= 2).length < 50;
-console.log(`\nPART A (lenient reading): ${stop ? "STOP — the median market pays under $0.50 and fewer than 50 pay $2+" : "CONTINUE to the next sweep"}`);
+const stop = fails.join && fails.supply;
+console.log(`\nPART A (plain resting size): join ${fails.join ? "fails" : "clears"} the bar, supply ${fails.supply ? "fails" : "clears"} it -> ${stop ? "STOP: in both, the median market pays under $0.50 and fewer than 50 pay $2+" : "CONTINUE to the next sweep"}`);
 console.log("One book at one moment; a share is before anyone reacts to our quote, and says nothing yet about what the fills cost.");
 
 mkdirSync(OUT, { recursive: true });
-const file = join(OUT, `sweep-${new Date(t0).toISOString().replace(/[:.]/g, "")}.json`);
+const file = pathJoin(OUT, `sweep-${new Date(t0).toISOString().replace(/[:.]/g, "")}.json`);
 writeFileSync(file, JSON.stringify({ at: t0, capital: CAPITAL, rows }));
 console.log(`saved ${file}`);
