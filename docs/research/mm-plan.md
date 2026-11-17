@@ -229,3 +229,22 @@ bar: the 25 best on week 1's net, scored on week 2.
 **Weeks:** week 1 is days 14 to 8 before sweep 1, week 2 days 7 to 1.
 A market with under 3 days of history in a week is left out of that
 week's count and the number left out is printed.
+
+**Two more details, fixed 2026-11-17 before any tape is read** (found
+while writing the replay):
+- **The quote rests only in minutes when a program is paying for that
+  market.** Nobody would quote a one-news-event market for nothing, and
+  most current programs started days ago, so quoting all 14 days would
+  charge the replay with fills nobody would take. Inventory bought
+  while paid is still held, and marked at the end or at settlement.
+  "Under 3 days in a week" counts quoted minutes.
+- **The ended sample's quote** is the join quote: S = $200 / (bid + 1 -
+  ask) a side at the first two-sided candle of its window, resting at
+  the candle's bid and ask. Window: the earlier of its programs' start
+  and 14 days before close, to close. Its share is the median sweep-1
+  JOIN share per side in its series (over markets where a join quote
+  existed), else the overall median.
+- Markets whose quote does not exist in sweep 1 (cost $0) are not in
+  the random draw; a quote that cannot be posted cannot be replayed.
+- A market whose trade tape runs past 200 pages (200,000 trades) in its
+  window is dropped and counted rather than replayed on part of it.

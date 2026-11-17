@@ -68,6 +68,12 @@ console.log("the reward");
   ok(near(half.reward, 0.01 * 0.375 + 9 * 0.01 * (0.5 * 0.5 + 0.25) / 2), "a side posted at half size earns half its share");
   ok(replay({ ...base, quotes: [[0, null, 0.44]], trades: [], shareYes: 0.5, shareNo: 0.25, poolRate }).reward === 0, "a one-sided market earns nothing for a quote that only joins");
   ok(replay({ ...base, quotes: [[5 * MIN, 0.40, 0.44]], trades: [], shareYes: 1, shareNo: 1, poolRate }).quoted === 5, "minutes before the first candle are not quoted");
+  // Paid only in minutes 0-4: from minute 5 nothing is posted, so the seller in minute 6 misses us, but what we hold is still marked.
+  const paid = replay({ ...base, quotes: [[0, 0.40, 0.44], [8 * MIN, 0.30, 0.34]], trades: [T(1, 0.35, 100, "no"), T(6, 0.30, 100, "no")], shareYes: 1, shareNo: 1, poolRate, quoteWhen: t => t < 5 * MIN, mode: "back" });
+  // Minutes 0-1 post in full (0.01 each); after the fill in minute 1 the YES side posts 100 of 200 for minutes 2-4.
+  ok(paid.yes === 100 && paid.quoted === 5, "outside paid minutes nothing is posted, so the second seller misses us");
+  ok(near(paid.reward, 0.01 + 0.01 + 3 * 0.01 * (0.5 + 1) / 2), `and nothing is earned there (${paid.reward.toFixed(4)})`);
+  ok(near(paid.pnl, -100 * 0.40 + 100 * 0.30), "but what was bought is still held and marked at the end");
   const rate = poolRateFor([{ start_date: "2026-11-01T00:00:00Z", end_date: "2026-11-02T00:00:00Z", period_reward: 144000 }, { start_date: "2026-11-01T12:00:00Z", end_date: "2026-11-03T12:00:00Z", period_reward: 288000 }]);
   ok(near(rate(Date.parse("2026-11-01T06:00:00Z")), 0.01) && near(rate(Date.parse("2026-11-01T18:00:00Z")), 0.02) && rate(Date.parse("2026-11-04T00:00:00Z")) === 0, "overlapping programs add; outside them the pool is nothing");
 }
