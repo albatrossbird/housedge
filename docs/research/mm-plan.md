@@ -171,3 +171,61 @@ quotes on each market) and 300 from the rest, drawn by a hash of the
 ticker so the draw can be repeated. The file is not in the repository
 (downloaded Kalshi data stays out); if the sandbox loses it, the
 samples are re-drawn the same way from the next sweep and that is said.
+
+## Part B: details fixed 2026-11-17, before any tape is read
+
+The plan above left these open. They are fixed here, and only ever make
+the test harder.
+
+**A third sample, because the first two cannot see the end of a
+market.** Both samples are markets still open at sweep 1, replayed over
+the 14 days before it. A market that jumps on one piece of news does
+most of its damage to a resting quote at the END of its life, and an
+open market has not got there yet. Kalshi lists past programs
+(`/incentive_programs?status=paid_out`), so:
+- **ended:** 300 markets drawn by a hash of the ticker from programs
+  that ended in the 14 days before sweep 1 and whose market has since
+  settled. Each is replayed from its program's start (at most 14 days)
+  to the market's close and its inventory is marked to SETTLEMENT.
+  There is no past book to score a share from, so its share is the
+  median sweep-1 share in the same series (the overall median where the
+  series is not in the sweep). That is an assumption and is said beside
+  every figure that uses it.
+- **A pass on the bar that the ended sample contradicts is not a
+  pass.** If the ended sample's reward plus fills is negative in total
+  under the back bound, Part B fails whatever the richest 300 say.
+
+**The quote.** On each market the better-paying of sweep 1's two quotes,
+with its sizes. Each minute it rests at the last candle's closing bid
+and ask (carried forward through minutes with no candle); a supply
+quote on an empty side rests one tick inside the other side's implied
+price. **Position cap:** the net position never exceeds the quote's
+size on either side; a side that is full posts nothing until the other
+side trades it down. Without a cap, $200 of capital is fiction.
+
+**Fills.** A taker trade against our side at our price or worse for the
+taker's counterparty fills us AT OUR PRICE, up to what is posted:
+front = at or through our price; back = strictly through it. Maker fees
+by the series' `fee_type` (`kalshiMakerFee`); a series whose schedule we
+cannot read is dropped and counted.
+
+**P&L of the fills** = cash paid and received, plus inventory at the
+end: at settlement where settled, else long YES at the last bid and
+long NO at one minus the last ask (never the mid). Marks to the mid 1,
+10 and 60 minutes after each fill are printed as a diagnosis and do not
+enter the bar.
+
+**Reward** = the pools Kalshi actually listed for that market over the
+replayed minutes (active, closed and paid-out programs) x the sweep-1
+share of each side / 2, for each minute that side is posted with the
+market two-sided, in proportion to the size posted. An upper bound: it
+assumes the snapshot always counted and that nobody answered our quote.
+
+**The best 25 are chosen BEFORE the replay:** the 25 highest by sweep-1
+reward per dollar among the richest 300, leaving out any supply quote
+whose supplied side is priced under 5c. Shown beside it, not as the
+bar: the 25 best on week 1's net, scored on week 2.
+
+**Weeks:** week 1 is days 14 to 8 before sweep 1, week 2 days 7 to 1.
+A market with under 3 days of history in a week is left out of that
+week's count and the number left out is printed.
