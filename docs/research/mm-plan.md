@@ -117,3 +117,57 @@ What supply cannot show, and Part B must: a bid resting alone on a thin
 side is the first thing hit when the market moves that way. A cheap side
 is cheap because the outcome is unlikely; being filled on it means
 holding the long shot.
+
+## Part A, sweep 1 (2026-11-17 04:08 UTC, 11pm New York): CONTINUE
+
+5,853 active programs on 5,853 markets in 403 series, every book read
+(5,864 requests, 22 minutes). Pools add to about $110,000 a day; the
+median market's is $14.29 a day, Target Size 1,000, Discount Factor 0.5.
+
+| quote ($200 a market) | snapshot counts on | median paid a day | markets paying $2+ | markets paying $0.50+ |
+|---|---|---|---|---|
+| join | 5,091 | $0.62 | 1,405 | 3,168 |
+| supply | 5,335 | $0.76 | 1,650 | 3,412 |
+
+The stop needed a median under $0.50 AND fewer than 50 markets at $2+.
+Neither quote is near it. The best 25 markets would pay the join quote
+$691 a day on $4,991 **before any loss on fills, and before anyone
+reacts to our orders**. That is the size of the reward, not a profit:
+a figure this large against so little capital says the fills are where
+the money goes, which is Part B's question. Richest series for our
+quotes: KXART, KXRT, KXYTVIEWSW, KXVOICERANK, weekly shipping-count
+markets. These are markets that jump on one piece of news.
+
+**The help page re-read the same day** (the formal terms at
+kalshi.com/regulatory/notices refused again, HTTP 429):
+- Target Size is "the depth that must be resting on each side for a
+  snapshot to count": plain resting size. The script's second, stricter
+  reading (score near the price) is dropped from here on.
+- "If a side of the book never reaches the Target Size, no orders on
+  that side qualify for that snapshot."
+- A snapshot taken while the market is not open is excluded, and the
+  reward is scaled by the share of snapshots not excluded. So a market
+  that closes early in its period pays only for the time it was open
+  and two-sided: `pool per day` here is the period's reward over the
+  period's days, an upper bound for a market about to close.
+- A market's daily reward is between $1 and $1,000; a final reward
+  under $1 on one program is not paid and does not combine with others.
+- Not eligible: FCMs, introducing brokers and their customers, and
+  non-U.S. users. No cap per account, minimum order size or minimum
+  resting time is stated.
+
+**One thing the supply quote shows that needs the formal terms before
+it is believed.** Its two best rows are markets priced at 98-99c with
+an empty other side, where 1,000 contracts at 1c ($10) would be the
+whole side. If that paid half a $100-a-day pool, somebody would already
+be doing it. Either the terms rule it out, or those orders are hit the
+moment the market turns. Supply rows on a side priced under 5c are
+reported apart in Part B and never counted towards the bar.
+
+Sweeps 2 and 3 follow at other hours (about 13:30 and 21:00 UTC).
+Part B's two samples are taken from THIS sweep's saved file, as the
+plan says: the 300 best by reward per dollar (the better of the two
+quotes on each market) and 300 from the rest, drawn by a hash of the
+ticker so the draw can be repeated. The file is not in the repository
+(downloaded Kalshi data stays out); if the sandbox loses it, the
+samples are re-drawn the same way from the next sweep and that is said.
