@@ -436,3 +436,44 @@ filled, 00:00-03:59 New York time against every other hour:
 
 July to September is independent of the 45 recorded days; October and
 November overlap them and are shown apart.
+
+### Result, 2026-11-17: no skip. The block made money over the four months
+
+The run read 12,984 settled windows (27,846 Kalshi requests, 137
+windows without Binance ticks). 2,310 decisions at 1bp, 1,321 filled,
++2.03c a contract on the stand-in (which reads high; see above).
+
+Filled 1bp decisions, 00:00-03:59 New York time against the rest, at 10
+contracts:
+
+| period | 00-04h trades | per contract | at 10 contracts | the rest | gap | t |
+|---|---|---|---|---|---|---|
+| July | 26 | -5.40c | -$14.05 | -1.06c | -4.34c | -0.42 |
+| August | 42 | +13.03c | +$54.74 | +2.35c | +10.68c | 1.44 |
+| September | 66 | +1.38c | +$9.10 | -0.89c | +2.27c | 0.38 |
+| October | 34 | +0.98c | +$3.34 | +7.06c | -6.08c | -0.78 |
+| November | 20 | +6.04c | +$12.08 | +1.37c | +4.66c | 0.42 |
+| 07-01..09-07 | 85 | +9.52c | +$80.93 | +1.29c | +8.23c | 1.49 |
+| 09-08..11-14 | 103 | -1.53c | -$15.72 | +2.15c | -3.68c | -0.82 |
+| July to September (independent) | 134 | +3.72c | +$49.79 | -0.09c | +3.80c | 0.90 |
+| all | 188 | +3.47c | +$65.21 | +1.80c | +1.67c | 0.48 |
+
+Against the three tests:
+1. t <= -1: **fails** (+0.48; the block was better than the rest).
+2. The block loses money itself: **fails** (+3.47c, positive in four
+   months of five).
+3. Worse in both halves: **fails** (better in the first, worse in the
+   second).
+
+On the three months the recorded days cannot see, the block was the
+better part of the day. The -3.13c that started this was 30 days, and
+inside them one fortnight. **The skip is not adopted and stays out of
+the trader message.**
+
+For context only, not tested (every block was looked at after the run,
+so these are candidates at most): 12-16h read -1.79c (t -1.35 against
+the rest; -4.42c then +0.05c by half) and 20-24h -1.05c (t -1.17;
++6.27c then -6.01c). Neither is worse in both halves by a margin worth
+a rule, and the run's own pre-fixed prediction (16-20h better, scored
+before 10-21) also failed at t 1.39. Four months agree with the 45
+recorded days: sharp-move has no time-of-day filter worth having.
