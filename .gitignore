@@ -45,4 +45,5 @@ __pycache__/
 .tape-cache/
 .ladder-cache/
 .vol-cache/
+.lip-cache/
 .binance-sharp/
