@@ -130,13 +130,17 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 - Sharp-move tweaks: current settings at or near the best row; size is
   the only clean risk lever.
 - Resting orders for p75 on November: FAIL, dropped (`maker-plan.md`).
+- Sharp-move midnight to 4am New York time, over four months on the
+  stand-in: +3.47c a contract on 188 fills against +1.80c for the rest
+  (t +0.48). Fails all three skip tests; no skip (`restart-plan.md`).
 
 **Candidates, not started**
 - **Market making where Kalshi pays for it:** the study plan is written
   (`mm-plan.md`, 2026-11-16). Part A (one sweep of every program
   market's public order book: what share would $200 a market score?)
-  runs from the research sandbox once the four-month sharp-move run has
-  finished; Part B (fills against the tape) only if A passes.
+  is running from the research sandbox: three sweeps at different
+  hours, the first on 2026-11-17. Part B (fills against the tape) only
+  if A passes.
 - **p75's 75-85c band:** its November re-test is spoiled through 11-14
   (it was printed). Fair test: days after 11-14.
 - **The BTC 2-minute underdog at 3-20c:** November re-test, to be fixed
