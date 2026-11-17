@@ -531,3 +531,50 @@ Please also send: sharp-move's live totals since it started (settled
 count, mean per contract, t), and your account's order limits (Kalshi's
 GET /account/limits).
 ```
+
+## The trader's answers, 2026-11-17, and the restart as built
+
+**p75's live split** (302 settled fills, 10-21..11-14):
+
+| live p75 fills | settled | won | per contract | $ | t |
+|---|---|---|---|---|---|
+| (a) 16:00-19:59 New York, or Sat/Sun | 153 | 129 | -7.82c | -$197.04 | -1.49 |
+| (b) everything else | 149 | 139 | +6.56c | +$174.80 | 2.45 |
+| all | 302 | 268 | -0.43c | -$22.24 | 0.18 |
+
+(a) did worse, so p75 restarts with both filters, as the rule said.
+**Agreement, not confirmation:** these fills sit inside the tape period
+the filters were found on (07-01..11-14), so the live split is not an
+independent test. The 8-week tape score of the skipped windows from the
+restart day is the test that counts.
+
+**Sharp-move live since 10-21:** 419 settled, 205 won, +1.53c a contract,
++$127.72, t 1.28. In line with the backtest's read (out of sample
+10-22..11-15, +3.73c at +100ms, which reads high).
+
+**Account limits:** basic tier, read 200/s, write 100/s. Far above
+anything either rule sends; nothing to change.
+
+**Built as written** (the trader's PR 33): both rules capped at 10 in
+code; drawdowns from the restart's high (sharp-move $100, p75 $75); t <=
+-1 at 300 settled; p75's two filters, logged once a window. The rules'
+earlier stops are replaced; fee check, fill-rate stop, step back and the
+other KILLs unchanged. The trader added a $50 daily loss cap per
+strategy.
+
+**Our answer on the old stops: none needs to stay.** Each was sized for
+40 contracts or overlaps a new one:
+- p75 "losing after 50" and the old t-stops: the 300-settled review
+  covers them (about 33 days for p75 at ~9 trades a day).
+- sharp-move's -3c after 100: a broken edge at -2c a contract loses
+  about $3.40 a day at 10 contracts; the 300-settled review (about 18
+  days) reaches it before the $100 stop would, and -3c after 100 at
+  this size is -$30, inside one bad day (11-14 was -$30 at 10).
+- the $10-a-contract drawdown: at 10 contracts it is the same $100 on
+  sharp-move and a looser $100 on p75; the $75 is tighter.
+
+**The $50 daily caps are fine.** The worst backtest day at 10 contracts
+is about -$30 for each rule, so $50 should only fire on something
+broken. Daily loss stops were tested on sharp-move and cost money when
+set tight (m15.md); at $50 it is insurance, not a rule, and should
+almost never act. If either fires, we want the day's fills.
