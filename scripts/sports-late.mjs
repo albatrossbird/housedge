@@ -31,6 +31,9 @@ const WINDOWS = [["A", "2025-10-01", "2026-03-01"], ["R", "2026-03-01", "2026-06
 const windowOf = d => (WINDOWS.find(([, a, b]) => d >= a && d < b) || [null])[0];
 const POINTS = [360, 180, 60], DELAYS = [5000, 10000, 30000], LOOK = 15000;
 const PRIMARY = { point: 180, delay: 10000, lo: 0.75, hi: 0.97 };
+// --primary-only: read only the primary decision point (the verdict), so it
+// arrives in a third of the time; a later full run reuses the cache.
+const ONLY_PRIMARY = has("primary-only");
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let kReq = 0, kRefused = 0, eReq = 0, nextAt = 0;
@@ -206,7 +209,7 @@ let done = 0, noPrint = 0;
 const tS = Date.now();
 for (const g of games) {
   if (++done % 200 === 0) console.error(`  scored ${done}/${games.length} games, ${kReq} Kalshi requests, ${Math.round((Date.now() - tS) / 60000)} min`);
-  for (const s of POINTS) {
+  for (const s of ONLY_PRIMARY ? [PRIMARY.point] : POINTS) {
     const w = g.walls[s];
     if (!w) continue;
     const tr = await gameTrades(g, w + DELAYS[0], w + DELAYS[DELAYS.length - 1] + LOOK);
@@ -218,6 +221,7 @@ for (const g of games) {
     }
   }
   // The paper's measure: 10 minutes before the ACTUAL close (not knowable live).
+  if (ONLY_PRIMARY) continue;
   const pc = g.close - 600000;
   const x = lateEntry(await gameTrades(g, pc, pc + LOOK), pc, { lookMs: LOOK });
   if (x) add("paper", trade(g, x));
