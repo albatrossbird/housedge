@@ -95,3 +95,13 @@ the period's **last play in feed order** to the next period's **first
 play stamped after it**; a stamp of exactly 00:00:00 UTC is treated as
 none; the pre-game point is the game's first play in feed order. This
 applies to all five leagues. The rule, bar and windows are unchanged.
+
+Re-run with the feed-order rule: every league clears.
+
+| league | joined | halftime found | break p10 / median / p90 (min) | break > 6 min | other break | pre-game |
+|---|---|---|---|---|---|---|
+| NBA | 1,632 | 99.7% | 11.8 / 14.7 / 15.8 | 93.0% | 99.6% | 99.7% |
+| NHL (2nd intermission) | 1,816 | 99.9% | 18.7 / 18.9 / 19.2 | 99.8% | 99.9% | 100.0% |
+| NFL | 369 | 100.0% | 13.9 / 14.3 / 15.2 | 100.0% | 100.0% | 100.0% |
+| college football | 1,858 | 99.1% | 19.9 / 21.0 / 22.8 | 98.5% | 99.7% | 99.9% |
+| men's college basketball | 5,852 | 99.7% | 11.3 / 15.1 / 16.3 | 94.8% | — | 99.7% |
