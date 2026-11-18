@@ -1,7 +1,7 @@
 // lib/sportsLate.js, worked by hand. Team shapes copied from ESPN's
 // scoreboard and Kalshi's markets on 2026-11-18.
 
-import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry } from "../lib/sportsLate.js";
+import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry, periodBounds, breakAfter } from "../lib/sportsLate.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -70,6 +70,25 @@ console.log("the entry");
   ok(lateEntry(tr, T0 + 7500) === null, "nothing in the window: no trade");
   ok(lateEntry(tr, T0, { lo: 0.85, hi: 0.97 }) === null, "a narrower band can leave none");
   ok(lateEntry([{ t: T0 + 15000, side: "yes", price: 0.9, count: 1, market: "A" }], T0) === null, "the window is half-open at 15 seconds");
+}
+
+console.log("halftime: the break between periods");
+{
+  // NBA game 2025-11-17, ESPN's period-end plays copied from its summary.
+  const plays = [
+    { period: 2, wallclock: "2025-11-17T00:42:00Z" },
+    { period: 2, wallclock: "2025-11-17T01:13:22Z" },   // End Period 2
+    { period: 2, wallclock: "" },                       // no wall-clock: skipped
+    { period: 3, wallclock: "2025-11-17T01:29:05Z" },   // first play after the break
+    { period: 3, wallclock: "2025-11-17T01:54:59Z" },
+  ];
+  const b = periodBounds(plays);
+  ok(b[2].first === Date.parse("2025-11-17T00:42:00Z") && b[2].last === Date.parse("2025-11-17T01:13:22Z"), "a period's first and last wall-clock");
+  const h = breakAfter(b, 2);
+  ok(h.end === Date.parse("2025-11-17T01:13:22Z") && h.restart === Date.parse("2025-11-17T01:29:05Z") && Math.abs(h.minutes - 15.7166) < 0.001, "the break runs from the period's last play to the next period's first");
+  ok(breakAfter(b, 3) === null && breakAfter(b, 1) === null, "no next period, or no earlier one: no break");
+  const shuffled = periodBounds([{ period: 1, wallclock: "2025-11-17T00:10:00Z" }, { period: 1, wallclock: "2025-11-17T00:05:00Z" }]);
+  ok(shuffled[1].first === Date.parse("2025-11-17T00:05:00Z") && shuffled[1].last === Date.parse("2025-11-17T00:10:00Z"), "feed order does not matter, wall-clock does");
 }
 
 if (bad) { console.error(`\n${bad} failed`); process.exit(1); }
