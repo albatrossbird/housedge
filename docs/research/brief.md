@@ -142,6 +142,12 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   as often as priced and the fee is the loss. No league passes alone.
   Stopped. Found on the way: Kalshi closed NBA, NHL and college
   basketball markets 15-30 minutes after the game until mid-2026.
+- Buy the leader late, by lead and price (`sports-margin-plan.md`,
+  2026-11-18): FAIL. Chosen on A, tested once on R + B. Only men's
+  college basketball had a cell to test (1:00 left, lead >= 6,
+  50-95c). On R + B it won 16 of 16, too few against the 60-trade bar.
+  Stopped. One candidate is recorded: re-score that exact rule on games
+  after 2026-11-17 once there are 60 trades, allowing at most 1 loss.
 
 **Candidates, not started**
 - **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in

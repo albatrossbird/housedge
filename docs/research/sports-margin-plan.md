@@ -79,3 +79,53 @@ times or caps on this data.
 - The risk shape: buying at 88c risks $8.80 to make $1.20 at 10
   contracts. A lead filter can raise the win rate; it does not change
   that one loss costs about seven wins.
+
+## Result, 2026-11-18: FAIL. "Buy the leader late" stops.
+
+`node scripts/sports-half.mjs --margin`, from the late test's cache (no
+new Kalshi reads). Plumbing clears: score known at 100% of decisions in
+every league, and the leader maps to one market in 100% of those with a
+leader (tied decisions, not traded: NBA 130, NHL 1,179, NFL 78, college
+football 285, men's college basketball 504).
+
+**Choosing on A.** Four leagues have no cell with 60+ trades, a positive
+mean and t >= 1, and are dropped untested:
+
+- NBA: best 60+ cell is 3:00, lead >= 6, 50-95c at +2.01c, t 0.84
+  (125 trades).
+- NHL: best is 6:00, lead >= 1, 50-95c at +1.19c, t 0.70 (319).
+- NFL: 6:00, lead >= 4, 50-95c at +1.46c, t 0.29 (68); the cells that
+  look strong have 2-43 trades.
+- College football: no positive 60+ cell (3:00, lead >= 4, 50-95c is
+  +0.01c on 92).
+
+Men's college basketball chose **1:00 left, lead >= 6, 50-95c**: 69
+trades on A, all 69 won, paid 93.1c, +6.47c a contract.
+
+**The test on R + B, once:**
+
+| | trades | won | paid | per contract | t |
+|---|---|---|---|---|---|
+| **R + B** | **16** | 100% | 93.2c | +6.37c | 8.63 |
+| R | 10 | 100% | 92.5c | +7.02c | 6.54 |
+| B | 6 | 100% | 94.3c | +5.29c | 5.66 |
+
+**FAIL: 16 trades against the 60 the bar needs.** Every trade won, so
+the t is not meaningful: with no losses its spread comes only from the
+price paid. What the 16 can say is little. A side fairly priced at 93c
+loses about 7% of the time, and 16 straight wins happen about one time
+in three at that rate (0.932^16 = 0.32). The 69 on A were the best of
+27 cells, so they are not evidence either.
+
+Per the stop rule, "buy the leader late" stops: no new leads, times or
+caps on this data.
+
+**One candidate, recorded and nothing more.** The exact chosen rule
+(men's college basketball, 1:00 left, lead >= 6, buy the leader at
+50-95c, +10s, 15s look) may be re-scored, unchanged, with this same
+code on games played after 2026-11-17, once there are at least 60
+trades (about one college basketball season). Bar fixed now: mean
+positive after fees AND **at most 1 loss in the first 60 trades**. If
+it were fairly priced at ~93c, at most 1 loss in 60 would happen about
+7% of the time. Break-even at 93c is roughly 4 losses in 60, so one
+loss costs about 14 wins. A print is one trade, so size is unknown.

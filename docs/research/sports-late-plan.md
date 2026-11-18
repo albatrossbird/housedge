@@ -172,7 +172,23 @@ Reference rows (never a second chance):
   the direction it reported, not significant, and gone in our windows.
   Read with the close-lag finding above, much of its late-game effect
   looks like measuring after the final whistle.
-- The 6:00 and 1:00 rows and "10 minutes before the actual close" need
-  trade windows the primary-only pass does not read. The full pass
-  (`--score`) is running from the same cache and is recorded below when
-  it finishes; it cannot change the verdict.
+- **Full pass** (`--score`, same cache; 68,473 Kalshi requests, 258
+  minutes) adds the rows below. None changes the verdict.
+
+| cell | trades | won | paid | per contract | t |
+|---|---|---|---|---|---|
+| 6:00 left, +10s | 3,133 | 88.0% | 87.8c | -0.53c | -0.99 |
+| 6:00 left, +5s | 3,192 | 87.3% | 87.7c | -1.14c | -1.98 |
+| 6:00 left, +30s | 3,125 | 87.4% | 87.9c | -1.25c | -2.21 |
+| 1:00 left, +10s | 2,142 | 88.1% | 88.4c | -0.97c | -1.44 |
+| 1:00 left, +5s | 2,185 | 88.5% | 88.4c | -0.63c | -0.94 |
+| 1:00 left, +30s | 2,038 | 88.6% | 88.7c | -0.78c | -1.17 |
+| 10 min before the ACTUAL close, A + B | 770 | 95.1% | 88.4c | +5.95c | 5.94 |
+| 10 min before the ACTUAL close, R | 74 | 94.6% | 89.9c | +4.08c | 1.68 |
+
+  Every game-clock row is negative. The only strongly positive row is
+  the paper's measure, timed off the market's actual close, which no
+  trader can see coming; in window A it sits mostly after the final
+  whistle for NBA, NHL and college basketball (close lag medians 14.8,
+  32.4 and 30.0 minutes). That gap, +5.95c against -1.32c, is roughly
+  what conditioning on the close is worth.
