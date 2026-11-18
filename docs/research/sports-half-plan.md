@@ -105,3 +105,39 @@ Re-run with the feed-order rule: every league clears.
 | NFL | 369 | 100.0% | 13.9 / 14.3 / 15.2 | 100.0% | 100.0% | 100.0% |
 | college football | 1,858 | 99.1% | 19.9 / 21.0 / 22.8 | 98.5% | 99.7% | 99.9% |
 | men's college basketball | 5,852 | 99.7% | 11.3 / 15.1 / 16.3 | 94.8% | — | 99.7% |
+
+## Result, 2026-11-18: FAIL. Favourites in sports games stop here.
+
+`node scripts/sports-half.mjs --score --primary-only` (23,252 public
+Kalshi requests, 88 minutes):
+
+| | trades | won | avg paid | per contract | t | days | at 10 contracts |
+|---|---|---|---|---|---|---|---|
+| **A + B (scored)** | 4,677 | 86.8% | 87.2c | **-1.18c** | **-2.21** | 221 | -$2.50 a day |
+| A 2025-10..2026-02 | 3,436 | 86.5% | 87.2c | -1.46c | -2.45 | 151 | -$3.32 a day |
+| B 2026-09..2026-11 | 1,241 | 87.6% | 87.3c | -0.40c | -0.35 | 70 | -$0.72 a day |
+
+5,374 games had a halftime and no in-band print within 5 minutes. All
+three tests fail. Worst day -$102.64 at 10 contracts. As at 3:00 left,
+the favourite wins about as often as its price says (86.8% at 87.2c),
+and the taker fee is the loss.
+
+Reference rows (never a second chance):
+
+| cell | trades | won | paid | per contract | t |
+|---|---|---|---|---|---|
+| NBA | 595 | 85.9% | 86.0c | -0.95c | -0.74 |
+| NHL (2nd intermission) | 695 | 85.5% | 86.4c | -1.75c | -1.43 |
+| NFL | 187 | 82.4% | 86.2c | -4.63c | -1.80 |
+| college football | 868 | 87.2% | 87.6c | -1.07c | -0.86 |
+| men's college basketball | 2,332 | 87.6% | 87.7c | -0.83c | -1.28 |
+| band 55-75c | 3,325 | 62.9% | 65.3c | -3.90c | -4.60 |
+| band 75-85c | 2,009 | 78.7% | 79.8c | -2.20c | -2.26 |
+| band 85-97c | 3,081 | 91.8% | 91.7c | -0.48c | -0.96 |
+| window R | 723 | 89.1% | 86.7c | +1.63c | 1.55 |
+
+No league and no band is positive in A + B, so there is no candidate.
+Window R is positive again, as it was at 3:00 left (+1.33c). It is not
+significant either time, and it is the paper's period. The pre-game and
+other-break rows come from the full pass, recorded below when it
+finishes. They cannot change the verdict.

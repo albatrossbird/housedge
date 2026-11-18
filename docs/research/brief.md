@@ -148,6 +148,10 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   50-95c). On R + B it won 16 of 16, too few against the 60-trade bar.
   Stopped. One candidate is recorded: re-score that exact rule on games
   after 2026-11-17 once there are 60 trades, allowing at most 1 loss.
+- Favourites at halftime (`sports-half-plan.md`, 2026-11-18): FAIL.
+  4,677 trades, -1.18c a contract at t -2.21, negative in both windows
+  and in every league. That was the last look: favourites in sports
+  games stop.
 
 **Candidates, not started**
 - **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in
