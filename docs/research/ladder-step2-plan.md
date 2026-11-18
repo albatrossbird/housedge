@@ -238,3 +238,54 @@ The recorder's first full day (run 43889262589): files of 14-18MB an
 hour and 32MB in the busiest (14:00 UTC: 2.86M changes); receive lag
 p99 typically 21ms, worst minute 186ms; never under 193MB available.
 At that rate the 14 days are nearer 6GB than the 5.2GB first estimated.
+
+## Day-3 early stop, 2026-11-18: STOP
+
+Run 44208436894 (`source: laddergaps`, 2026-11-15..2026-11-18: 100
+files, 1,126MB read). The rule fixed before recording: median
+qualifying gap under 50ms => STOP. No parameter changed.
+
+| day | closes | qualifying gaps | median lifetime | p10 / p90 | under 50ms | closed by a trade |
+|---|---|---|---|---|---|---|
+| 11-15 (from 05:49 UTC) | 19 | 52 | 6ms | 1 / 18ms | 98% | 49 |
+| 11-16 | 24 | 49 | 4ms | 0 / 13ms | 100% | 43 |
+| 11-17 | 24 | 43 | 4ms | 0 / 14ms | 100% | 43 |
+| **all** | 67 | **144** | **5ms** | 0 / 14ms | **99%** | 135 |
+
+Every gap was KXBTC against KXBTCD (median edge at open 1.8c). Closer
+to the hour they die faster: 4ms in the last minute, 9ms at 5-16
+minutes out.
+
+The fill replay, 87 attempts, one-legged fills unwound at the bid (the
+plan's measure):
+
+| delay | both legs (40 / 10) | unwound a day, 40 | unwound a day, 10 |
+|---|---|---|---|
+| +0ms | 41 / 71 | +$2.74 | +$5.58 |
+| +25ms | 2 / 3 | -$39.07 | -$9.67 |
+| +50ms | 0 / 0 | -$26.00 | -$6.24 |
+| +100ms | 0 / 0 | -$27.79 | -$7.21 |
+| +250ms | 0 / 0 | -$36.60 | -$8.95 |
+
+- From +25ms on, both legs almost never fill; a one-legged position
+  unwound loses at every delay. **Even +0ms, which no one outside
+  Kalshi's matching engine can reach, makes $2.74-5.58 a day**, under
+  the $10 build bar.
+- The "held to settlement" column is positive ($13.59 a day at +100ms,
+  10 contracts) and is NOT an edge: a leg held to settlement is a
+  directional bet on Bitcoin's hourly close, and 3 days of it says
+  nothing. The plan measures unwound for that reason.
+
+**Verdict: STOP.** The gaps are real, about 48 a day, and taken by
+another bot within single-digit milliseconds, mostly by a trade on one
+of the legs. The recorder is no longer needed; turning it off is the
+user's step on the box:
+`sudo systemctl disable --now marketslap-ladder-stream.service`.
+Its archive (`ladder/` in the private bucket) is kept unless the user
+decides to delete it.
+
+Recorder health at the stop (run 44212039356, `laddersizes`): 416.7MB
+over the last 24 hours, the 23:00 UTC hour read in full: 66 markets,
+1.44M changes, receive lag p99 median 27ms (worst 65ms), memory never
+under 259MB, no gaps, errors or drops. It worked as built for all three
+days; the stop is the market's answer, not the recorder's.

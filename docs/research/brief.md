@@ -103,13 +103,6 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
   (b) +6.56c; not independent); sharp-move live +1.53c, t 1.28 on 419.
 
 **Running**
-- **Ladder step 2** (`ladder-step2-plan.md`). The recorder
-  (`marketslap-ladder-stream`) has run on the box since 2026-11-15
-  05:49 UTC, healthy. **Early stop on 11-18** (a follow-up is scheduled
-  for 00:30 UTC: `laddergaps` over 11-15..11-18); build bar on 11-29.
-  The first day alone, a pipeline test, showed 52 qualifying gaps with a
-  median life of 6ms and no two-legged fill from +25ms: it points to
-  STOP. If it stops, the user turns the recorder off on the box.
 - **p75's filters, scored on the tape** from 2026-11-17 for 8 weeks
   (to about 2027-01-12): a filter is dropped if its skipped windows make
   more per contract than the traded ones; confirmed only at t >= 2.
@@ -121,6 +114,9 @@ the rest, the skipped trades losing money themselves, and worse in both
 halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 
 **Done**
+- Ladder step 2: STOP at day 3 (run 44208436894): 144 gaps, median life
+  5ms, no two-legged fill from +25ms. The user turns the recorder off
+  (`sudo systemctl disable --now marketslap-ladder-stream.service`).
 - Ladder step 1, the tape: passed its screen (m15.md "Ladder
   consistency").
 - What speed is worth: nothing below 100ms for sharp-move (m15.md).
