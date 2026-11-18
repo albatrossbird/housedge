@@ -16,7 +16,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from "node:fs";
 import { join as pathJoin } from "node:path";
-import { LEAGUES, joinGame, lateEntry, periodBounds, breakAfter, decisionPlay, leaderMarket } from "../lib/sportsLate.js";
+import { LEAGUES, joinGame, lateEntry, periodBounds, decisionPlay, leaderMarket, wallOf, breakInFeed, firstInFeed } from "../lib/sportsLate.js";
 import { kalshiEventOf, kalshiGameDate } from "../lib/sportsKeys.js";
 import { parseTrade } from "../lib/m15Tape.js";
 import { kalshiTakerFee } from "../lib/fees.js";
@@ -68,7 +68,7 @@ async function eget(path) {
 const cachePath = (...p) => pathJoin(CACHE, ...p);
 function cached(file) { return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined; }
 function save(file, v) { writeFileSync(file + ".tmp", JSON.stringify(v)); renameSync(file + ".tmp", file); }
-for (const d of ["kalshi", "espn-board", "espn-half", "trades"]) mkdirSync(cachePath(d), { recursive: true });
+for (const d of ["kalshi", "espn-board", "espn-half2", "trades"]) mkdirSync(cachePath(d), { recursive: true });
 
 const cutoff = await kget("/historical/cutoff");
 const marketCut = Date.parse(cutoff.market_settled_ts), tradeCut = Date.parse(cutoff.trades_created_ts);
@@ -123,7 +123,7 @@ async function board(league, date) {
 // sports-margin-plan.md, reads the same cache) ----
 const teamOf = c => ({ abbreviation: c?.team?.abbreviation, location: c?.team?.location, displayName: c?.team?.displayName, shortDisplayName: c?.team?.shortDisplayName, name: c?.team?.name });
 async function gameBounds(league, id) {
-  const file = cachePath("espn-half", `${league}-${id}.json`), c = cached(file);
+  const file = cachePath("espn-half2", `${league}-${id}.json`), c = cached(file);
   if (c) return c;
   const d = await eget(`/${LEAGUES[league].espn}/summary?event=${id}`);
   let plays = d?.plays;
@@ -133,7 +133,9 @@ async function gameBounds(league, id) {
   const comps = d?.header?.competitions?.[0]?.competitors || [];
   const fp = LEAGUES[league].finalPeriod;
   const late = plays.filter(p => p.period?.number === fp).map(p => [p.clock?.displayValue ?? "", p.wallclock || "", p.homeScore ?? null, p.awayScore ?? null]);
-  const out = { bounds, home: teamOf(comps.find(x => x.homeAway === "home")), away: teamOf(comps.find(x => x.homeAway === "away")), late };
+  // Feed order, placeholders dropped: the breaks are read from this (plan note, 2026-11-18).
+  const order = plays.map(p => [p.period?.number, wallOf(p.wallclock)]).filter(([p, w]) => p != null && w != null);
+  const out = { bounds, order, home: teamOf(comps.find(x => x.homeAway === "home")), away: teamOf(comps.find(x => x.homeAway === "away")), late };
   save(file, out);
   return out;
 }
@@ -160,9 +162,9 @@ for (const league of LEAGUE_LIST) {
     const j = joinGame(kGame, cands);
     if (!j.id) continue;
     P.joined++;
-    const gb = await gameBounds(league, j.id), b = gb.bounds;
-    const half = breakAfter(b, L.halfAfter), other = L.otherBreak ? breakAfter(b, L.otherBreak) : null;
-    const first = b[1]?.first ?? null;
+    const gb = await gameBounds(league, j.id);
+    const half = breakInFeed(gb.order, L.halfAfter), other = L.otherBreak ? breakInFeed(gb.order, L.otherBreak) : null;
+    const first = firstInFeed(gb.order);
     if (half) { P.half++; P.breaks.push(half.minutes); if (half.minutes > 6) P.over6++; }
     if (other) P.other++;
     if (first) P.pre++;

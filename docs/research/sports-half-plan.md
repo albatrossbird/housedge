@@ -82,3 +82,16 @@ If it passes: a written plan for a 4-week paper record on live games
 - That 10 contracts were there at that price: a print is one trade.
 - That fees stay where they are.
 - That the break is the same live as in ESPN's record of it.
+
+## Plumbing note, 2026-11-18 (no trade or result read): breaks read in feed order
+
+The first plumbing pass took each period's earliest and latest
+wall-clock. College football failed the break check (88.3% of breaks
+over 6 minutes, p10 1.7 minutes) because ESPN's football feeds carry
+stray stamps: a 2nd-quarter play stamped after the restart, a kickoff
+stamped at exactly midnight UTC as a placeholder. Every other league
+passed. Fixed before scoring, from ESPN data only: the break runs from
+the period's **last play in feed order** to the next period's **first
+play stamped after it**; a stamp of exactly 00:00:00 UTC is treated as
+none; the pre-game point is the game's first play in feed order. This
+applies to all five leagues. The rule, bar and windows are unchanged.

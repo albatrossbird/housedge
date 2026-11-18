@@ -1,7 +1,7 @@
 // lib/sportsLate.js, worked by hand. Team shapes copied from ESPN's
 // scoreboard and Kalshi's markets on 2026-11-18.
 
-import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry, periodBounds, breakAfter, decisionPlay, leaderMarket } from "../lib/sportsLate.js";
+import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry, periodBounds, breakAfter, decisionPlay, leaderMarket, wallOf, breakInFeed, firstInFeed } from "../lib/sportsLate.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -89,6 +89,22 @@ console.log("halftime: the break between periods");
   ok(breakAfter(b, 3) === null && breakAfter(b, 1) === null, "no next period, or no earlier one: no break");
   const shuffled = periodBounds([{ period: 1, wallclock: "2025-11-17T00:10:00Z" }, { period: 1, wallclock: "2025-11-17T00:05:00Z" }]);
   ok(shuffled[1].first === Date.parse("2025-11-17T00:05:00Z") && shuffled[1].last === Date.parse("2025-11-17T00:10:00Z"), "feed order does not matter, wall-clock does");
+}
+
+console.log("halftime in feed order: football's stray stamps");
+{
+  // College football 2025-10-11 (ESPN 401752865) and 2026-10-10 (401856825), copied.
+  ok(wallOf("2025-10-11T00:00:00Z") === null && wallOf("2025-10-11T17:55:14Z") === Date.parse("2025-10-11T17:55:14Z") && wallOf("") === null, "a midnight placeholder is no stamp");
+  const o1 = [[2, wallOf("2025-10-11T16:54:46Z")], [2, wallOf("2025-10-11T17:55:14Z")], [3, wallOf("2025-10-11T18:15:30Z")]];
+  const b1 = breakInFeed(o1, 2);
+  ok(b1.end === Date.parse("2025-10-11T17:55:14Z") && Math.abs(b1.minutes - 20.2667) < 0.001, "the break runs from the half's last play in feed order");
+  // A 2nd-quarter play stamped 21:37 sits early in the feed; min/max read it as the end of the half.
+  const o2 = [[2, wallOf("2026-10-10T21:37:31Z")], [2, wallOf("2026-10-10T21:09:07Z")], [3, wallOf("2026-10-10T21:29:38Z")]];
+  ok(Math.abs(breakInFeed(o2, 2).minutes - 20.5167) < 0.001, "a stray stamp earlier in the feed is ignored");
+  ok(Math.abs(breakAfter(periodBounds(o2.map(([period, w]) => ({ period, wallclock: new Date(w).toISOString() }))), 2).minutes + 7.883) < 0.01, "where min/max read a negative break");
+  const o3 = [[2, 1000], [3, 900], [3, 1500]];
+  ok(breakInFeed(o3, 2).restart === 1500, "the restart is the next period's first play stamped after the end");
+  ok(breakInFeed([[1, 5]], 1) === null && firstInFeed(o3) === 1000 && firstInFeed([]) === null, "no next period: none; the first play in feed order");
 }
 
 console.log("the margin test: the leader and its market");
