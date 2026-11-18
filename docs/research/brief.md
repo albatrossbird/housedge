@@ -138,6 +138,10 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   (t +0.48). Fails all three skip tests; no skip (`restart-plan.md`).
 
 **Candidates, not started**
+- **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in
+  order: late favourites in sports games on the game clock (p75's idea,
+  ESPN play-by-play joined to Kalshi's tape); weather outcomes already
+  confirmed by station observations; bracket sums on slow markets.
 - **Quoting a liquidity-reward market only until its outcome starts to
   arrive** (from the market-making study's FAIL): untested. Knowing
   when to stop is the whole edge; it needs its own plan.
