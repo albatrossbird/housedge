@@ -1,7 +1,7 @@
 // lib/sportsLate.js, worked by hand. Team shapes copied from ESPN's
 // scoreboard and Kalshi's markets on 2026-11-18.
 
-import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry, periodBounds, breakAfter } from "../lib/sportsLate.js";
+import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry, periodBounds, breakAfter, decisionPlay, leaderMarket } from "../lib/sportsLate.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -89,6 +89,29 @@ console.log("halftime: the break between periods");
   ok(breakAfter(b, 3) === null && breakAfter(b, 1) === null, "no next period, or no earlier one: no break");
   const shuffled = periodBounds([{ period: 1, wallclock: "2025-11-17T00:10:00Z" }, { period: 1, wallclock: "2025-11-17T00:05:00Z" }]);
   ok(shuffled[1].first === Date.parse("2025-11-17T00:05:00Z") && shuffled[1].last === Date.parse("2025-11-17T00:10:00Z"), "feed order does not matter, wall-clock does");
+}
+
+console.log("the margin test: the leader and its market");
+{
+  // NFL 2026-11-15, Dallas at home to San Francisco, copied from ESPN.
+  const late = [["15:00", "2026-11-15T23:47:57Z", 19, 31], ["3:40", "2026-11-16T00:30:00Z", 26, 31], ["2:51", "2026-11-16T00:31:10Z", 26, 38], ["0:00", "2026-11-16T00:44:21Z", 40, 46]];
+  const dp = decisionPlay(late, "nfl", 180);
+  ok(dp.wall === Date.parse("2026-11-16T00:31:10Z") && dp.home === 26 && dp.away === 38, "the decision play carries its score");
+  ok(dp.wall === decisionWall(late.map(([clock, wallclock]) => ({ period: 4, clock, wallclock })), "nfl", 180), "and picks the same play as the late test");
+  const DAL = { abbreviation: "DAL", location: "Dallas", displayName: "Dallas Cowboys", name: "Cowboys" };
+  const SF = { abbreviation: "SF", location: "San Francisco", displayName: "San Francisco 49ers", name: "49ers" };
+  const mk = [{ ticker: "KXNFLGAME-26NOV15SFDAL-DAL", name: "Dallas" }, { ticker: "KXNFLGAME-26NOV15SFDAL-SF", name: "San Francisco" }];
+  const lm = leaderMarket(dp, mk, DAL, SF);
+  ok(lm.ticker === "KXNFLGAME-26NOV15SFDAL-SF" && lm.lead === 12, "the away team leads by 12: its market");
+  ok(leaderMarket({ wall: 1, home: 7, away: 7 }, mk, DAL, SF).why === "tied" && leaderMarket({ wall: 1, home: null, away: 3 }, mk, DAL, SF).why === "no score", "tied or no score: no leader");
+  const buysLeader = x => (x.market === lm.ticker) === (x.side === "yes");
+  const tr = [
+    { t: 100, side: "yes", price: 0.85, count: 1, market: "KXNFLGAME-26NOV15SFDAL-DAL" },  // buys the trailer
+    { t: 200, side: "no", price: 0.86, count: 1, market: "KXNFLGAME-26NOV15SFDAL-DAL" },   // buys the leader through the other market
+    { t: 300, side: "yes", price: 0.87, count: 1, market: "KXNFLGAME-26NOV15SFDAL-SF" },
+  ];
+  ok(lateEntry(tr, 0, { lookMs: 1000, lo: 0.5, hi: 0.95, pick: buysLeader }).t === 200, "only a print that buys the leader counts, through either market");
+  ok(lateEntry(tr, 0, { lookMs: 1000, lo: 0.5, hi: 0.95 }).t === 100, "without pick, the first in-band print as before");
 }
 
 if (bad) { console.error(`\n${bad} failed`); process.exit(1); }
