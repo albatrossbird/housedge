@@ -154,7 +154,7 @@ for (const league of LEAGUE_LIST) {
     const walls = Object.fromEntries(POINTS.map(s => [s, decisionWall(gp.plays, league, s)]));
     for (const s of POINTS) if (walls[s]) P.decided[s] = (P.decided[s] || 0) + 1;
     const close = Math.max(...ms.map(m => m.close));
-    if (gp.lastWall) P.lagMin.push((close - Date.parse(gp.lastWall)) / 60000);
+    if (gp.lastWall) { P.lagMin.push((close - Date.parse(gp.lastWall)) / 60000); ((P.lagBy ||= {})[win] ||= []).push((close - Date.parse(gp.lastWall)) / 60000); }
     games.push({ league, event: ev, date, win, markets: ms, close, walls });
   }
   console.error(`  ${league}: ${P.joined}/${P.events} joined, ${kReq} Kalshi + ${eReq} ESPN requests, ${Math.round((Date.now() - t0) / 60000)} min`);
@@ -168,6 +168,7 @@ for (const [l, P] of Object.entries(plumb)) {
   const tw = P.events - P.notTwo;
   console.log(`${l.padEnd(7)} ${String(P.events).padStart(6)}  ${["A", "R", "B"].map(w => P.byWindow[w] || 0).join(" / ").padEnd(18)} ${String(P.notTwo).padStart(10)}  ${String(P.joined).padStart(6)}  ${(tw ? 100 * P.joined / tw : 0).toFixed(1).padStart(5)}%   ${(P.finalPlays ? 100 * P.wallPlays / P.finalPlays : 0).toFixed(1).padStart(6)}%                        ${POINTS.map(s => P.decided[s] || 0).join(" / ").padEnd(30)} ${q(0.1)} / ${q(0.5)} / ${q(0.9)}`);
   if (Object.keys(P.why).length) console.log(`         not joined: ${Object.entries(P.why).map(([k, v]) => `${k} ${v}`).join("; ")}`);
+  if (P.lagBy) console.log(`         close lag median by window: ${["A", "R", "B"].map(w => `${w} ${P.lagBy[w]?.length ? med(P.lagBy[w]).toFixed(1) : "—"}`).join(", ")} min`);
   if (P.examples?.length) console.log(`         e.g. ${P.examples.join("; ")}`);
 }
 console.log(`requests: Kalshi ${kReq} (${kRefused} refused and retried), ESPN ${eReq}; ${Math.round((Date.now() - t0) / 60000)} minutes`);

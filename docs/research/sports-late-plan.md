@@ -101,3 +101,34 @@ for 4 weeks, then the trader, at 10 contracts like p75.
 - That the price was there for 10 contracts at once: a print says
   someone traded at that price, not how much more was there.
 - That Kalshi's sports fees stay as they are: they changed in 2026.
+
+## Plumbing pass, 2026-11-18 (no trade or result read): clears
+
+| league | games (A / R / B) | joined | wall-clock on final-period plays | decided at 3:00 left |
+|---|---|---|---|---|
+| NBA | 1,632 (938 / 417 / 277) | 100.0% | 100.0% | 1,627 |
+| NHL | 1,816 (973 / 441 / 402) | 100.0% | 100.0% | 1,815 |
+| NFL | 369 (220 / 0 / 149) | 100.0% | 99.9% | 369 |
+| college football | 1,879 (572 / 0 / 1,307) | 98.9% | 99.6% | 1,851 |
+| men's college basketball | 6,008 (4,679 / 592 / 737) | 97.4% | 100.0% | 5,834 |
+
+The unjoined games are small-school opponents ESPN's top-division
+scoreboard does not list (Albany, Division III guests). Join fixes
+before this pass, from trial games only: accents folded ("San José
+State"), ESPN's "LA" read as Los Angeles, and an equal team code
+accepted where the names differ ("Appalachian St." / "App State").
+
+**Found here, and it matters for the paper, not for this test.** Until
+mid-2026 Kalshi closed NBA, NHL and college basketball markets long
+after the game ended: the median gap from ESPN's last play to Kalshi's
+close was 15 / 32 / 30 minutes in window A and 12 / 27 / 30 in R,
+against 1.5 / 1.3 / 0.9 in window B. The sports paper's data is March
+to May 2026 (window R), so its "final ten minutes before close" was,
+for those leagues, mostly AFTER the final whistle, when the outcome is
+known. Its late-game step-like calibration may partly be that. This
+test decides on the game clock and is not affected; the reference row
+"10 minutes before the actual close" is, and is read with that in mind
+(meaningful in B; mostly post-game in A and R for NBA, NHL and college
+basketball).
+
+Scoring follows, unchanged.
