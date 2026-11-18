@@ -136,8 +136,18 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 - Sharp-move midnight to 4am New York time, over four months on the
   stand-in: +3.47c a contract on 188 fills against +1.80c for the rest
   (t +0.48). Fails all three skip tests; no skip (`restart-plan.md`).
+- Late favourites in sports games on the game clock
+  (`sports-late-plan.md`, 2026-11-18): FAIL. 2,731 trades at 3:00 left,
+  -1.32c a contract at t -2.31, negative in both windows; favourites won
+  as often as priced and the fee is the loss. No league passes alone.
+  Stopped. Found on the way: Kalshi closed NBA, NHL and college
+  basketball markets 15-30 minutes after the game until mid-2026.
 
 **Candidates, not started**
+- **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in
+  order: weather outcomes already confirmed by station observations;
+  bracket sums on slow markets. (Late favourites in sports, the first,
+  FAILED 2026-11-18; see Done.)
 - **Quoting a liquidity-reward market only until its outcome starts to
   arrive** (from the market-making study's FAIL): untested. Knowing
   when to stop is the whole edge; it needs its own plan.
