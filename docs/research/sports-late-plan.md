@@ -132,3 +132,47 @@ test decides on the game clock and is not affected; the reference row
 basketball).
 
 Scoring follows, unchanged.
+
+## Result, 2026-11-18: FAIL. The idea stops.
+
+Primary cell, scored as fixed above (`node scripts/sports-late.mjs
+--score --primary-only`; 22,966 public Kalshi requests, 87 minutes):
+
+| | trades | won | avg paid | per contract | t | days | at 10 contracts |
+|---|---|---|---|---|---|---|---|
+| **A + B (scored)** | 2,731 | 87.8% | 88.5c | **-1.32c** | **-2.31** | 214 | -$1.68 a day |
+| A 2025-10..2026-02 | 2,060 | 87.8% | 88.6c | -1.50c | -2.33 | 147 | -$2.11 a day |
+| B 2026-09..2026-11 | 671 | 88.1% | 88.1c | -0.74c | -0.61 | 67 | -$0.74 a day |
+
+7,329 games reached 3:00 left in A + B with no in-band print within 15
+seconds and were not traded. All three tests fail: the mean is negative
+at t -2.31, negative in both windows, on 2,731 trades. The favourite
+won about as often as its price said (87.8% against 88.5c paid), and
+the taker fee is the loss. Upper bound as always: a print says someone
+traded there, not that ten more were.
+
+Reference rows (never a second chance):
+
+| cell | trades | won | paid | per contract | t |
+|---|---|---|---|---|---|
+| NBA | 383 | 90.3% | 86.9c | +2.68c | 1.71 |
+| NHL | 448 | 89.1% | 91.3c | -2.74c | -2.04 |
+| NFL | 102 | 86.3% | 87.0c | -1.52c | -0.50 |
+| college football | 426 | 85.7% | 87.8c | -2.81c | -1.81 |
+| men's college basketball | 1,372 | 87.5% | 88.3c | -1.49c | -1.88 |
+| feed delay +5s | 2,780 | 87.9% | 88.4c | -1.18c | -2.05 |
+| feed delay +30s | 2,723 | 87.8% | 88.7c | -1.48c | -2.61 |
+| band 75-85c | 996 | 78.3% | 80.2c | -2.96c | -2.51 |
+| band 85-97c | 2,105 | 91.4% | 91.8c | -0.87c | -1.58 |
+| the paper's period (R) | 467 | 90.6% | 88.6c | +1.33c | 0.94 |
+
+- **No cell passes on its own**, so there is no candidate to re-test.
+  NBA is the only positive league and is at t 1.71, under the bar.
+- The paper's own period, scored with this rule, is +1.33c at t 0.94:
+  the direction it reported, not significant, and gone in our windows.
+  Read with the close-lag finding above, much of its late-game effect
+  looks like measuring after the final whistle.
+- The 6:00 and 1:00 rows and "10 minutes before the actual close" need
+  trade windows the primary-only pass does not read. The full pass
+  (`--score`) is running from the same cache and is recorded below when
+  it finishes; it cannot change the verdict.
