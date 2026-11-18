@@ -477,3 +477,104 @@ the rest; -4.42c then +0.05c by half) and 20-24h -1.05c (t -1.17;
 a rule, and the run's own pre-fixed prediction (16-20h better, scored
 before 10-21) also failed at t 1.39. Four months agree with the 45
 recorded days: sharp-move has no time-of-day filter worth having.
+
+## The message sent to the trader (final, 2026-11-17)
+
+Replaces every earlier draft. The midnight-4am sharp-move skip is left
+out: it failed all three skip tests over four months (above).
+
+```
+RESEARCH → TRADER: restart at small size (2026-11-17, replaces earlier drafts)
+
+Before restarting p75, one check: split your 302 live p75 fills into
+(a) decided 16:00-19:59 New York time, or on a Saturday or Sunday (New
+York date), and (b) everything else. Send count, won, and mean per
+contract for each. If (a) did better than (b), do not restart p75.
+
+RULE CHANGE, sharp-move: restart at 10 contracts. No other change, and
+no time filter. Stop at a $100 drawdown from the restart's peak. Review
+at 300 settled: stop if t <= -1. No size increase without a rule change
+from us.
+
+RULE CHANGE, p75 (only if the check above agrees): restart at 10
+contracts with two filters. Place no order when the decision time in
+America/New_York is 16:00-19:59, and none on Saturday or Sunday (New
+York date). Everything else unchanged. Stop at a $75 drawdown from the
+restart's peak. Review at 300 settled: stop if t <= -1.
+
+The two rules stay independent: p75 trades a window whether or not
+sharp-move holds a position in it.
+
+Unchanged for both: the step back on slow fills, the fee check, the
+KILL behaviour.
+
+Why, in short:
+- Both backtests lost on 11-14 on the same windows you traded: it was
+  the market, not execution.
+- Sharp-move's problem was size. At 40 contracts a day swings about
+  $96; at 10, about $17.
+- Sharp-move has no time of day worth skipping. Midnight-4am New York
+  looked bad on 30 days; over four months (Jul-Nov) it made +3.47c a
+  contract against +1.80c for the rest of the day.
+- Faster than ~100ms does not help sharp-move, and neither do
+  take-profits, stop-losses, daily loss stops or a volatility flag.
+  All were tested.
+- p75's two filters are the only cuts that lost in both halves of 4.5
+  months. They are not proven; we score the skipped windows on the
+  public tape for 8 weeks and drop a filter that turns out wrong.
+- Tested and dropped, no action for you: resting orders for p75 (every
+  order the resting bid missed went on to win) and market making for
+  Kalshi's liquidity rewards (markets lost more at their settlement
+  than the rewards paid).
+
+Please also send: sharp-move's live totals since it started (settled
+count, mean per contract, t), and your account's order limits (Kalshi's
+GET /account/limits).
+```
+
+## The trader's answers, 2026-11-17, and the restart as built
+
+**p75's live split** (302 settled fills, 10-21..11-14):
+
+| live p75 fills | settled | won | per contract | $ | t |
+|---|---|---|---|---|---|
+| (a) 16:00-19:59 New York, or Sat/Sun | 153 | 129 | -7.82c | -$197.04 | -1.49 |
+| (b) everything else | 149 | 139 | +6.56c | +$174.80 | 2.45 |
+| all | 302 | 268 | -0.43c | -$22.24 | 0.18 |
+
+(a) did worse, so p75 restarts with both filters, as the rule said.
+**Agreement, not confirmation:** these fills sit inside the tape period
+the filters were found on (07-01..11-14), so the live split is not an
+independent test. The 8-week tape score of the skipped windows from the
+restart day is the test that counts.
+
+**Sharp-move live since 10-21:** 419 settled, 205 won, +1.53c a contract,
++$127.72, t 1.28. In line with the backtest's read (out of sample
+10-22..11-15, +3.73c at +100ms, which reads high).
+
+**Account limits:** basic tier, read 200/s, write 100/s. Far above
+anything either rule sends; nothing to change.
+
+**Built as written** (the trader's PR 33): both rules capped at 10 in
+code; drawdowns from the restart's high (sharp-move $100, p75 $75); t <=
+-1 at 300 settled; p75's two filters, logged once a window. The rules'
+earlier stops are replaced; fee check, fill-rate stop, step back and the
+other KILLs unchanged. The trader added a $50 daily loss cap per
+strategy.
+
+**Our answer on the old stops: none needs to stay.** Each was sized for
+40 contracts or overlaps a new one:
+- p75 "losing after 50" and the old t-stops: the 300-settled review
+  covers them (about 33 days for p75 at ~9 trades a day).
+- sharp-move's -3c after 100: a broken edge at -2c a contract loses
+  about $3.40 a day at 10 contracts; the 300-settled review (about 18
+  days) reaches it before the $100 stop would, and -3c after 100 at
+  this size is -$30, inside one bad day (11-14 was -$30 at 10).
+- the $10-a-contract drawdown: at 10 contracts it is the same $100 on
+  sharp-move and a looser $100 on p75; the $75 is tighter.
+
+**The $50 daily caps are fine.** The worst backtest day at 10 contracts
+is about -$30 for each rule, so $50 should only fire on something
+broken. Daily loss stops were tested on sharp-move and cost money when
+set tight (m15.md); at $50 it is insurance, not a rule, and should
+almost never act. If either fires, we want the day's fills.
