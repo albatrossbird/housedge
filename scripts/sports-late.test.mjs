@@ -1,7 +1,7 @@
 // lib/sportsLate.js, worked by hand. Team shapes copied from ESPN's
 // scoreboard and Kalshi's markets on 2026-11-18.
 
-import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry } from "../lib/sportsLate.js";
+import { clockSecs, decisionWall, teamMatches, joinGame, lateEntry, periodBounds, breakAfter, decisionPlay, leaderMarket, wallOf, breakInFeed, firstInFeed } from "../lib/sportsLate.js";
 
 let bad = 0;
 const ok = (c, w) => { if (c) console.log(`  ok  ${w}`); else { bad++; console.error(`FAIL ${w}`); } };
@@ -70,6 +70,64 @@ console.log("the entry");
   ok(lateEntry(tr, T0 + 7500) === null, "nothing in the window: no trade");
   ok(lateEntry(tr, T0, { lo: 0.85, hi: 0.97 }) === null, "a narrower band can leave none");
   ok(lateEntry([{ t: T0 + 15000, side: "yes", price: 0.9, count: 1, market: "A" }], T0) === null, "the window is half-open at 15 seconds");
+}
+
+console.log("halftime: the break between periods");
+{
+  // NBA game 2025-11-17, ESPN's period-end plays copied from its summary.
+  const plays = [
+    { period: 2, wallclock: "2025-11-17T00:42:00Z" },
+    { period: 2, wallclock: "2025-11-17T01:13:22Z" },   // End Period 2
+    { period: 2, wallclock: "" },                       // no wall-clock: skipped
+    { period: 3, wallclock: "2025-11-17T01:29:05Z" },   // first play after the break
+    { period: 3, wallclock: "2025-11-17T01:54:59Z" },
+  ];
+  const b = periodBounds(plays);
+  ok(b[2].first === Date.parse("2025-11-17T00:42:00Z") && b[2].last === Date.parse("2025-11-17T01:13:22Z"), "a period's first and last wall-clock");
+  const h = breakAfter(b, 2);
+  ok(h.end === Date.parse("2025-11-17T01:13:22Z") && h.restart === Date.parse("2025-11-17T01:29:05Z") && Math.abs(h.minutes - 15.7166) < 0.001, "the break runs from the period's last play to the next period's first");
+  ok(breakAfter(b, 3) === null && breakAfter(b, 1) === null, "no next period, or no earlier one: no break");
+  const shuffled = periodBounds([{ period: 1, wallclock: "2025-11-17T00:10:00Z" }, { period: 1, wallclock: "2025-11-17T00:05:00Z" }]);
+  ok(shuffled[1].first === Date.parse("2025-11-17T00:05:00Z") && shuffled[1].last === Date.parse("2025-11-17T00:10:00Z"), "feed order does not matter, wall-clock does");
+}
+
+console.log("halftime in feed order: football's stray stamps");
+{
+  // College football 2025-10-11 (ESPN 401752865) and 2026-10-10 (401856825), copied.
+  ok(wallOf("2025-10-11T00:00:00Z") === null && wallOf("2025-10-11T17:55:14Z") === Date.parse("2025-10-11T17:55:14Z") && wallOf("") === null, "a midnight placeholder is no stamp");
+  const o1 = [[2, wallOf("2025-10-11T16:54:46Z")], [2, wallOf("2025-10-11T17:55:14Z")], [3, wallOf("2025-10-11T18:15:30Z")]];
+  const b1 = breakInFeed(o1, 2);
+  ok(b1.end === Date.parse("2025-10-11T17:55:14Z") && Math.abs(b1.minutes - 20.2667) < 0.001, "the break runs from the half's last play in feed order");
+  // A 2nd-quarter play stamped 21:37 sits early in the feed; min/max read it as the end of the half.
+  const o2 = [[2, wallOf("2026-10-10T21:37:31Z")], [2, wallOf("2026-10-10T21:09:07Z")], [3, wallOf("2026-10-10T21:29:38Z")]];
+  ok(Math.abs(breakInFeed(o2, 2).minutes - 20.5167) < 0.001, "a stray stamp earlier in the feed is ignored");
+  ok(Math.abs(breakAfter(periodBounds(o2.map(([period, w]) => ({ period, wallclock: new Date(w).toISOString() }))), 2).minutes + 7.883) < 0.01, "where min/max read a negative break");
+  const o3 = [[2, 1000], [3, 900], [3, 1500]];
+  ok(breakInFeed(o3, 2).restart === 1500, "the restart is the next period's first play stamped after the end");
+  ok(breakInFeed([[1, 5]], 1) === null && firstInFeed(o3) === 1000 && firstInFeed([]) === null, "no next period: none; the first play in feed order");
+}
+
+console.log("the margin test: the leader and its market");
+{
+  // NFL 2026-11-15, Dallas at home to San Francisco, copied from ESPN.
+  const late = [["15:00", "2026-11-15T23:47:57Z", 19, 31], ["3:40", "2026-11-16T00:30:00Z", 26, 31], ["2:51", "2026-11-16T00:31:10Z", 26, 38], ["0:00", "2026-11-16T00:44:21Z", 40, 46]];
+  const dp = decisionPlay(late, "nfl", 180);
+  ok(dp.wall === Date.parse("2026-11-16T00:31:10Z") && dp.home === 26 && dp.away === 38, "the decision play carries its score");
+  ok(dp.wall === decisionWall(late.map(([clock, wallclock]) => ({ period: 4, clock, wallclock })), "nfl", 180), "and picks the same play as the late test");
+  const DAL = { abbreviation: "DAL", location: "Dallas", displayName: "Dallas Cowboys", name: "Cowboys" };
+  const SF = { abbreviation: "SF", location: "San Francisco", displayName: "San Francisco 49ers", name: "49ers" };
+  const mk = [{ ticker: "KXNFLGAME-26NOV15SFDAL-DAL", name: "Dallas" }, { ticker: "KXNFLGAME-26NOV15SFDAL-SF", name: "San Francisco" }];
+  const lm = leaderMarket(dp, mk, DAL, SF);
+  ok(lm.ticker === "KXNFLGAME-26NOV15SFDAL-SF" && lm.lead === 12, "the away team leads by 12: its market");
+  ok(leaderMarket({ wall: 1, home: 7, away: 7 }, mk, DAL, SF).why === "tied" && leaderMarket({ wall: 1, home: null, away: 3 }, mk, DAL, SF).why === "no score", "tied or no score: no leader");
+  const buysLeader = x => (x.market === lm.ticker) === (x.side === "yes");
+  const tr = [
+    { t: 100, side: "yes", price: 0.85, count: 1, market: "KXNFLGAME-26NOV15SFDAL-DAL" },  // buys the trailer
+    { t: 200, side: "no", price: 0.86, count: 1, market: "KXNFLGAME-26NOV15SFDAL-DAL" },   // buys the leader through the other market
+    { t: 300, side: "yes", price: 0.87, count: 1, market: "KXNFLGAME-26NOV15SFDAL-SF" },
+  ];
+  ok(lateEntry(tr, 0, { lookMs: 1000, lo: 0.5, hi: 0.95, pick: buysLeader }).t === 200, "only a print that buys the leader counts, through either market");
+  ok(lateEntry(tr, 0, { lookMs: 1000, lo: 0.5, hi: 0.95 }).t === 100, "without pick, the first in-band print as before");
 }
 
 if (bad) { console.error(`\n${bad} failed`); process.exit(1); }
