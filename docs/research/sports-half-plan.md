@@ -138,6 +138,17 @@ Reference rows (never a second chance):
 
 No league and no band is positive in A + B, so there is no candidate.
 Window R is positive again, as it was at 3:00 left (+1.33c). It is not
-significant either time, and it is the paper's period. The pre-game and
-other-break rows come from the full pass, recorded below when it
-finishes. They cannot change the verdict.
+significant either time, and it is the paper's period.
+
+The full pass (`--score`, same cache; the container restarted at 9,800
+games and the re-run read 3,333 more Kalshi requests) adds:
+
+| cell | trades | won | paid | per contract | t |
+|---|---|---|---|---|---|
+| pre-game, 10 min before the first play | 3,308 | 83.6% | 85.1c | -2.38c | -3.41 |
+| end of the 3rd quarter / NHL 1st intermission | 2,208 | 84.3% | 85.5c | -1.98c | -2.47 |
+
+"Further out" is worse, not better: before the game the favourite wins
+less often than priced, by more than the fee. Every time point measured
+(pre-game, NHL 1st intermission, halftime, end of the 3rd, 6:00, 3:00
+and 1:00 left) loses after fees.
