@@ -78,3 +78,48 @@ money.
 - Venue risk: a new product, a CME lawsuit against its approval, and
   margin access still rolling out.
 - Spot custody and transfer costs between the two venues.
+
+## Result, 2026-11-19: FAIL. Hedged carry on Kalshi's crypto perps stops.
+
+`node scripts/perps-carry.mjs --score` (public reads: 126 Kalshi funding
+histories and 1,519 Coinbase one-minute candles; cached in
+`.perps-cache/`).
+
+**Plumbing clears.** 505 prints per coin from 2026-06-03 20:00 UTC, none
+missing. The one gap over 8 hours is the 2026-11-01 daylight-saving
+shift. The mark is within 1% of Coinbase spot at 100% of prints. The rate
+rises with the premium in every coin (correlation 0.12 / 0.15 / 0.25), so
+the sign is the standard one: positive pays the short.
+
+$10,000 of notional per coin, capital $20,000 per coin, 168 days:
+
+| | funding received | H1 / H2 | price | costs | net | a year on capital |
+|---|---|---|---|---|---|---|
+| **pooled** | $694 | $128 / $565 | +$10 | $369 | **+$335** | **1.21%** |
+| BTC | $524 | $171 / $352 | +$6 | $121 | +$409 | 4.44% |
+| ETH | $11 | -$40 / +$50 | $0 | $122 | -$112 | -1.22% |
+| SOL | $160 | -$3 / +$163 | +$4 | $125 | +$39 | 0.42% |
+| pooled, hedge 0.1% | | | | $101 | +$603 | 2.18% |
+| pooled, margin N/2 | | | | $369 | +$335 | 1.62% |
+
+FAIL on the first test: 1.21% a year against the 6% bar, below cash.
+Funding was positive in both halves and in all three coins, so the
+second and third tests pass.
+The hedge works (the price nets to +$10 on $30,000). There is simply not
+much funding to collect: BTC paid shorts 9.9% a year on notional, ETH
+nothing. A hedged position ties up twice the notional, so even BTC alone,
+at 4.44%, is about the T-bill rate.
+
+Gross funding to a short, a year, every market with 30+ days of prints:
+
+- crypto, 19 markets: median 0.2%, mean 2.1%. Highest UNI 28.2% (since
+  2026-09-30 only), LINK 10.6%, BTC 9.9%, XRP 7.1%; lowest ADA -6.6%.
+- metals, 6 markets: median 8.1%.
+- indices, 2 markets: median 3.8%.
+- energy, 1 market: 7.1%.
+- **Equity perps were listed on 2026-11-05.** They have 14 daily prints,
+  too young for this table, so survey test 3 waits for history.
+
+No reference row passes alone, so there is no candidate. Kalshi's crypto
+funding is about the big venues' 3-5%, not above it: the "retail venue
+pays more" idea does not hold on this data.

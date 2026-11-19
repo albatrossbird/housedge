@@ -45,7 +45,7 @@ go further into algorithmic trading?
     the fee endpoints need a margin-enabled key.
   - **Market data is public.** `external-api.kalshi.com/trade-api/v2/margin/markets`
     (book top, open interest, volume) and
-    `/margin/funding_rates/historical?market_ticker=<T>` (every funding
+    `/margin/funding_rates/historical?ticker=<T>` (every funding
     print since launch, with the mark price) answer with no key. The perps
     WebSocket and the order endpoints need one. Production margin access
     is rolling out member by member.
@@ -61,13 +61,17 @@ go further into algorithmic trading?
    cancels and the funding is the return. A newer, retail-heavy venue may
    pay longs' funding above the big venues' 3-5%. This needs only public
    data that already exists: Kalshi's funding history and Coinbase's
-   public candles. It can run today.
-2. **Funding gap, Kalshi against Coinbase perps.** If (1) shows Kalshi's
-   funding running high, hedge with Coinbase's perp instead of spot. That
+   public candles. **FAILED 2026-11-19**: 1.21% a year on capital, below
+   cash (BTC alone 4.44%). Kalshi's crypto funding is not above the big
+   venues'.
+2. **Funding gap, Kalshi against Coinbase perps.** Dropped with (1): it
+   was to run only if (1) showed Kalshi's funding running high, and it did
+   not. Had it, hedge with Coinbase's perp instead of spot. That
    is cheaper to hold, and the return is the difference between the
    venues. It needs Coinbase's funding history (not yet checked).
 3. **Equity perps' funding** (94 markets). This is where the outside
-   evidence says the premium now sits. A hedge needs the stock at a
+   evidence says the premium now sits. Kalshi listed them on 2026-11-05;
+   about three months of prints are needed first. A hedge needs the stock at a
    broker, and stock hours differ from perp hours. Printed as reference in
    (1) first; its own plan only if the reference rows warrant one.
 4. **Price gaps between Kalshi's perp and spot.** A latency trade. Our

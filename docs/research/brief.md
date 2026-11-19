@@ -152,8 +152,19 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   4,677 trades, -1.18c a contract at t -2.21, negative in both windows
   and in every league. That was the last look: favourites in sports
   games stop.
+- Funding carry on Kalshi's crypto perps (`perps-carry-plan.md`,
+  2026-11-19): FAIL. Short perp plus long spot on BTC, ETH and SOL from
+  launch: 1.21% a year on capital, below cash. BTC alone 4.44%. The
+  funding is about the big venues', not above it. Survey of crypto and
+  perp bots: `perps-survey.md`.
 
 **Candidates, not started**
+- **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
+  record running weekly from 2026-11-18 (`sports-margin-plan.md`).
+- **From the perps survey** (`perps-survey.md`), in order: equity perps'
+  funding once there is history (listed 2026-11-05); a directional
+  crypto bot on free data; perp-against-spot price gaps (needs a keyed
+  recorder).
 - **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in
   order: weather outcomes already confirmed by station observations;
   bracket sums on slow markets. (Late favourites in sports, the first,
