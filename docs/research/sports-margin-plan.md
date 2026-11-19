@@ -130,7 +130,11 @@ it were fairly priced at ~93c, at most 1 loss in 60 would happen about
 7% of the time. Break-even at 93c is roughly 4 losses in 60, so one
 loss costs about 14 wins. A print is one trade, so size is unknown.
 
-## The forward record, fixed 2026-11-19 before any forward result was read
+## The forward record, fixed 2026-11-19
+
+The bar below was written into the code before the code's first run.
+That run, on Nov 18's games, was a test of the code, and it read one
+trade: a win at 94c.
 
 Run weekly with `node scripts/sports-half.mjs --forward=<today>
 --leagues=ncaamb`: the one candidate rule above, unchanged, on games
