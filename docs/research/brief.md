@@ -71,6 +71,8 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
   re-running a large archive read.
 - Run new analysis from the branch first. Merge the code with the
   result, squash-merged.
+- **No stock-market trading** (the user, 2026-11-19): no stocks, equity
+  perps or stock-index products, as research targets or trades.
 
 **Data and secrets**
 - Recorded and downloaded Kalshi data is private. Never make the
@@ -161,13 +163,15 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
-- **From the perps survey** (`perps-survey.md`), in order: equity perps'
-  funding once there is history (listed 2026-11-05); a directional
-  crypto bot on free data; perp-against-spot price gaps (needs a keyed
-  recorder).
-- **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in
-  order: weather outcomes already confirmed by station observations;
-  bracket sums on slow markets. (Late favourites in sports, the first,
+- **Next tests, in order** (2026-11-19, from `strategy-survey.md` and
+  `perps-survey.md`; ranked by where a small, careful player can have an
+  edge):
+  1. weather outcomes already confirmed by station observations;
+  2. bracket sums on slow markets;
+  3. a directional crypto bot on free data (one fixed test, a pass
+     unlikely after fees);
+  4. Kalshi perp against spot price gaps (needs a keyed recorder).
+  Equity and index perps are dropped: no stock-market trading. (Late favourites in sports, the first,
   FAILED 2026-11-18; see Done.)
 - **Quoting a liquidity-reward market only until its outcome starts to
   arrive** (from the market-making study's FAIL): untested. Knowing
