@@ -27,11 +27,17 @@ const opt = (name, dflt) => { const a = process.argv.find(x => x.startsWith(`--$
 const has = f => process.argv.includes(`--${f}`);
 const CACHE = opt("cache", ".sports-cache"), PACE = Number(opt("pace", 220)), LIMIT = Number(opt("limit", 0)), SIZE = 10;
 const LEAGUE_LIST = opt("leagues", Object.keys(LEAGUES).join(",")).split(",").filter(l => LEAGUES[l]);
-const MARGIN = has("margin"), SCORE = has("score") || MARGIN;
+// --forward=<YYYY-MM-DD> re-scores the ONE candidate rule recorded in
+// sports-margin-plan.md (men's college basketball, 1:00 left, lead >= 6,
+// 50-95c) on games from 2026-11-18 up to (not including) that date, under
+// the forward bar fixed there. Nothing is chosen; no other cell is read.
+const FORWARD = opt("forward", "");
+const MARGIN = has("margin") || !!FORWARD, SCORE = has("score") || MARGIN;
 if (!SCORE && !has("plumbing")) { console.error("pass --plumbing or --score"); process.exit(2); }
 
 // The plan's windows, by the game's Eastern date.
-const WINDOWS = [["A", "2025-10-01", "2026-03-01"], ["R", "2026-03-01", "2026-06-01"], ["B", "2026-09-01", "2026-11-18"]];
+const WINDOWS = FORWARD ? [["F", "2026-11-18", FORWARD]] : [["A", "2025-10-01", "2026-03-01"], ["R", "2026-03-01", "2026-06-01"], ["B", "2026-09-01", "2026-11-18"]];
+if (FORWARD && !(FORWARD > "2026-11-18" && FORWARD <= new Date().toISOString().slice(0, 10))) { console.error("--forward needs a date after 2026-11-18, no later than today"); process.exit(2); }
 const windowOf = d => (WINDOWS.find(([, a, b]) => d >= a && d < b) || [null])[0];
 const DELAY = 60000, LOOK = 300000, PRE = 600000;
 // --primary-only: read only halftime (the verdict); a later full run
@@ -72,11 +78,11 @@ for (const d of ["kalshi", "espn-board", "espn-half2", "trades"]) mkdirSync(cach
 
 const cutoff = await kget("/historical/cutoff");
 const marketCut = Date.parse(cutoff.market_settled_ts), tradeCut = Date.parse(cutoff.trades_created_ts);
-const SINCE = Date.parse(`${WINDOWS[0][1]}T00:00:00Z`) - 86400000, UNTIL = Date.parse(`${WINDOWS[2][2]}T12:00:00Z`);
+const SINCE = Date.parse(`${WINDOWS[0][1]}T00:00:00Z`) - 86400000, UNTIL = Date.parse(`${WINDOWS[WINDOWS.length - 1][2]}T12:00:00Z`);
 
 // ---- Kalshi: settled game markets, grouped into games ----
 async function settledMarkets(series) {
-  const file = cachePath("kalshi", `${series}.json`), c = cached(file);
+  const file = cachePath("kalshi", FORWARD ? `${series}-F${FORWARD}.json` : `${series}.json`), c = cached(file);
   if (c) return c;
   const out = new Map(), keep = m => {
     const close = Date.parse(m.close_time);
@@ -210,7 +216,7 @@ async function gameTrades(g, from, to) {
 }
 const fee = p => kalshiTakerFee(p, SIZE, 1);   // all five series: taker multiplier 1 (fee_changes, read 2026-11-18)
 const result = (g, ticker) => g.markets.find(m => m.ticker === ticker).result;
-const trade = (g, x) => { const won = x.side === result(g, x.market); return { league: g.league, win: g.win, day: g.date, price: x.price, won, ctrs: SIZE, pnl: (won ? (1 - x.price) * SIZE : -x.price * SIZE) - fee(x.price) }; };
+const trade = (g, x) => { const won = x.side === result(g, x.market); return { league: g.league, event: g.event, at: x.t, win: g.win, day: g.date, price: x.price, won, ctrs: SIZE, pnl: (won ? (1 - x.price) * SIZE : -x.price * SIZE) - fee(x.price) }; };
 
 
 const cents = v => v == null ? "—" : `${v >= 0 ? "+" : ""}${(100 * v).toFixed(2)}c`;
@@ -246,6 +252,24 @@ if (MARGIN) {
         if (x) madd(`${g.league}|${s}|${M}|${cap}`, trade(g, x));
       }
     }
+  }
+  if (FORWARD) {
+    const all = (mcells.get("ncaamb|60|6|0.95") || []).sort((a, b) => a.at - b.at);
+    let verdict = "RUNNING", at = all.length, losses = 0;
+    for (let i = 0; i < all.length; i++) {
+      if (!all[i].won) losses++;
+      if (losses >= 2) { verdict = "FAIL: a second loss"; at = i + 1; break; }
+      if (losses === 0 && i + 1 >= 45) { verdict = "PASS if the mean is positive: 45 straight wins"; at = i + 1; break; }
+      if (i + 1 >= 60) { verdict = "PASS if the mean is positive: at most 1 loss in 60"; at = i + 1; break; }
+    }
+    const head = all.slice(0, at);
+    console.log(`\nFORWARD RECORD (sports-margin-plan.md): men's college basketball, 1:00 left, lead >= 6, 50-95c; games ${WINDOWS[0][1]}..${FORWARD} (exclusive)`);
+    console.log("                                        trades    won   paid  per ctr       t        days      at 10 contracts");
+    console.log(row("forward, counted to the verdict", head));
+    console.log(`  losses ${head.filter(x => !x.won).length} in ${head.length}; VERDICT: ${verdict}`);
+    for (const x of all.filter(x => !x.won)) console.log(`  loss: ${x.event} paid ${x.price.toFixed(2)}`);
+    console.log(`requests: Kalshi ${kReq} (${kRefused} refused), ESPN ${eReq}. Upper bound: a print says someone traded there, not that 10 more were available.`);
+    process.exit(0);
   }
   if (process.env.MDEBUG) for (const [k, v] of mcells) console.error(`  cell ${k}: ${v.length} (${v.map(x => x.win).join("")})`);
   console.log(`\nBUY THE LEADER LATE, BY LEAD AND PRICE (sports-margin-plan.md): chosen on A, tested once on R + B`);

@@ -129,3 +129,25 @@ positive after fees AND **at most 1 loss in the first 60 trades**. If
 it were fairly priced at ~93c, at most 1 loss in 60 would happen about
 7% of the time. Break-even at 93c is roughly 4 losses in 60, so one
 loss costs about 14 wins. A print is one trade, so size is unknown.
+
+## The forward record, fixed 2026-11-19 before any forward result was read
+
+Run weekly with `node scripts/sports-half.mjs --forward=<today>
+--leagues=ncaamb`: the one candidate rule above, unchanged, on games
+from 2026-11-18. The bar, checked in time order as trades arrive:
+
+- **FAIL at the second loss**, whenever it comes. At 93c a contract the
+  rule cannot pass with two losses, so the test stops there and does not
+  wait for 60 trades.
+- **PASS at 45 straight wins**, or at **at most 1 loss in 60**, in both
+  cases only if the mean after fees is positive. 45 straight wins is the
+  earlier exit the user asked for. If the true price were fair (~7%
+  losses), passing either way would happen about 8% of the time, against
+  7% for the 60-trade bar alone.
+- Otherwise it is still running. In window A the rule fired about once
+  every two days, so 45 trades is about early February and 60 about
+  March. Only a loss can end it sooner.
+
+A pass leads to a live paper log that records what was actually on offer
+at decision time, and only then to the trader. A print is one trade, so
+size is still unknown.
