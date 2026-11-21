@@ -11,7 +11,8 @@ perps, or stock options).
   crypto markets (`m15.md`), run by the trader.
 - **Failed:** funding carry on Kalshi's crypto perps (`perps-carry-plan.md`):
   1.21% a year on capital, below cash.
-- **Not yet tested:** a directional (trend) bot. That is test 1 below.
+- **Passed its bar:** crypto trend, long or flat (test 1 below), in a
+  paper record.
 
 ## Venues a US account can trade by API (fees to be confirmed on each
 venue's own page; third-party figures disagree)
@@ -48,8 +49,10 @@ paper record before any money.
 
 ## The test queue (each with a plan fixed before its data)
 
-1. **Crypto trend, long or flat** (`crypto-trend-plan.md`). Free daily
-   prices back to 2015, so it is cheap to settle.
+1. **Crypto trend, long or flat** (`crypto-trend-plan.md`). **PASSED its
+   bar 2026-11-21**: Sharpe 0.81 against buy-and-hold's 0.56 over
+   2021..2026-11, worst drawdown -49% against -76%, mostly from ETH.
+   Paper record running.
 2. **Weather outcomes confirmed by observations** on Kalshi
    (`strategy-survey.md`).
 3. **FX trend and carry** on the majors. Daily FX and central-bank rates

@@ -159,18 +159,21 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   launch: 1.21% a year on capital, below cash. BTC alone 4.44%. The
   funding is about the big venues', not above it. Survey of crypto and
   perp bots: `perps-survey.md`.
+- Crypto trend, long or flat (`crypto-trend-plan.md`, 2026-11-21): PASS
+  on its bar. BTC + ETH, hold while the past 30 days are up, else cash,
+  0.40% a switch: Sharpe 0.81 against buy-and-hold's 0.56 over
+  2021..2026-11, worst drawdown -49% against -76%. Second half weaker
+  (0.48). The gain is mostly ETH; BTC alone matches holding. Paper record
+  weekly. Wider survey and queue: `algo-survey.md`.
 
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
-- **Next tests, in order** (2026-11-19, from `strategy-survey.md` and
-  `perps-survey.md`; ranked by where a small, careful player can have an
-  edge):
-  1. weather outcomes already confirmed by station observations;
-  2. bracket sums on slow markets;
-  3. a directional crypto bot on free data (one fixed test, a pass
-     unlikely after fees);
-  4. Kalshi perp against spot price gaps (needs a keyed recorder).
+- **Next tests, in order** (`algo-survey.md`, 2026-11-21): weather
+  outcomes confirmed by observations; FX trend and carry on the majors;
+  bracket sums on slow markets; trend across CME futures (no index
+  futures); bitcoin volatility selling on CME options; Kalshi perp
+  against spot gaps.
   Equity and index perps are dropped: no stock-market trading. (Late favourites in sports, the first,
   FAILED 2026-11-18; see Done.)
 - **Quoting a liquidity-reward market only until its outcome starts to
