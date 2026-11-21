@@ -69,11 +69,9 @@ go further into algorithmic trading?
    not. Had it, hedge with Coinbase's perp instead of spot. That
    is cheaper to hold, and the return is the difference between the
    venues. It needs Coinbase's funding history (not yet checked).
-3. **Equity perps' funding** (94 markets). This is where the outside
-   evidence says the premium now sits. Kalshi listed them on 2026-11-05;
-   about three months of prints are needed first. A hedge needs the stock at a
-   broker, and stock hours differ from perp hours. Printed as reference in
-   (1) first; its own plan only if the reference rows warrant one.
+3. **Equity perps' funding** (94 markets). **Dropped 2026-11-19: the
+   user does not want to trade the stock market.** Index perps are out for
+   the same reason.
 4. **Price gaps between Kalshi's perp and spot.** A latency trade. Our
    speed test found faster entries did worse on the 15-minute markets, and
    12 bps a side is a high bar for a gap. It needs recording first (perps

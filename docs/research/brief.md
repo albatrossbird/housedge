@@ -71,6 +71,8 @@ On KXBTC15M only. Gold, the other coins and the shadow rules are retired.
   re-running a large archive read.
 - Run new analysis from the branch first. Merge the code with the
   result, squash-merged.
+- **No stock-market trading** (the user, 2026-11-19): no stocks, equity
+  perps or stock-index products, as research targets or trades.
 
 **Data and secrets**
 - Recorded and downloaded Kalshi data is private. Never make the
@@ -157,17 +159,22 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   launch: 1.21% a year on capital, below cash. BTC alone 4.44%. The
   funding is about the big venues', not above it. Survey of crypto and
   perp bots: `perps-survey.md`.
+- Crypto trend, long or flat (`crypto-trend-plan.md`, 2026-11-21): PASS
+  on its bar. BTC + ETH, hold while the past 30 days are up, else cash,
+  0.40% a switch: Sharpe 0.81 against buy-and-hold's 0.56 over
+  2021..2026-11, worst drawdown -49% against -76%. Second half weaker
+  (0.48). The gain is mostly ETH; BTC alone matches holding. Paper record
+  weekly. Wider survey and queue: `algo-survey.md`.
 
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
-- **From the perps survey** (`perps-survey.md`), in order: equity perps'
-  funding once there is history (listed 2026-11-05); a directional
-  crypto bot on free data; perp-against-spot price gaps (needs a keyed
-  recorder).
-- **From the strategy survey** (`strategy-survey.md`, 2026-11-18), in
-  order: weather outcomes already confirmed by station observations;
-  bracket sums on slow markets. (Late favourites in sports, the first,
+- **Next tests, in order** (`algo-survey.md`, 2026-11-21): weather
+  outcomes confirmed by observations; FX trend and carry on the majors;
+  bracket sums on slow markets; trend across CME futures (no index
+  futures); bitcoin volatility selling on CME options; Kalshi perp
+  against spot gaps.
+  Equity and index perps are dropped: no stock-market trading. (Late favourites in sports, the first,
   FAILED 2026-11-18; see Done.)
 - **Quoting a liquidity-reward market only until its outcome starts to
   arrive** (from the market-making study's FAIL): untested. Knowing
