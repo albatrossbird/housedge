@@ -1,11 +1,13 @@
 // Plans and prices. Amounts come from lib/billing/plans.js, the same list
 // checkout charges from, so the page cannot quote a price Stripe does not.
 //
-// Pro (the arbs) is the product sold on money; +EV rides inside Pro+ as a tool with a
-// published record, never as a profit claim (decided 2026-11-11). Every
+// One paid plan, Pro (decided 2026-11-22): the arbs are what it is sold on;
+// +EV rides inside it as a tool with a published record, never as a profit
+// claim. Its price is a founding price: lib/billing/plans.js keeps every
+// subscriber on the price they bought at. Every
 // button says what pressing it does right now: "Coming soon" while billing
 // is off, "Sign up" when signed out, "Current plan" for the one held, the
-// $1 trial on Pro+ for anyone on the free plan (checkout enforces once per
+// $1 trial on Pro for anyone on the free plan (checkout enforces once per
 // account), "Switch
 // plan" to move between paid plans (Stripe's portal prorates; a second
 // checkout would bill twice).
@@ -19,10 +21,10 @@ const cap = `+${Math.round(FREE_EV_CAP * 100)}%`;
 const PLANS = [
   { id: "free", name: "Free", blurb: "See what MarketSlap finds.",
     features: ["Kalshi and Polymarket prices side by side, with search", `Sports +EV prices under ${cap}, with how picks like them have actually done`, "How many arbs are open right now, by sport"] },
-  { id: "arb", name: CATALOG.arb.name, blurb: "Pregame arbs, for steady side income.", month: "arb", year: "arb_year",
-    features: ["Every pregame arb we find across 17 sportsbooks and exchanges", "Returns after each venue's fees", "Stake calculator, with links that open the bet", "Filters for your books, kickoff window and bet types"] },
-  { id: "pro", name: CATALOG.pro.name, blurb: "Pro, plus +EV and alerts.", month: "pro", year: "pro_year", trial: "trial", best: true,
-    features: ["Everything in Pro", "Every +EV price, with quality flags and our published track record", ["Email alerts on your own conditions", "Soon"], ["A free 1:1 onboarding call", "Yearly"]] },
+  { id: "pro", name: CATALOG.pro.name, blurb: "Every sports arb and +EV price.", month: "pro", year: "pro_year", trial: "trial", best: true, founding: true,
+    features: ["Every pregame arb we find across 17 sportsbooks and exchanges", "Returns after each venue's fees", "Stake calculator, with links that open the bet",
+      "Every +EV price, with quality flags and our published track record", "Filters for your books, kickoff window and bet types",
+      ["Email alerts on your own conditions", "Soon"], ["A free 1:1 onboarding call", "Yearly"]] },
 ];
 
 async function post(url, body = {}) {
@@ -82,7 +84,7 @@ export default function Pricing() {
     }
     if (held === plan.id && me?.hasBilling) return <button onClick={manage} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "manage" ? "Opening…" : "Current plan · Manage"}</button>;
     if (held === plan.id) return <span style={btn("secondary", true)}>Current plan</span>;
-    if (held === "pro") return <span style={btn("secondary", true)}>Included in Pro+</span>;
+    if (held === "pro") return <span style={btn("secondary", true)}>Included in Pro</span>;
     if (paidHeld) return <button onClick={manage} disabled={!!busy} style={btn(kind, !!busy)}>{busy === "manage" ? "Opening…" : "Switch plan"}</button>;
     if (t && held === "free") {
       return (
@@ -107,6 +109,7 @@ export default function Pricing() {
         <div className="num" style={{ fontSize: 13, color: yearly ? T.yes : T.muted, minHeight: 19, marginTop: 6 }}>
           {yearly ? `${dollars(Math.round(y / 12))} a month, saving ${dollars(m * 12 - y)}` : `or ${dollars(y)} a year`}
         </div>
+        {plan.founding && <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>Founding price, locked in for as long as you stay subscribed.</div>}
       </div>
     );
   }
@@ -121,7 +124,7 @@ export default function Pricing() {
       <div style={{ textAlign: "center", maxWidth: 620, margin: "8px auto 22px", display: "grid", gap: 10, justifyItems: "center" }}>
         <h1 style={{ font: `800 clamp(28px, 6vw, 38px)/1.1 ${T.display}`, letterSpacing: "-0.02em", margin: 0 }}>Pricing</h1>
         <p style={{ color: T.muted, fontSize: 16, margin: 0, lineHeight: 1.5 }}>
-          Prediction-market comparison stays free. Paid plans unlock every sports arb and +EV price. Cancel anytime.
+          Prediction-market comparison stays free. Pro unlocks every sports arb and +EV price. Cancel anytime.
         </p>
         {open && me?.billing?.test && <p style={{ ...tag(T.warnSoft, T.warn), fontSize: 13, fontWeight: 650, letterSpacing: 0, padding: "8px 14px", whiteSpace: "normal", margin: 0 }}>Test mode: pay with card 4242 4242 4242 4242, any future date and any CVC. No real money moves.</p>}
         <div role="group" aria-label="Billing period" style={{ display: "inline-flex", background: T.raised, borderRadius: 12, padding: 3, gap: 2, marginTop: 4 }}>
@@ -130,10 +133,10 @@ export default function Pricing() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 12, alignItems: "stretch" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 12, alignItems: "stretch", maxWidth: 760, margin: "0 auto" }}>
         {PLANS.map(plan => (
           <section key={plan.id} aria-label={plan.name} style={{ ...card, padding: "20px 18px", display: "flex", flexDirection: "column", position: "relative", border: `${plan.best ? 2 : 1}px solid ${plan.best ? ACCENT : T.border}` }}>
-            {plan.best && <span style={{ ...tag(ACCENT, T.onAccent), position: "absolute", top: -11, left: 18 }}>BEST VALUE</span>}
+            {plan.founding && <span style={{ ...tag(ACCENT, T.onAccent), position: "absolute", top: -11, left: 18 }}>FOUNDING PRICE</span>}
             <div style={{ font: `750 18px/1.2 ${T.display}` }}>{plan.name}</div>
             <div style={{ fontSize: 14, color: T.muted, marginTop: 3 }}>{plan.blurb}</div>
             <Price plan={plan} />
@@ -155,16 +158,16 @@ export default function Pricing() {
         ))}
       </div>
 
-      <section aria-label="Day pass" style={{ ...card, marginTop: 12, padding: "16px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+      <section aria-label="Day pass" style={{ ...card, maxWidth: 760, boxSizing: "border-box", margin: "12px auto 0", padding: "16px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ flex: "999 1 260px" }}>
           <div style={{ font: `750 17px/1.2 ${T.display}` }}>{CATALOG.pass.name} · <span className="num">{dollars(CATALOG.pass.amount)}</span></div>
-          <div style={{ fontSize: 14, color: T.muted, marginTop: 4, lineHeight: 1.45 }}>Everything in Pro+ for {CATALOG.pass.hours} hours. One payment, nothing renews. Try it on a big game day.</div>
+          <div style={{ fontSize: 14, color: T.muted, marginTop: 4, lineHeight: 1.45 }}>Everything in Pro for {CATALOG.pass.hours} hours. One payment, nothing renews. Try it on a big game day.</div>
         </div>
         <div style={{ flex: "1 1 220px" }}>
           {!me ? <span style={btn("secondary", true)}>&nbsp;</span>
             : !open ? <span style={btn("secondary", true)}>Coming soon</span>
             : !signedIn ? <a href="/signup?next=/pricing" style={btn("secondary")}>Sign up to buy</a>
-            : passCovered ? <span style={btn("secondary", true)}>Included in Pro+</span>
+            : passCovered ? <span style={btn("secondary", true)}>Included in Pro</span>
             : <button onClick={() => buy("pass")} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "pass" ? "Opening checkout…" : `${passRunning ? `Add ${CATALOG.pass.hours} hours` : "Buy a day pass"} · ${dollars(CATALOG.pass.amount)}`}</button>}
           {passRunning && !passCovered && <div style={{ fontSize: 12, color: T.muted, marginTop: 6, textAlign: "center" }}>Yours runs until {new Date(me.plan.passUntil).toLocaleString()}</div>}
         </div>

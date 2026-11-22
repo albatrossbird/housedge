@@ -455,16 +455,25 @@ migration is `0034` (`payments`). Billing needs accounts on as well, so in
     subscription on its old one: the founding-price lock comes free.
   - The pricing page reads the same file, so it cannot quote a price
     Stripe does not charge.
-- **What is sold (decided 2026-11-11, renamed 2026-11-22):** Free; **Pro**
-  (the arbs) $29/month or $249/year; **Pro+** (Pro + +EV, with alerts once
-  built) $49/month or
-  $399/year; a $5 day pass (Pro+ for 24 hours); and a **$1 trial**: 3 days
-  of Pro+ that becomes Pro+ monthly unless cancelled.
-  - **Names are display only.** The ids stay `arb` (sold as Pro) and `pro`
-    (sold as Pro+), in `profiles.plan`, `CATALOG` and the Stripe product ids
-    `ms_arb`/`ms_pro`, so a rename never touches stored data. Stripe names a
-    product only when it creates it: after the first live checkout, rename
-    the product in the Stripe dashboard too.
+- **What is sold (decided 2026-11-22):** Free, and ONE paid plan, **Pro**:
+  every sports arb and every +EV price (alerts once built), $39/month or
+  $329/year, shown as a founding price that is locked for as long as the
+  member stays subscribed (true by construction, see above). Plus a $5 day
+  pass (Pro for 24 hours) and a **$1 trial**: 3 days of Pro that becomes Pro
+  monthly unless cancelled.
+  - **Why one plan:** competitors tier on speed and coverage (live markets,
+    more books), not on arbs versus +EV, and +EV is the tool we openly say
+    has lost after fees, so charging extra for it put a warning next to an
+    upsell. A higher tier waits for something that costs more to run:
+    alerts, faster scans. $39 over $29 so it reads as a real tool; it still
+    sits far under AVO ($88) and the arb scanners ($80-500).
+  - **The old plans stay in `CATALOG` with `offered: false`**: `arb` ($29
+    arbs-only, briefly sold as "Pro") and `ev`. Checkout refuses them; a
+    profile naming them still reads. The id `pro` is the one plan.
+  - **Names are display only.** Ids (`profiles.plan`, `CATALOG`, Stripe
+    product ids `ms_pro` etc.) never change, so a rename never touches stored
+    data. Stripe names a product only when it creates it: after the first
+    live checkout, rename the product in the Stripe dashboard too.
   - **The trial is a subscription with `trial_period_days`, plus the $1 as
     a one-time line** on the first invoice. Checkout refuses it to any
     customer who has EVER had a subscription (`status=all`), and to a paying

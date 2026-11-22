@@ -197,7 +197,7 @@ ok(testMode({ STRIPE_SECRET_KEY: "sk_test_1" }) && !testMode({ STRIPE_SECRET_KEY
 reset();
 const p1 = await ensurePrice("pro");
 const made = priceOf("pro");
-ok(made && made.unit_amount === 4900 && made.recurring?.interval === "month" && made.product === "ms_pro" && made.metadata.ms_key === "pro" && S.st.products.ms_pro, "the first use makes the product and the price from lib/billing/plans.js", JSON.stringify(made));
+ok(made && made.unit_amount === CATALOG.pro.amount && made.recurring?.interval === "month" && made.product === "ms_pro" && made.metadata.ms_key === "pro" && S.st.products.ms_pro, "the first use makes the product and the price from lib/billing/plans.js", JSON.stringify(made));
 const callsBefore = S.st.calls.length;
 ok((await ensurePrice("pro")) === p1 && S.st.calls.length === callsBefore, "a second use is served from memory");
 await ensurePrice("pro_year");
@@ -228,15 +228,16 @@ ok(cs.mode === "subscription" && cs.customer === cus1 && cs.client_reference_id 
 ok(cs.subscription_data?.metadata?.profile_id === "u1" && cs.success_url === "https://marketslap.com/account?checkout=done&session_id={CHECKOUT_SESSION_ID}" && cs.cancel_url === "https://marketslap.com/pricing", "checkout: returns to the account page with the session id, or to pricing");
 ok(prof("u1").plan === "free", "checkout grants nothing by itself");
 
-await run(checkout, { at: "AT1", body: { plan: "arb" } });
+await run(checkout, { at: "AT1", body: { plan: "pro_year" } });
 ok(Object.keys(S.st.customers).length === 1, "checkout: a second checkout reuses the customer");
+ok((await run(checkout, { at: "AT1", body: { plan: "arb" } })).statusCode === 400 && (await run(checkout, { at: "AT1", body: { plan: "arb_year" } })).statusCode === 400, "checkout: the retired arbs-only plan is refused");
 S.st.customers = {};
-await run(checkout, { at: "AT1", body: { plan: "arb" } });
+await run(checkout, { at: "AT1", body: { plan: "pro_year" } });
 ok(prof("u1").stripe_customer_id !== cus1 && S.st.customers[prof("u1").stripe_customer_id], "checkout: a stored customer Stripe no longer knows (a test one, once the key is live) is replaced");
 
 const before = prof("u1").stripe_customer_id;
 S.st.customers[before] = { id: before, deleted: true };     // how Stripe answers for a deleted customer: 200, not 404
-await run(checkout, { at: "AT1", body: { plan: "arb" } });
+await run(checkout, { at: "AT1", body: { plan: "pro_year" } });
 ok(prof("u1").stripe_customer_id !== before && !S.st.customers[prof("u1").stripe_customer_id].deleted, "checkout: a customer deleted in Stripe is replaced, not checked out as");
 
 prof("u1").plan = "arb"; prof("u1").plan_until = new Date(Date.now() + 86400000).toISOString();
@@ -375,11 +376,11 @@ ok((await run(confirm, { at: "AT2", body: { session_id: mine.id } })).statusCode
 ok((await recordPassSession(mine.id, { forProfile: "u2" })).forbidden && !S.payments.length, "a pass session is applied only to the profile it belongs to, even if a caller skipped its own check");
 r = await run(confirm, { at: "AT1", body: { session_id: mine.id } });
 ok(r.statusCode === 200 && prof("u1").pass_until, "confirm: the buyer's own pass applies at once, without waiting on the webhook", JSON.stringify(r.body));
-await run(checkout, { at: "AT2", body: { plan: "arb" } });
+await run(checkout, { at: "AT2", body: { plan: "pro_year" } });
 const subCs = Object.values(S.st.sessions).find(s => s.mode === "subscription");
-sub(prof("u2").stripe_customer_id, "arb");
+sub(prof("u2").stripe_customer_id, "pro_year");
 r = await run(confirm, { at: "AT2", body: { session_id: subCs.id } });
-ok(r.statusCode === 200 && prof("u2").plan === "arb", "confirm: a subscription applies at once too");
+ok(r.statusCode === 200 && prof("u2").plan === "pro", "confirm: a subscription applies at once too");
 
 // ---- portal and /api/me ----------------------------------------------------
 reset();
