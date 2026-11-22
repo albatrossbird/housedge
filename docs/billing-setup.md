@@ -48,9 +48,10 @@ account.
 **Settings → Billing → Customer portal** (test mode), then **Activate**:
 - Payment methods: allow updating. Invoice history: on.
 - Cancellations: allow, **at the end of the billing period**.
-- Subscriptions: allow switching plans, with proration. Add the products
-  MarketSlap Pro and MarketSlap Pro+. They appear after the first test
-  checkout of each (step 6), so come back to this after it.
+- Subscriptions: allow switching plans, with proration. Add the product
+  MarketSlap Pro with both its prices (monthly and yearly), so a member can
+  move between them. It appears after the first test checkout (step 6), so
+  come back to this after it.
 - Business information: Terms `https://marketslap.com/terms`, Privacy
   `https://marketslap.com/privacy`.
 
@@ -72,17 +73,18 @@ Signed in as an allowlisted tester:
   card `4242 4242 4242 4242`, any future date, any CVC.
 - You land on `/account` showing **Pro**. Stripe → Webhooks → the endpoint
   should list deliveries with `200`.
-- `/sports` shows every arb; +EV over +3% is still locked.
-- **Manage billing** → switch to Pro+ → back on `/account` it says Pro+. Cancel → it stays until the period ends.
+- `/sports` shows every arb and every +EV price.
+- **Manage billing** → switch to yearly → back on `/account` it still says
+  Pro. Cancel → it stays until the period ends.
 - Buy a day pass: the account page shows when it ends. A second one adds 24
   hours.
 - With a fresh account, **Try 3 days for $1**:
-  - Checkout shows $1 today and $49 a month from the trial's end. The account
-    page says Pro+.
+  - Checkout shows $1 today and $39 a month from the trial's end. The account
+    page says Pro.
   - In the Stripe dashboard the subscription is "Trialing".
   - To see it convert, open the subscription in Stripe and end the trial now
-    (Actions → Update subscription). Stripe charges $49 and the account stays
-    Pro+. Test clocks do NOT work here: a clock only applies to customers
+    (Actions → Update subscription). Stripe charges $39 and the account stays
+    Pro. Test clocks do NOT work here: a clock only applies to customers
     created inside it, and checkout creates its own customers.
   - A second trial on the same account is refused.
 - Refund a payment from the Stripe dashboard: `payments.refunded_cents` fills in.
