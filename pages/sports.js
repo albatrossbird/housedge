@@ -260,8 +260,8 @@ export default function Sports() {
           {tab === "arb" && locked?.arb && (
             <LockedCard signedIn={!!me?.user}
               title={lockedArb ? `${lockedArb} arbitrage ${lockedArb === 1 ? "pair" : "pairs"} right now` : "No arbitrage right now"}
-              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with Arbs or Pro.`
-                : "Arbs or Pro shows every pair as soon as a scan finds it."} />
+              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with Pro or Pro+.`
+                : "Pro or Pro+ shows every pair as soon as a scan finds it."} />
           )}
           {list.slice(0, shown).map((x, i) => tab === "ev" ? <EvCard key={i} r={x} /> : <ArbCard key={i} a={x} />)}
           {list.length > shown && (
@@ -272,7 +272,7 @@ export default function Sports() {
           {tab === "ev" && locked?.ev && lockedEv > 0 && (
             <LockedCard signedIn={!!me?.user}
               title={`${lockedEv} more ${lockedEv === 1 ? "price" : "prices"} at +${Math.round(locked.ev.cap * 100)}% EV or better`}
-              detail={`Free shows edges under +${Math.round(locked.ev.cap * 100)}%. Pro shows all of them.`} />
+              detail={`Free shows edges under +${Math.round(locked.ev.cap * 100)}%. Pro+ shows all of them.`} />
           )}
         </div>
 
