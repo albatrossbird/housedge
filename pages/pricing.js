@@ -1,11 +1,11 @@
 // Plans and prices. Amounts come from lib/billing/plans.js, the same list
 // checkout charges from, so the page cannot quote a price Stripe does not.
 //
-// Arbs is the product sold on money; +EV rides inside Pro as a tool with a
+// Pro (the arbs) is the product sold on money; +EV rides inside Pro+ as a tool with a
 // published record, never as a profit claim (decided 2026-11-11). Every
 // button says what pressing it does right now: "Coming soon" while billing
 // is off, "Sign up" when signed out, "Current plan" for the one held, the
-// $1 trial on Pro for anyone on the free plan (checkout enforces once per
+// $1 trial on Pro+ for anyone on the free plan (checkout enforces once per
 // account), "Switch
 // plan" to move between paid plans (Stripe's portal prorates; a second
 // checkout would bill twice).
@@ -21,8 +21,8 @@ const PLANS = [
     features: ["Kalshi and Polymarket prices side by side, with search", `Sports +EV prices under ${cap}, with how picks like them have actually done`, "How many arbs are open right now, by sport"] },
   { id: "arb", name: CATALOG.arb.name, blurb: "Pregame arbs, for steady side income.", month: "arb", year: "arb_year",
     features: ["Every pregame arb we find across 17 sportsbooks and exchanges", "Returns after each venue's fees", "Stake calculator, with links that open the bet", "Filters for your books, kickoff window and bet types"] },
-  { id: "pro", name: CATALOG.pro.name, blurb: "Arbs and +EV, with alerts.", month: "pro", year: "pro_year", trial: "trial", best: true,
-    features: ["Everything in Arbs", "Every +EV price, with quality flags and our published track record", ["Email alerts on your own conditions", "Soon"], ["A free 1:1 onboarding call", "Yearly"]] },
+  { id: "pro", name: CATALOG.pro.name, blurb: "Pro, plus +EV and alerts.", month: "pro", year: "pro_year", trial: "trial", best: true,
+    features: ["Everything in Pro", "Every +EV price, with quality flags and our published track record", ["Email alerts on your own conditions", "Soon"], ["A free 1:1 onboarding call", "Yearly"]] },
 ];
 
 async function post(url, body = {}) {
@@ -82,7 +82,7 @@ export default function Pricing() {
     }
     if (held === plan.id && me?.hasBilling) return <button onClick={manage} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "manage" ? "Opening…" : "Current plan · Manage"}</button>;
     if (held === plan.id) return <span style={btn("secondary", true)}>Current plan</span>;
-    if (held === "pro") return <span style={btn("secondary", true)}>Included in Pro</span>;
+    if (held === "pro") return <span style={btn("secondary", true)}>Included in Pro+</span>;
     if (paidHeld) return <button onClick={manage} disabled={!!busy} style={btn(kind, !!busy)}>{busy === "manage" ? "Opening…" : "Switch plan"}</button>;
     if (t && held === "free") {
       return (
@@ -158,13 +158,13 @@ export default function Pricing() {
       <section aria-label="Day pass" style={{ ...card, marginTop: 12, padding: "16px 18px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ flex: "999 1 260px" }}>
           <div style={{ font: `750 17px/1.2 ${T.display}` }}>{CATALOG.pass.name} · <span className="num">{dollars(CATALOG.pass.amount)}</span></div>
-          <div style={{ fontSize: 14, color: T.muted, marginTop: 4, lineHeight: 1.45 }}>Everything in Pro for {CATALOG.pass.hours} hours. One payment, nothing renews. Try it on a big game day.</div>
+          <div style={{ fontSize: 14, color: T.muted, marginTop: 4, lineHeight: 1.45 }}>Everything in Pro+ for {CATALOG.pass.hours} hours. One payment, nothing renews. Try it on a big game day.</div>
         </div>
         <div style={{ flex: "1 1 220px" }}>
           {!me ? <span style={btn("secondary", true)}>&nbsp;</span>
             : !open ? <span style={btn("secondary", true)}>Coming soon</span>
             : !signedIn ? <a href="/signup?next=/pricing" style={btn("secondary")}>Sign up to buy</a>
-            : passCovered ? <span style={btn("secondary", true)}>Included in Pro</span>
+            : passCovered ? <span style={btn("secondary", true)}>Included in Pro+</span>
             : <button onClick={() => buy("pass")} disabled={!!busy} style={btn("secondary", !!busy)}>{busy === "pass" ? "Opening checkout…" : `${passRunning ? `Add ${CATALOG.pass.hours} hours` : "Buy a day pass"} · ${dollars(CATALOG.pass.amount)}`}</button>}
           {passRunning && !passCovered && <div style={{ fontSize: 12, color: T.muted, marginTop: 6, textAlign: "center" }}>Yours runs until {new Date(me.plan.passUntil).toLocaleString()}</div>}
         </div>
