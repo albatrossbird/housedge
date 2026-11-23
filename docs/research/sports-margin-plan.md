@@ -155,3 +155,8 @@ from 2026-11-18. The bar, checked in time order as trades arrive:
 A pass leads to a live paper log that records what was actually on offer
 at decision time, and only then to the trader. A print is one trade, so
 size is still unknown.
+
+**Forward log**
+- 2026-11-23 (games 2026-11-18..22): 2 trades, 2 won, paid 94.5c on
+  average, +5.14c a contract; 0 losses. RUNNING. Only 2 of 222 joined
+  games met the rule, so it is firing more slowly than window A's pace.
