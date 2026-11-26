@@ -87,3 +87,28 @@ trader.
   observed.
 - **The settlement source:** The Weather Company's figure is not ours,
   and the instrument check measures the gap only on past days.
+
+## Plumbing, 2026-11-26 (no price or P&L read): clears with margin 1
+
+`node scripts/wx-confirmed.mjs --plumbing`. 24 US daily-high series,
+38,256 settled markets. 20 series run all of A and B; Newark, San Diego,
+Louisville and Trenton (`KXHIGHTEWR`, `KXHIGHTSAN`, `KXHIGHTSDF`,
+`KXHIGHTTTN`) start in B.
+
+**Fixed before scoring:** historical-tier markets carry no rules text, so
+the first pass found no station for any market before July and skipped
+all of A. A series' station is now read from whichever of its markets
+names it (every series names one).
+
+- **Coverage:** 99.95% of markets fall on days with reports in 20+ hours.
+- **The instrument check** (settlements against the observed running
+  max, no price):
+
+| margin | confirmed markets | settled against the confirmed side |
+|---|---|---|
+| 0 | 11,865 | 9 (0.08%) |
+| **1** | **9,076** | **2 (0.02%)** |
+| 2 | 6,475 | 2 (0.03%) |
+
+The free reports stand in for The Weather Company's figure. Margin 1 is
+used, as planned.
