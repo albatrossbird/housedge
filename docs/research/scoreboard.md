@@ -27,14 +27,13 @@ linked plan or in `m15.md`. Update this page whenever a status changes.
 
 ## In test
 
-| strategy | market | status | doc |
-|---|---|---|---|
-| weather outcomes already confirmed | Kalshi daily highs, 24 US cities | plumbing clears (station data matches settlement on 9,074 of 9,076); scoring 2026-11-26 | `wx-confirmed-plan.md` |
+Nothing at the moment.
 
 ## Failed and stopped
 
 | strategy | market | result | doc |
 |---|---|---|---|
+| weather outcomes already confirmed | Kalshi daily highs, 24 US cities | 4 tradeable of 9,076 confirmed markets: priced at 97c+ within minutes | `wx-confirmed-plan.md` |
 | late favourites (3:00 left) | Kalshi sports games | -1.32c a contract, t -2.31 | `sports-late-plan.md` |
 | favourites at halftime | Kalshi sports games | -1.18c, t -2.21 | `sports-half-plan.md` |
 | leader by lead and price | Kalshi sports games | too few trades to test except one candidate (above) | `sports-margin-plan.md` |

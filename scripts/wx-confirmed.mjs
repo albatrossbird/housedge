@@ -199,7 +199,7 @@ for (const m of markets) {
     const c = confirmAt(m.obs, m, margin);
     if (!c) continue;
     const tr = await tradesIn(m.ticker, c.t, c.t + 90 * MIN);
-    const mk = (x) => { const won = c.side === m.result; return { day: m.date, win: m.win, price: x.price, won, series: m.series, pnl: (won ? (1 - x.price) * SIZE : -x.price * SIZE) - fee(x.price) }; };
+    const mk = (x) => { const won = c.side === m.result; return { day: m.date, win: m.win, price: x.price, won, series: m.series, ctrs: SIZE, pnl: (won ? (1 - x.price) * SIZE : -x.price * SIZE) - fee(x.price) }; };
     if (margin === MARGIN) {
       confirmedN++;
       const e = entry(tr, c.t + 10 * MIN, c.side, 0.97);

@@ -112,3 +112,42 @@ names it (every series names one).
 
 The free reports stand in for The Weather Company's figure. Margin 1 is
 used, as planned.
+
+## Result, 2026-11-26: FAIL. Buying confirmed weather outcomes stops.
+
+`node scripts/wx-confirmed.mjs --score --primary-only` (9,105 public
+Kalshi requests, 34 minutes). The first scoring printed +0.00c a
+contract on every row: the stats helper divides by a contract count the
+trades did not carry. Fixed, and re-scored from the cache. Every other
+figure is unchanged.
+
+| | trades | won | paid | per contract | t |
+|---|---|---|---|---|---|
+| **A + B** | **4** | 100% | 96.0c | +3.73c | 2.28 |
+| A | 4 | 100% | 96.0c | +3.73c | 2.28 |
+| B | 0 | | | | |
+
+Of 9,076 markets the observations confirmed, **9,072 had no taker print
+at 97c or less in the hour after the decision.** FAIL on trade count:
+the market prices a confirmed outcome at 97c or above within minutes,
+before a 10-minute-old report can act on it.
+
+Reference rows (never a second chance):
+
+| cell | trades | won | paid | per contract |
+|---|---|---|---|---|
+| delay 0 (the report's own timestamp) | 88 | 100% | 95.4c | +4.31c |
+| cap 95c | 3 | 100% | 94.3c | +5.29c |
+| cap 99c | 7 | 85.7% | 98.7c | -13.09c |
+| delay 30 min | 4 | 100% | 96.0c | +3.73c |
+
+- **The 88 trades at delay 0 are the finding.** Someone buys the
+  confirmed side within the first 10 minutes of the report, 88 times in
+  ten months. That is a speed race (the station's one-minute feed or the
+  settlement source itself), and at about 9 trades a month it is too
+  small to be worth building for.
+- **Above 97c the fee and the rare miss eat everything.** The cap-99c
+  row holds the instrument check's one contradiction: one loss at 98.7c
+  costs about 30 wins.
+- The margin 0 and 2 rows were not run. They cannot bring the primary to
+  200 trades when 9,072 of 9,076 confirmed markets offered nothing.
