@@ -15,6 +15,7 @@ export const THEME_CSS = `
   --accent: #5b8cff; --accent-soft: rgba(91, 140, 255, .16); --on-accent: #ffffff;
   --good: #2fd17c; --good-soft: rgba(47, 209, 124, .15); --bad: #ff6262; --bad-soft: rgba(255, 98, 98, .14);
   --warn: #f2b84b; --warn-soft: rgba(242, 184, 75, .15); --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  --kalshi: #22c483; --polymarket: #5a7dff; --polyglobal: #b08cff; --bar: #aab3c5; --track: #262b37;
   --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
@@ -24,6 +25,7 @@ export const THEME_CSS = `
   --accent: #2f62e6; --accent-soft: rgba(47, 98, 230, .1); --on-accent: #ffffff;
   --good: #0f9d55; --good-soft: rgba(15, 157, 85, .1); --bad: #d93b3b; --bad-soft: rgba(217, 59, 59, .09);
   --warn: #a86a00; --warn-soft: rgba(168, 106, 0, .1); --shadow: 0 1px 2px rgba(14, 18, 32, .08);
+  --kalshi: #0f9d63; --polymarket: #2f55e6; --polyglobal: #7448d6; --bar: #334155; --track: #e6e9ef;
   color-scheme: light } }
 body { background: var(--bg); color: var(--fg); margin: 0; -webkit-font-smoothing: antialiased; }
 .ms-page a { color: var(--accent); }
@@ -52,7 +54,7 @@ export const secondary = { ...primary, color: T.text, background: T.raised, bord
 export const card = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 20, boxShadow: T.shadow };
 
 // The site header: logo, wordmark, and a way back to the board.
-export function ShellHeader({ width = 1080 }) {
+export function ShellHeader({ width = 1080, right = null }) {
   return (
     <header style={{ position: "sticky", top: 0, zIndex: 20, background: T.bg, padding: "0 max(16px, env(safe-area-inset-left, 0px))" }}>
       <div style={{ maxWidth: width, margin: "0 auto", minHeight: 58, display: "flex", alignItems: "center", gap: 12 }}>
@@ -60,9 +62,11 @@ export function ShellHeader({ width = 1080 }) {
           <img src="/logo-mark.svg" alt="" aria-hidden="true" width={30} height={31} style={{ display: "block" }} />
           <span style={{ font: `800 18px/1 ${T.display}`, letterSpacing: "0.08em", color: T.text }}>MARKET<span className="ms-slap">SLAP</span></span>
         </a>
-        <nav style={{ marginLeft: "auto", display: "flex", gap: 16, fontSize: 14, fontWeight: 650 }}>
+        <nav style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16, fontSize: 14, fontWeight: 650 }}>
+          <a href="/" style={{ color: T.muted, textDecoration: "none" }}>Markets</a>
           <a href="/sports" style={{ color: T.muted, textDecoration: "none" }}>Sports</a>
           <a href="/pricing" style={{ color: T.muted, textDecoration: "none" }}>Pricing</a>
+          {right}
         </nav>
       </div>
     </header>
