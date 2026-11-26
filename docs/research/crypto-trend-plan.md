@@ -116,3 +116,8 @@ on days after 2026-11-20. It checks plumbing and the daily decision. It
 cannot confirm the edge, since a 30-day trend rule needs years for that.
 At the 2026-11-20 close both coins are in cash (BTC -30.0% and ETH -34.5%
 over 30 days).
+
+**Paper log**
+- 2026-11-23 (closes 2026-11-21..22): no switches; both coins in cash
+  (BTC -24.6%, ETH -27.8% over 30 days). The rule is flat at 0%;
+  buy-and-hold is +5% over the two days.

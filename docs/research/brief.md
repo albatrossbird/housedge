@@ -165,12 +165,18 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   2021..2026-11, worst drawdown -49% against -76%. Second half weaker
   (0.48). The gain is mostly ETH; BTC alone matches holding. Paper record
   weekly. Wider survey and queue: `algo-survey.md`.
+- Weather outcomes already confirmed by observations
+  (`wx-confirmed-plan.md`, 2026-11-26): FAIL. The free station reports
+  match Kalshi's settlement (2 against of 9,076). But only 4 confirmed
+  markets offered a print at 97c or less after a 10-minute delay; 88 did
+  in the first 10 minutes. It is a speed race, too small to chase.
+  Scoreboard of every strategy: `scoreboard.md`.
 
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
-- **Next tests, in order** (`algo-survey.md`, 2026-11-21): weather
-  outcomes confirmed by observations; FX trend and carry on the majors;
+- **Next tests, in order** (`scoreboard.md` Queue): FX trend and carry
+  on the majors;
   bracket sums on slow markets; trend across CME futures (no index
   futures); bitcoin volatility selling on CME options; Kalshi perp
   against spot gaps.
