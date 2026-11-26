@@ -404,6 +404,31 @@ The Actions workflow keeps running until the box has been seen to keep
 prices fresh; both writing the same prices is harmless. Its schedule is
 turned off in a follow-up once that is measured.
 
+## Movers (`marketslap-movers.timer`)
+
+The home page's "Today on the markets" lists: the biggest moves and the
+most money traded over about a day, across Kalshi, Polymarket US and
+polymarket.com. `scripts/movers.mjs` reads the three venues' public data
+every 15 minutes and writes the `movers` table, which `/api/movers`
+serves. It needs migration `0035_movers.sql` and uses `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` from `/etc/marketslap/env`.
+
+    sudo systemctl start marketslap-sync.service
+    sudo systemctl enable --now marketslap-movers.timer
+    sudo systemctl start --no-block marketslap-movers.service
+
+After about 3 minutes, check the run (the last lines read
+`wrote N movers rows` and `timings (s): ...`, and the unit is not
+`failed`):
+
+    sudo journalctl -u marketslap-movers -n 40 --no-pager
+    systemctl status marketslap-movers --no-pager | head -5
+
+Polymarket US publishes no price from a day ago and only an all-time
+volume, so the job keeps its own readings (`mover_snapshots`,
+`mover_history`). Its .us rows have a move and a volume only after the
+job has run for a day.
+
 ## Dukascopy history (`marketslap-dukascopy.timer`)
 
 Downloads Dukascopy's free tick history for gold and the nine commodity

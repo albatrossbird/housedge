@@ -577,6 +577,56 @@ unmatched is a demand signal for the matcher. Two found immediately:
 "fed rate" returns 8 markets and 0 matched, and "government shutdown"
 returns 9 across both venues with 0 matched.
 
+### Movers and most traded (`/api/movers`, free, on the home page)
+
+"Today on the markets": the biggest moves and the most money traded over
+about a day, across Kalshi, Polymarket US and polymarket.com.
+`scripts/movers.mjs` runs on the box every 15 minutes
+(`deploy/marketslap-movers.timer`) and writes `movers` (migration 0035);
+`/api/movers` reads it, cached at the edge; `components/Movers.js` draws it.
+Rules live in `lib/movers.js`, pinned by `scripts/movers.test.mjs`.
+
+- **What each venue publishes (checked 2026-11-26).** Kalshi: the bid/ask a
+  day ago and 24h contracts on every market, read by one paced `/events`
+  sweep (104 pages, ~41s; unpaced, page 6 drew a 429). polymarket.com:
+  `oneDayPriceChange` and `volume24hr`, events ordered by 24h volume.
+  **Polymarket US: neither.** Its list has a current price only and `/bbo`
+  an all-time `sharesTraded`, so its day figures are our own readings, and
+  .us rows have no move or volume until the job has run for a day. MOVES:
+  an hourly snapshot (`mover_snapshots`) of every book with a two-sided
+  quote inside 5c, from the list sweep (21,000 of 71,000 open markets,
+  140 pages, ~52s). VOLUME: `/bbo`, which allows about ONE READ A SECOND —
+  60 reads two at a time drew 48 HTTP 429s, Retry-After 8-10s — so each
+  run reads at most 120, paced at 1.1s (this run's biggest .us moves, last
+  run's most traded, the paired legs) into `mover_history`. The price
+  refresh on the same box also reads /bbo; do not raise the budget
+  without measuring both.
+- **The day-ago price is the day-ago MIDPOINT**, not `previous_price`: a
+  market with no trade a day ago reads 0 there, and the first cut was all
+  "0 -> 99" rows that were markets settling.
+- **One row per event**, or one Kalshi strike ladder fills the list.
+- **Moves need $5k traded, traded needs $1k.** At $1k the top moves were
+  Bozeman housing permits; at $5k, Netanyahu, Bitcoin and Aaron Rodgers.
+- **Prices under 3c or over 97c are left out of moves** (1c/99c for
+  traded): the first cut's top moves were finished games and released
+  numbers. A game's end is Kalshi's `expected_expiration_time` (its
+  `close_time` is weeks out) and .com's `gameStartTime` + 4h.
+- **Moves skip markets that end within a day** (games in progress, numbers
+  released this morning); traded keeps them.
+- **Money is dollars on .com and contracts x price on Kalshi and .us**, the
+  comparable figure, stated on the page and never summed across venues.
+- A claim moving on two venues is ONE row (the bigger move leads), the
+  other venues' price and move riding in `also`, linked through `pairs`.
+- A venue whose read did not complete keeps its previous rows and fails
+  the unit.
+
+### One look for free and Pro
+
+The home page, `/sports`, and the account and pricing pages all wear the
+Pro board's theme (`THEME_CSS` in `components/AccountShell.js`): dark by
+default, light on a light device, CSS variables only. `${hex}12` cannot
+tint a variable, so pages use `tint(c, "12")`, a `color-mix`.
+
 ### Embedding is gated per Kalshi series
 
 `lib/embedGate.js`, imported by `embed.js`. Kalshi's econ catalogue is

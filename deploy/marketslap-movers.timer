@@ -1,0 +1,16 @@
+# Every 15 minutes, measured from the START of the previous run, so runs
+# never overlap.
+#
+# Not enabled by bootstrap or the sync timer — starting a job is a human
+# decision. See deploy/README.md.
+
+[Unit]
+Description=MarketSlap movers every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
