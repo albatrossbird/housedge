@@ -1,0 +1,35 @@
+# The home page's movers and most-traded lists, across Kalshi, Polymarket
+# US and polymarket.com. Reads the three venues' public data and writes
+# the `movers` table (migration 0035); /api/movers serves it.
+#
+# A venue whose read does not complete keeps its previous rows and the
+# unit ends `failed`, visible in `systemctl status` and the journal.
+#
+# Needs no npm install: the script reads and writes Supabase over REST.
+# Uses SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from the env file.
+#
+# MEASURED from a sandbox, 2026-11-26: the Kalshi sweep is 104 pages in
+# ~41s, the .us list 140 pages in ~54s, run side by side. Nice=10 like
+# the refresh, because the recorders share this machine.
+
+[Unit]
+Description=MarketSlap movers and most-traded lists
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=marketslap
+WorkingDirectory=/opt/marketslap
+EnvironmentFile=/etc/marketslap/env
+ExecStart=/usr/bin/node scripts/movers.mjs
+# Well under the 15-minute interval, so a hung run is killed before the
+# next one is due rather than piling up.
+TimeoutStartSec=600
+Nice=10
+MemoryMax=400M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

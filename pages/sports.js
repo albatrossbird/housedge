@@ -20,12 +20,13 @@
 import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import { venueName, sportName } from "../lib/sportsBoard.js";
+import { ACCENT, T as SHELL_T, THEME_CSS, ShellHeader } from "../components/AccountShell.js";
 
-const ACCENT = "#5641D2";
-const T = {
-  bg: "#F7F8FA", surface: "#FFFFFF", border: "#E4E7ED",
-  text: "#0F1923", muted: "#6B7280", yes: "#059669", no: "#DC2626", arb: "#D97706",
-};
+// The Pro board's theme (components/AccountShell.js), so the free board
+// and the paid one read as one product: dark by default, light on a light
+// device, every colour a CSS variable.
+const T = { ...SHELL_T, arb: SHELL_T.warn };
+const tint = (c, a) => `color-mix(in srgb, ${c} ${Math.round(parseInt(a, 16) / 2.55)}%, transparent)`;
 const FLAG_TEXT = {
   longshot: "Longshot: fair under 25%. Longshots on this board have won far less than priced.",
   thin: "Thin: fewer than 4 sportsbooks in the fair price.",
@@ -54,9 +55,9 @@ function when(iso) {
 
 function Chip({ active, onClick, children }) {
   return (
-    <button onClick={onClick} style={{
-      border: `1px solid ${active ? ACCENT : T.border}`, background: active ? `${ACCENT}10` : T.surface,
-      color: active ? ACCENT : T.text, borderRadius: 99, padding: "5px 12px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+    <button onClick={onClick} aria-pressed={!!active} style={{
+      border: `1.5px solid ${active ? T.text : "transparent"}`, background: active ? T.surface : T.raised,
+      color: T.text, borderRadius: 999, minHeight: 36, padding: "0 14px", fontSize: 14, fontWeight: 650, cursor: "pointer", fontFamily: "inherit",
     }}>{children}</button>
   );
 }
@@ -65,7 +66,7 @@ function Select({ value, onChange, options, label }) {
     <label style={{ fontSize: 13, color: T.muted, display: "inline-flex", alignItems: "center", gap: 6 }}>
       {label}
       <select value={value} onChange={e => onChange(e.target.value)} style={{
-        border: `1px solid ${T.border}`, borderRadius: 6, background: T.surface, color: T.text, padding: "4px 6px", fontSize: 13, fontFamily: "inherit",
+        border: `1px solid ${T.border}`, borderRadius: 999, background: T.raised, color: T.text, padding: "7px 12px", fontSize: 14, fontWeight: 650, fontFamily: "inherit",
       }}>
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
@@ -82,7 +83,7 @@ const sportCount = (bySport, sport) => (sport === "all" ? Object.values(bySport 
 
 function LockedCard({ title, detail, signedIn }) {
   return (
-    <div style={{ background: `${ACCENT}08`, border: `1px dashed ${ACCENT}66`, borderRadius: 10, padding: "16px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+    <div style={{ background: `${tint(ACCENT, "08")}`, border: `1px dashed ${tint(ACCENT, "66")}`, borderRadius: 18, padding: "16px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
       <span aria-hidden="true" style={{ fontSize: 18 }}>🔒</span>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
@@ -94,7 +95,7 @@ function LockedCard({ title, detail, signedIn }) {
   );
 }
 
-const card = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "14px 16px" };
+const card = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: "14px 16px", boxShadow: T.shadow };
 
 function EvCard({ r }) {
   return (
@@ -113,7 +114,7 @@ function EvCard({ r }) {
       </div>
       {r.flags?.length > 0 && (
         <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {r.flags.map(f => <span key={f} title={FLAG_TEXT[f] ?? f} style={{ fontSize: 11, color: T.arb, background: `${T.arb}12`, borderRadius: 99, padding: "2px 8px" }}>{f}</span>)}
+          {r.flags.map(f => <span key={f} title={FLAG_TEXT[f] ?? f} style={{ fontSize: 11, color: T.arb, background: `${tint(T.arb, "12")}`, borderRadius: 99, padding: "2px 8px" }}>{f}</span>)}
         </div>
       )}
     </div>
@@ -197,29 +198,18 @@ export default function Sports() {
   const lockedArb = locked?.arb ? sportCount(locked.arb.bySport, sport) : 0;
 
   return (
-    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif", color: T.text }}>
+    <div className="ms-page" style={{ minHeight: "100vh", background: T.bg, fontFamily: T.ui, color: T.text }}>
+      <style dangerouslySetInnerHTML={{ __html: THEME_CSS }} />
       <Head>
         <title>Sports edges · MarketSlap</title>
         <meta name="description" content="Sports prices that beat the sportsbooks' consensus after fees, and arbitrage pairs across Kalshi, Polymarket US, Novig, ProphetX and the sportsbooks." />
       </Head>
-      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", gap: 12 }}>
-          <a href="/" aria-label="MarketSlap home" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-            <img src="/logo-mark.svg" alt="" aria-hidden="true" width={32} height={33} style={{ display: "block" }} />
-            <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: "0.1em", color: T.text }}>MARKET<span className="ms-slap">SLAP</span></span>
-          </a>
-          <span style={{ width: 1, height: 22, background: T.border }} />
-          <span style={{ fontSize: 15, fontWeight: 600 }}>Sports</span>
-          {me?.enabled && (
-            <span style={{ marginLeft: "auto" }}>
-              {me.user ? <a href="/account" style={{ ...signLink, color: T.muted, fontWeight: 500 }}>Account</a> : <a href="/signup?next=/sports" style={{ ...signLink, color: "#fff", background: ACCENT, borderRadius: 8, padding: "7px 14px" }}>Sign up</a>}
-            </span>
-          )}
-        </div>
-      </div>
+      <ShellHeader width={900} right={me?.enabled ? (me.user
+        ? <a href="/account" style={{ ...signLink, color: T.muted, fontWeight: 650 }}>Account</a>
+        : <a href="/signup?next=/sports" style={{ ...signLink, color: T.onAccent, background: ACCENT, borderRadius: 999, padding: "8px 14px" }}>Sign up</a>) : null} />
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px clamp(12px, 4vw, 24px) 32px" }}>
-        <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>Prices that beat the books</h1>
+        <h1 style={{ font: `800 28px/1.1 ${T.display}`, letterSpacing: "-0.02em", margin: "6px 0 8px" }}>Prices that beat the books</h1>
         <p style={{ margin: 0, fontSize: 14, color: T.muted, lineHeight: 1.5 }}>
           Each price is compared with a fair price built from the sportsbooks' consensus, after the venue's fee. Every +EV tool shows this
           number; we also say what it has been worth. Picks like these have won about 2 points less often than the consensus said, so treat
@@ -230,7 +220,7 @@ export default function Sports() {
         </div>
         {error && (/not configured/.test(error)
           ? <div style={{ ...card, marginTop: 12, color: T.muted, fontSize: 14 }}>The sports board is not connected yet.</div>
-          : <div style={{ ...card, marginTop: 12, borderColor: `${T.no}55`, color: T.no, fontSize: 13 }}>The board could not be read ({error}). It refreshes every minute.</div>)}
+          : <div style={{ ...card, marginTop: 12, borderColor: `${tint(T.no, "55")}`, color: T.no, fontSize: 13 }}>The board could not be read ({error}). It refreshes every minute.</div>)}
 
         <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Chip active={tab === "ev"} onClick={() => { setTab("ev"); setShown(60); }}>+EV prices{board ? ` (${rows.length})` : ""}</Chip>
@@ -260,8 +250,8 @@ export default function Sports() {
           {tab === "arb" && locked?.arb && (
             <LockedCard signedIn={!!me?.user}
               title={lockedArb ? `${lockedArb} arbitrage ${lockedArb === 1 ? "pair" : "pairs"} right now` : "No arbitrage right now"}
-              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with Arbs or Pro.`
-                : "Arbs or Pro shows every pair as soon as a scan finds it."} />
+              detail={lockedArb ? `${Object.entries(locked.arb.bySport).filter(([s]) => sport === "all" || s === sport).map(([s, n]) => `${sportName(s)} ${n}`).join(" · ")}. Both legs, stakes and returns come with Pro.`
+                : "Pro shows every pair as soon as a scan finds it."} />
           )}
           {list.slice(0, shown).map((x, i) => tab === "ev" ? <EvCard key={i} r={x} /> : <ArbCard key={i} a={x} />)}
           {list.length > shown && (

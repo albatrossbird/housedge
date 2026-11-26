@@ -455,10 +455,25 @@ migration is `0034` (`payments`). Billing needs accounts on as well, so in
     subscription on its old one: the founding-price lock comes free.
   - The pricing page reads the same file, so it cannot quote a price
     Stripe does not charge.
-- **What is sold (decided 2026-11-11):** Free; **Arbs** $29/month or
-  $249/year; **Pro** (Arbs + +EV, with alerts once built) $49/month or
-  $399/year; a $5 day pass (Pro for 24 hours); and a **$1 trial**: 3 days
-  of Pro that becomes Pro monthly unless cancelled.
+- **What is sold (decided 2026-11-22):** Free, and ONE paid plan, **Pro**:
+  every sports arb and every +EV price (alerts once built), $39/month or
+  $329/year, shown as a founding price that is locked for as long as the
+  member stays subscribed (true by construction, see above). Plus a $5 day
+  pass (Pro for 24 hours) and a **$1 trial**: 3 days of Pro that becomes Pro
+  monthly unless cancelled.
+  - **Why one plan:** competitors tier on speed and coverage (live markets,
+    more books), not on arbs versus +EV, and +EV is the tool we openly say
+    has lost after fees, so charging extra for it put a warning next to an
+    upsell. A higher tier waits for something that costs more to run:
+    alerts, faster scans. $39 over $29 so it reads as a real tool; it still
+    sits far under AVO ($88) and the arb scanners ($80-500).
+  - **The old plans stay in `CATALOG` with `offered: false`**: `arb` ($29
+    arbs-only, briefly sold as "Pro") and `ev`. Checkout refuses them; a
+    profile naming them still reads. The id `pro` is the one plan.
+  - **Names are display only.** Ids (`profiles.plan`, `CATALOG`, Stripe
+    product ids `ms_pro` etc.) never change, so a rename never touches stored
+    data. Stripe names a product only when it creates it: after the first
+    live checkout, rename the product in the Stripe dashboard too.
   - **The trial is a subscription with `trial_period_days`, plus the $1 as
     a one-time line** on the first invoice. Checkout refuses it to any
     customer who has EVER had a subscription (`status=all`), and to a paying
@@ -473,7 +488,7 @@ migration is `0034` (`payments`). Billing needs accounts on as well, so in
     never a profit claim. The `ev` plan stays in `CATALOG` with
     `offered: false` (checkout refuses it) so a profile holding it still
     reads.
-  - **Arbs is sold on pregame arbs**, which stay open minutes to hours and
+  - **Pro is sold on pregame arbs**, which stay open minutes to hours and
     suit a 5-minute scan. The median arb is ~0.5%, so any "covers the month
     in a day" claim needs a bankroll stated beside it and recorded daily
     totals behind it. Never AVO's "5-10% typical arbs".
@@ -561,6 +576,56 @@ Kalshi" is an answer, not a failure.
 unmatched is a demand signal for the matcher. Two found immediately:
 "fed rate" returns 8 markets and 0 matched, and "government shutdown"
 returns 9 across both venues with 0 matched.
+
+### Movers and most traded (`/api/movers`, free, on the home page)
+
+"Today on the markets": the biggest moves and the most money traded over
+about a day, across Kalshi, Polymarket US and polymarket.com.
+`scripts/movers.mjs` runs on the box every 15 minutes
+(`deploy/marketslap-movers.timer`) and writes `movers` (migration 0035);
+`/api/movers` reads it, cached at the edge; `components/Movers.js` draws it.
+Rules live in `lib/movers.js`, pinned by `scripts/movers.test.mjs`.
+
+- **What each venue publishes (checked 2026-11-26).** Kalshi: the bid/ask a
+  day ago and 24h contracts on every market, read by one paced `/events`
+  sweep (104 pages, ~41s; unpaced, page 6 drew a 429). polymarket.com:
+  `oneDayPriceChange` and `volume24hr`, events ordered by 24h volume.
+  **Polymarket US: neither.** Its list has a current price only and `/bbo`
+  an all-time `sharesTraded`, so its day figures are our own readings, and
+  .us rows have no move or volume until the job has run for a day. MOVES:
+  an hourly snapshot (`mover_snapshots`) of every book with a two-sided
+  quote inside 5c, from the list sweep (21,000 of 71,000 open markets,
+  140 pages, ~52s). VOLUME: `/bbo`, which allows about ONE READ A SECOND —
+  60 reads two at a time drew 48 HTTP 429s, Retry-After 8-10s — so each
+  run reads at most 120, paced at 1.1s (this run's biggest .us moves, last
+  run's most traded, the paired legs) into `mover_history`. The price
+  refresh on the same box also reads /bbo; do not raise the budget
+  without measuring both.
+- **The day-ago price is the day-ago MIDPOINT**, not `previous_price`: a
+  market with no trade a day ago reads 0 there, and the first cut was all
+  "0 -> 99" rows that were markets settling.
+- **One row per event**, or one Kalshi strike ladder fills the list.
+- **Moves need $5k traded, traded needs $1k.** At $1k the top moves were
+  Bozeman housing permits; at $5k, Netanyahu, Bitcoin and Aaron Rodgers.
+- **Prices under 3c or over 97c are left out of moves** (1c/99c for
+  traded): the first cut's top moves were finished games and released
+  numbers. A game's end is Kalshi's `expected_expiration_time` (its
+  `close_time` is weeks out) and .com's `gameStartTime` + 4h.
+- **Moves skip markets that end within a day** (games in progress, numbers
+  released this morning); traded keeps them.
+- **Money is dollars on .com and contracts x price on Kalshi and .us**, the
+  comparable figure, stated on the page and never summed across venues.
+- A claim moving on two venues is ONE row (the bigger move leads), the
+  other venues' price and move riding in `also`, linked through `pairs`.
+- A venue whose read did not complete keeps its previous rows and fails
+  the unit.
+
+### One look for free and Pro
+
+The home page, `/sports`, and the account and pricing pages all wear the
+Pro board's theme (`THEME_CSS` in `components/AccountShell.js`): dark by
+default, light on a light device, CSS variables only. `${hex}12` cannot
+tint a variable, so pages use `tint(c, "12")`, a `color-mix`.
 
 ### Embedding is gated per Kalshi series
 

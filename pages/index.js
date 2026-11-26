@@ -8,11 +8,13 @@ import { useRouter } from "next/router";
 import { positionAtSize } from "../lib/fees.js";
 import { positionOnCurve } from "../lib/depthLadder.js";
 import { legsForUsView } from "../lib/venueDisplay.js";
+import { THEME_CSS } from "../components/AccountShell.js";
+import Movers from "../components/Movers.js";
 
 // Brand palette, sampled from the MarketSlap logo artwork rather than
 // eyeballed: the wordmark's two inks and the app-icon tile.
 const BRAND = {
-  ink:   "#0A1226",  // "MARKET"
+  ink:   "var(--fg)",  // "MARKET" — follows the theme, as in the Pro board
   slap:  "#5641D2",  // "SLAP" — the gradient's midpoint; see .ms-slap
   teal:  "#0E7490",  // where the mark's fade lands, = the Kalshi venue colour
   // The dark app-icon ground lives in favicon.svg, which is the only
@@ -46,28 +48,37 @@ const BRAND = {
 // The probability bars. One fill for every venue — see the Row comment.
 // The track is lighter than T.border so the bar itself carries the eye;
 // at 4.8:1 against the track the fill is a shape, not a tint.
-const BAR_FILL  = "#334155";
-const BAR_TRACK = "#EDEFF3";
+const BAR_FILL  = "var(--bar)";
+const BAR_TRACK = "var(--track)";
 
 const VENUE = {
-  kalshi: "#1E293B",   // 14.6:1 — the anchor side of every pair
-  poly:   "#475569",   //  7.6:1 — both .com and .us; the label says which
+  kalshi: "var(--fg)",     // the anchor side of every pair
+  poly:   "var(--muted)",  // both .com and .us; the label says which
 };                     // dE 19 apart, and dE 13 clear of T.muted
 
 // One accent, not two. A second would re-open the ambiguity this split
 // closes.
-const ACCENT = "#5641D2";
+const ACCENT = "var(--accent)";
 
+// THE PRO BOARD'S THEME (components/AccountShell.js THEME_CSS): dark by
+// default, light on a light device. Every colour is a CSS variable so one
+// set of inline styles serves both, and free and Pro read as one product.
 const T = {
-  bg: "#F7F8FA",
-  surface: "#FFFFFF",
-  border: "#E4E7ED",
-  text: "#0F1923",
-  muted: "#6B7280",
-  yes: "#059669",
-  no: "#DC2626",
-  arb: "#D97706",
+  bg: "var(--bg)",
+  surface: "var(--surface)",
+  raised: "var(--raised)",
+  border: "var(--line)",
+  text: "var(--fg)",
+  muted: "var(--muted)",
+  yes: "var(--good)",
+  no: "var(--bad)",
+  arb: "var(--warn)",
 };
+
+// `${hex}12` cannot tint a CSS variable, so a soft fill is a colour-mix.
+// The second argument keeps the old two-hex-digit alpha, so each call
+// site reads as it did.
+const tint = (c, a) => `color-mix(in srgb, ${c} ${Math.round(parseInt(a, 16) / 2.55)}%, transparent)`;
 
 const pct = (v) => `${Math.round(v * 100)}%`;
 // How stale a price is, in words. Deliberately coarse: the underlying
@@ -609,11 +620,11 @@ function MarketCard({ market, pinned, onPin, showTrending = true }) {
     <div style={{
       background: T.surface,
       border: `1px solid ${edge}`,
-      borderRadius: 10, padding: "18px 20px",
+      borderRadius: 20, padding: "18px 20px",
       display: "flex", flexDirection: "column", gap: 14,
-      boxShadow: pinned ? `0 0 0 2px ${ACCENT}26`
-               : isArb ? `0 0 0 1px ${T.arb}22`
-               : "0 1px 3px rgba(0,0,0,0.04)",
+      boxShadow: pinned ? `0 0 0 2px ${tint(ACCENT, "26")}`
+               : isArb ? `0 0 0 1px ${tint(T.arb, "22")}`
+               : "var(--shadow)",
     }}>
       <div>
         <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -872,7 +883,7 @@ function PinnedStrip({ market, onClear }) {
       <div style={{
         flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 12,
         flexWrap: "wrap",
-        border: `1px solid ${ACCENT}55`, background: `${ACCENT}0A`,
+        border: `1px solid ${tint(ACCENT, "55")}`, background: `${tint(ACCENT, "0A")}`,
         borderRadius: 8, padding: "8px 12px",
       }}>
         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: ACCENT }}>PINNED</span>
@@ -913,7 +924,7 @@ function MenuItem({ label, onClick, active, soon }) {
       disabled={!!soon}
       style={{
         width: "100%", textAlign: "left", padding: "11px 16px",
-        background: active ? `${ACCENT}0E` : "transparent",
+        background: active ? `${tint(ACCENT, "0E")}` : "transparent",
         border: "none", borderTop: `1px solid ${T.border}`,
         color: soon ? T.muted : (active ? ACCENT : T.text),
         fontWeight: active ? 700 : 500, fontSize: 14,
@@ -955,9 +966,9 @@ function SearchBox({ query, setQuery, active, marginBottom }) {
         style={{
           width: "100%", boxSizing: "border-box",
           padding: "12px 40px 12px 14px",
-          fontSize: 15, color: T.text, background: T.surface,
-          border: `1px solid ${active ? ACCENT : T.border}`,
-          borderRadius: 10, outline: "none",
+          fontSize: 16, minHeight: 46, color: T.text, background: T.raised,
+          border: `1px solid ${active ? ACCENT : "transparent"}`,
+          borderRadius: 14, outline: "none",
           fontFamily: "inherit",
         }}
       />
@@ -1103,7 +1114,7 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
           <span style={{
             flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
             textTransform: "uppercase", color: ACCENT,
-            background: `${ACCENT}14`, padding: "2px 7px", borderRadius: 99,
+            background: `${tint(ACCENT, "14")}`, padding: "2px 7px", borderRadius: 99,
           }}>Alpha</span>
           <span>Matching is still being tuned, and prices come from a scheduled read. Check the venue before you trade.</span>
         </p>
@@ -1115,6 +1126,10 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
           they can do. On a category tab the order is reversed — they
           already know, so search leads. */}
       <SearchBox query={query} setQuery={setQuery} active={searchMode} marginBottom={26} />
+
+      {/* WHAT HAPPENED TODAY, across all three venues: something new on
+          every visit, which the matched cards below cannot be. Free. */}
+      <Movers />
 
       {/* THE TILES ARE THE FALLBACK, NOT THE FRONT DOOR.
           Each card below now carries its category, its count and its
@@ -1131,7 +1146,7 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
             onClick={() => onCategory(key)}
             style={{
               textAlign: "left", cursor: "pointer", background: T.surface,
-              border: `1px solid ${T.border}`, borderRadius: 10, padding: "14px 16px",
+              border: `1px solid ${T.border}`, borderRadius: 18, padding: "14px 16px",
               display: "flex", flexDirection: "column", gap: 4, transition: "border-color 0.15s",
             }}
           >
@@ -1161,7 +1176,7 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
       </div>
 
       {cards.length === 0 ? (
-        <div style={{ padding: 24, border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, fontSize: 13, color: T.muted, marginBottom: 30 }}>
+        <div style={{ padding: 24, border: `1px solid ${T.border}`, borderRadius: 18, background: T.surface, fontSize: 13, color: T.muted, marginBottom: 30 }}>
           Loading the most traded markets…
         </div>
       ) : (
@@ -1225,7 +1240,7 @@ function HomeView({ data, onCategory, query, setQuery, searchMode }) {
       </div>
 
       {(
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, background: T.surface, overflow: "hidden" }}>
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 18, background: T.surface, overflow: "hidden" }}>
           {rest.map((m, i) => {
             const tab = CATEGORY_OF_CARD[m.category] || m.category;
             return (
@@ -1308,7 +1323,7 @@ function SearchResult({ r }) {
   const matched = r.kind === "matched";
   return (
     <div style={{
-      border: `1px solid ${matched ? `${ACCENT}44` : T.border}`,
+      border: `1px solid ${matched ? `${tint(ACCENT, "44")}` : T.border}`,
       borderRadius: 10, background: T.surface, padding: 14,
       opacity: r.live ? 1 : 0.62,
     }}>
@@ -1316,7 +1331,7 @@ function SearchResult({ r }) {
         <span style={{
           fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase",
           color: matched ? ACCENT : T.muted,
-          background: matched ? `${ACCENT}14` : "transparent",
+          background: matched ? `${tint(ACCENT, "14")}` : "transparent",
           padding: matched ? "2px 7px" : 0, borderRadius: 99,
         }}>
           {matched ? `On ${r.counterparts.length + 1} venues` : `Only on ${r.market.venue}`}
@@ -1617,9 +1632,10 @@ export default function HouseEdge() {
   const searchMode = query.trim().length >= 2;
 
   return (
-    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "var(--ui)", color: T.text }} className="ms-page">
+      <style dangerouslySetInnerHTML={{ __html: THEME_CSS }} />
       {/* Nav */}
-      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
+      <div style={{ background: T.bg, borderBottom: `1px solid ${T.border}`, padding: "0 clamp(12px, 4vw, 24px)", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
           <button
             onClick={goHome}
@@ -1666,7 +1682,7 @@ export default function HouseEdge() {
             style={{
               width: 38, height: 38, borderRadius: 8, flexShrink: 0,
               border: `1px solid ${menuOpen ? ACCENT : T.border}`,
-              background: menuOpen ? `${ACCENT}12` : T.surface,
+              background: menuOpen ? `${tint(ACCENT, "12")}` : T.surface,
               color: menuOpen ? ACCENT : T.text,
               cursor: "pointer", fontSize: 16, lineHeight: 1,
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -1793,7 +1809,7 @@ export default function HouseEdge() {
               style={{
                 padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: `1px solid ${activeCategory === key ? ACCENT : T.border}`,
-                background: activeCategory === key ? `${ACCENT}12` : T.surface,
+                background: activeCategory === key ? `${tint(ACCENT, "12")}` : T.surface,
                 color: activeCategory === key ? ACCENT : T.muted, transition: "all 0.15s",
                 display: "flex", alignItems: "center", gap: 6,
                 opacity: cat.supported ? 1 : 0.5,
@@ -1820,7 +1836,7 @@ export default function HouseEdge() {
                   padding: "5px 12px", borderRadius: 99, fontSize: 12,
                   fontWeight: league === key ? 700 : 500, cursor: "pointer",
                   border: `1px solid ${league === key ? ACCENT : T.border}`,
-                  background: league === key ? `${ACCENT}12` : T.surface,
+                  background: league === key ? `${tint(ACCENT, "12")}` : T.surface,
                   color: league === key ? ACCENT : T.muted, transition: "all 0.15s",
                 }}
               >
@@ -1873,7 +1889,7 @@ export default function HouseEdge() {
               padding: "10px 14px", fontSize: 13, fontWeight: arbOnly ? 700 : 500,
               borderRadius: 8, flexShrink: 0,
               border: `1px solid ${arbOnly ? T.arb : T.border}`,
-              background: arbOnly ? `${T.arb}18` : T.surface,
+              background: arbOnly ? `${tint(T.arb, "18")}` : T.surface,
               color: arbCount === 0 && !arbOnly ? T.muted : (arbOnly ? T.arb : T.text),
               cursor: arbCount === 0 && !arbOnly ? "not-allowed" : "pointer",
               opacity: arbCount === 0 && !arbOnly ? 0.55 : 1,
@@ -1901,7 +1917,7 @@ export default function HouseEdge() {
                   padding: "10px 14px", fontSize: 13, fontWeight: venue === key ? 700 : 500,
                   cursor: "pointer", border: "none",
                   borderLeft: i === 0 ? "none" : `1px solid ${T.border}`,
-                  background: venue === key ? `${ACCENT}14` : "transparent",
+                  background: venue === key ? `${tint(ACCENT, "14")}` : "transparent",
                   color: venue === key ? ACCENT : T.muted,
                   transition: "all 0.15s",
                 }}
@@ -1979,27 +1995,27 @@ export default function HouseEdge() {
         {loading && <Skeleton />}
 
         {unsupported && (
-          <div style={{ padding: "24px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, color: "#92400E", fontSize: 14 }}>
+          <div style={{ padding: "24px", background: "var(--warn-soft)", border: "1px solid var(--line)", borderRadius: 18, color: "var(--warn)", fontSize: 14 }}>
             <strong>{CATEGORIES[activeCategory].label} coming soon</strong> — we're working on adding this category.
           </div>
         )}
 
         {needsEmbed && !loading && (
-          <div style={{ padding: "24px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, color: "#1E40AF", fontSize: 14 }}>
+          <div style={{ padding: "24px", background: "var(--accent-soft)", border: "1px solid var(--line)", borderRadius: 18, color: "var(--fg)", fontSize: 14 }}>
             <strong>No matched markets yet.</strong> The embedding engine needs to run first to match markets across platforms.
             <br /><br />
             <a href="/api/embed" target="_blank" rel="noopener noreferrer"
-              style={{ padding: "8px 16px", background: ACCENT, color: "#fff", borderRadius: 6, textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
+              style={{ padding: "8px 16px", background: ACCENT, color: "var(--on-accent)", borderRadius: 6, textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
               Initialize matching engine ↗
             </a>
           </div>
         )}
 
         {error && (
-          <div style={{ padding: "24px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, color: T.no, fontSize: 14 }}>
+          <div style={{ padding: "24px", background: "var(--bad-soft)", border: "1px solid var(--line)", borderRadius: 18, color: T.no, fontSize: 14 }}>
             <strong>Could not load data:</strong> {error}
             <br /><br />
-            <button onClick={() => loadMarkets(activeCategory)} style={{ padding: "8px 16px", background: T.no, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+            <button onClick={() => loadMarkets(activeCategory)} style={{ padding: "8px 16px", background: T.no, color: "var(--on-accent)", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
               Try again
             </button>
           </div>
@@ -2030,7 +2046,7 @@ export default function HouseEdge() {
                   onClick={() => setVenue(venue === "us" ? "global" : "us")}
                   style={{
                     padding: "9px 16px", border: `1px solid ${ACCENT}`, borderRadius: 8,
-                    background: `${ACCENT}12`, color: ACCENT, cursor: "pointer",
+                    background: `${tint(ACCENT, "12")}`, color: ACCENT, cursor: "pointer",
                     fontSize: 13, fontWeight: 600,
                   }}
                 >
