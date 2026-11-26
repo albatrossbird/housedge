@@ -91,7 +91,7 @@ trader.
 ## Plumbing, 2026-11-26 (no price or P&L read): clears with margin 1
 
 `node scripts/wx-confirmed.mjs --plumbing`. 24 US daily-high series,
-38,256 settled markets. 20 series run all of A and B; Newark, San Diego,
+37,492 settled markets in the windows. 20 series run all of A and B; Newark, San Diego,
 Louisville and Trenton (`KXHIGHTEWR`, `KXHIGHTSAN`, `KXHIGHTSDF`,
 `KXHIGHTTTN`) start in B.
 
