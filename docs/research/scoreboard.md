@@ -23,6 +23,7 @@ linked plan or in `m15.md`. Update this page whenever a status changes.
 | strategy | market | status | key figure | doc |
 |---|---|---|---|---|
 | crypto trend, long or flat | BTC + ETH spot | passed its bar 2026-11-21; weekly paper record | Sharpe 0.81 against 0.56 holding (2021..2026-11), worst drawdown -49% against -76% | `crypto-trend-plan.md` |
+| crypto trend, 15 more coins | AAVE, ADA, BCH, BNB, DOGE, HYPE, LINK, LTC, NEAR, SHIB, SUI, UNI, VVV, WLD, ZEC | passed its bar narrowly 2026-11-27; weekly paper record | Sharpe 0.66 against 0.58 holding; worst drawdown -67% against -87%; loses to holding on most coins alone | `crypto-multi-trend-plan.md` |
 | college basketball leader, 1:00 left | Kalshi game markets | candidate; weekly forward re-score | 2 of 2 won so far; fails at a second loss, passes at 45 straight or at most 1 loss in 60 | `sports-margin-plan.md` |
 
 ## In test
@@ -48,14 +49,10 @@ Nothing at the moment.
 ## Queue (next first)
 
 1. Bracket sums on slow Kalshi markets.
-2. Crypto trend across more coins (SOL, XRP, LINK and the rest of
-   Kalshi's 19 perp coins), long or short through the perps. Added
-   2026-11-27: the one strategy family that has passed here; perps make
-   the short side cheap.
-3. Trend across CME futures: metals, energy, rates (no index futures).
+2. Trend across CME futures: metals, energy, rates (no index futures).
    FX trend failed, so this needs commodities to carry it.
-4. Bitcoin volatility selling on CME options (needs bought data).
-5. Kalshi perp against spot gaps (needs a keyed recorder).
+3. Bitcoin volatility selling on CME options (needs bought data).
+4. Kalshi perp against spot gaps (needs a keyed recorder).
 
 Sources for new ideas: academic papers, venue launches (new markets are
 least efficient early), our own recorders, and what other traders
