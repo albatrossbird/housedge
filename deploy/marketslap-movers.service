@@ -28,9 +28,9 @@ EnvironmentFile=/etc/marketslap/env
 # MemoryMax 3s in (2026-11-27). Measured since, reading them one at a
 # time: peak RSS 385MB without the cap, 285MB with it, same output.
 ExecStart=/usr/bin/node --max-old-space-size=160 scripts/movers.mjs
-# Well under the 15-minute interval, so a hung run is killed before the
-# next one is due rather than piling up.
-TimeoutStartSec=600
+# A normal run is ~5 minutes on the box (2026-11-27). Killed at 13, under
+# the 15-minute interval, so a hung run never piles up.
+TimeoutStartSec=780
 Nice=10
 MemoryMax=400M
 

@@ -597,7 +597,7 @@ Rules live in `lib/movers.js`, pinned by `scripts/movers.test.mjs`.
   quote inside 5c, from the list sweep (21,000 of 71,000 open markets,
   140 pages, ~52s). VOLUME: `/bbo`, which allows about ONE READ A SECOND —
   60 reads two at a time drew 48 HTTP 429s, Retry-After 8-10s — so each
-  run reads at most 120, paced at 1.1s (this run's biggest .us moves, last
+  run reads at most 60 (120 took 346s on the box, ~2.9s a read), paced at 1.1s (this run's biggest .us moves, last
   run's most traded, the paired legs) into `mover_history`. The price
   refresh on the same box also reads /bbo; do not raise the budget
   without measuring both.
