@@ -179,9 +179,9 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
-- **Next tests, in order** (`scoreboard.md` Queue): crypto trend across
-  more coins via the perps (added 2026-11-27);
-  bracket sums on slow markets; trend across CME futures (no index
+- **Next tests, in order** (`scoreboard.md` Queue): bracket sums on slow
+  markets; crypto trend across more coins via the perps (added
+  2026-11-27); trend across CME futures (no index
   futures); bitcoin volatility selling on CME options; Kalshi perp
   against spot gaps.
   Equity and index perps are dropped: no stock-market trading.
