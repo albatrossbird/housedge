@@ -619,6 +619,11 @@ Rules live in `lib/movers.js`, pinned by `scripts/movers.test.mjs`.
   other venues' price and move riding in `also`, linked through `pairs`.
 - A venue whose read did not complete keeps its previous rows and fails
   the unit.
+- **Memory: the venues are read ONE AFTER ANOTHER, under a 160MB heap
+  cap.** The first box run read all three at once and was OOM-killed at
+  the unit's 400MB `MemoryMax` 3s in: the .us event-slug lookup alone
+  peaked at ~300MB on 26MB pages of 500 events, so it pages by 100.
+  Measured peak since: 285MB, ~2 minutes a run.
 
 ### One look for free and Pro
 

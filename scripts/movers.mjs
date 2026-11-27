@@ -121,7 +121,10 @@ async function readCom() {
 async function readUs() {
   const s = Date.now();
   let eventOf = new Map();
-  try { eventOf = await fetchUsEventSlugs(); } catch (e) { warnings.push(`.us event slugs: ${e.message}`); }
+  // 100 events a page, not the default 500: a 500-event page is 26MB of
+  // JSON and peaked this lookup alone at ~300MB, which the box's 400MB
+  // cap on this unit killed on the first run (2026-11-27).
+  try { eventOf = await fetchUsEventSlugs({ pageSize: 100, maxPages: 200 }); } catch (e) { warnings.push(`.us event slugs: ${e.message}`); }
   const pool = new Map();
   const pairedSet = new Set(pairedUs);
   const sweep = await sweepUs({
@@ -195,8 +198,13 @@ async function readUs() {
   };
 }
 
-// One at a time would be ~2 minutes; the three venues share nothing.
-await Promise.all([readKalshi(), readCom(), readUs()]);
+// ONE AFTER ANOTHER, not side by side. Together they peaked past the
+// unit's 400MB cap on a 1GB box shared with the recorders, and the OOM
+// killer ended the first run. Sequential costs about a minute of a
+// 15-minute interval.
+await readCom();
+await readKalshi();
+await readUs();
 
 // ------------------------------------------------------------ rank and link
 
