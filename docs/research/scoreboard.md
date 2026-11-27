@@ -33,6 +33,8 @@ Nothing at the moment.
 
 | strategy | market | result | doc |
 |---|---|---|---|
+| FX carry (top 2 / bottom 2 majors) | spot FX vs USD | Sharpe 0.09, 2010..2026-11 | `fx-plan.md` |
+| FX trend (63 days, 7 majors) | spot FX vs USD | Sharpe -0.27, negative in both halves | `fx-plan.md` |
 | weather outcomes already confirmed | Kalshi daily highs, 24 US cities | 4 tradeable of 9,076 confirmed markets: priced at 97c+ within minutes | `wx-confirmed-plan.md` |
 | late favourites (3:00 left) | Kalshi sports games | -1.32c a contract, t -2.31 | `sports-late-plan.md` |
 | favourites at halftime | Kalshi sports games | -1.18c, t -2.21 | `sports-half-plan.md` |
@@ -45,9 +47,13 @@ Nothing at the moment.
 
 ## Queue (next first)
 
-1. FX trend and carry on the majors (OANDA US).
-2. Bracket sums on slow Kalshi markets.
-3. Trend across CME futures: metals, energy, rates, FX (no index futures).
+1. Bracket sums on slow Kalshi markets.
+2. Crypto trend across more coins (SOL, XRP, LINK and the rest of
+   Kalshi's 19 perp coins), long or short through the perps. Added
+   2026-11-27: the one strategy family that has passed here; perps make
+   the short side cheap.
+3. Trend across CME futures: metals, energy, rates (no index futures).
+   FX trend failed, so this needs commodities to carry it.
 4. Bitcoin volatility selling on CME options (needs bought data).
 5. Kalshi perp against spot gaps (needs a keyed recorder).
 

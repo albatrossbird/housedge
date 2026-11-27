@@ -171,17 +171,20 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   markets offered a print at 97c or less after a 10-minute delay; 88 did
   in the first 10 minutes. It is a speed race, too small to chase.
   Scoreboard of every strategy: `scoreboard.md`.
+- FX trend and carry on the majors (`fx-plan.md`, 2026-11-27): both
+  FAIL over 2010..2026-11. Carry Sharpe 0.09 (top 2 long, bottom 2
+  short, monthly). Trend -0.27 (63 days, all seven), negative in both
+  halves. Both worked better in 1999-2009 (carry 0.35).
 
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
-- **Next tests, in order** (`scoreboard.md` Queue): FX trend and carry
-  on the majors;
+- **Next tests, in order** (`scoreboard.md` Queue): crypto trend across
+  more coins via the perps (added 2026-11-27);
   bracket sums on slow markets; trend across CME futures (no index
   futures); bitcoin volatility selling on CME options; Kalshi perp
   against spot gaps.
-  Equity and index perps are dropped: no stock-market trading. (Late favourites in sports, the first,
-  FAILED 2026-11-18; see Done.)
+  Equity and index perps are dropped: no stock-market trading.
 - **Quoting a liquidity-reward market only until its outcome starts to
   arrive** (from the market-making study's FAIL): untested. Knowing
   when to stop is the whole edge; it needs its own plan.

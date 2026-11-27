@@ -82,3 +82,46 @@ account through the trader.
 - Fills at the noon rate.
 - That a well-known effect persists. Carry in particular crashes in
   risk-off weeks.
+
+## Result, 2026-11-27: both FAIL. FX trend and carry on the majors stop.
+
+`node scripts/fx-trend-carry.mjs --score` (public FRED series).
+
+**Plumbing clears.** 6,993 common days, 1999-01-04..2026-11-20. Every
+scored day has a rate for all seven currencies and the US. The three
+daily moves over 8% are real events: the franc's cap on 2011-09-06 and
+its removal on 2015-01-15 (+13.9%), and AUD on 2008-10-14. Fixed before
+scoring: FRED resets requests that carry Node's default user agent, so
+the fetch sends a plain one.
+
+| 2010-01-01..2026-11-20, 1x gross | Sharpe | a year | worst drawdown |
+|---|---|---|---|
+| **carry** (top 2 long, bottom 2 short) | **0.09** | 0.31% | -10.3% |
+| carry, 2010-2017 | 0.06 | 0.20% | -10.3% |
+| carry, 2018..2026-11 | 0.14 | 0.42% | -6.5% |
+| **trend** (63 days, all seven) | **-0.27** | -1.63% | -33.4% |
+| trend, 2010-2017 | -0.12 | -0.84% | -17.6% |
+| trend, 2018..2026-11 | -0.43 | -2.33% | -23.9% |
+
+- **Carry:** Sharpe 0.09 against 0.5. It is positive in both halves but
+  barely above zero after costs.
+- **Trend:** loses in both halves.
+
+Reference rows (never a second chance):
+- **The papers' era is where these lived.** 1999-2009: carry 0.35, trend
+  0.06.
+- **Carry with 1 or 3 per side:** 0.03 and -0.02.
+- **Trend lookbacks:**
+  - 21 days: -0.55.
+  - 126 days: -0.35.
+  - 252 days: -0.21.
+- **Costs doubled:** carry -0.02, trend -0.47.
+- **Half and half:** -0.17.
+- **Trend per currency:**
+  - JPY: 0.35, the only positive one of note.
+  - AUD and NZD: about -0.4, with drawdowns over 60%.
+
+No reference row passes alone, so there is no candidate. A US retail
+trader cannot harvest either of these effects on the majors since 2010.
+The same trend rule that passed on crypto (`crypto-trend-plan.md`) loses
+on currencies, which trend far less.
