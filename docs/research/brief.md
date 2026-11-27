@@ -175,13 +175,18 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   FAIL over 2010..2026-11. Carry Sharpe 0.09 (top 2 long, bottom 2
   short, monthly). Trend -0.27 (63 days, all seven), negative in both
   halves. Both worked better in 1999-2009 (carry 0.35).
+- Crypto trend across 15 more coins (`crypto-multi-trend-plan.md`,
+  2026-11-27): PASS on its bar, narrowly. Sharpe 0.66 against 0.58
+  equal-weight holding, worst drawdown -67% against -87%. Second half
+  0.60 against holding's 0.62, and below holding on most coins alone.
+  The rule mainly sits out crashes. BTC, ETH and SOL were left out
+  (already read). Paper record weekly.
 
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
 - **Next tests, in order** (`scoreboard.md` Queue): bracket sums on slow
-  markets; crypto trend across more coins via the perps (added
-  2026-11-27); trend across CME futures (no index
+  markets; trend across CME futures (no index
   futures); bitcoin volatility selling on CME options; Kalshi perp
   against spot gaps.
   Equity and index perps are dropped: no stock-market trading.
