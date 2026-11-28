@@ -141,6 +141,38 @@ Checking twice as often changes when the rule buys, not what it pays
 for a side that wins 71% of the time, so it is not re-run. Nothing goes
 to the trader.
 
-Reference rows (their own month, the bands, distance, move, by minute)
-are still running. They are recorded below when they finish, and they
-cannot change the verdict.
+## Reference rows (never a second chance)
+
+| row | trades | won | per contract | t |
+|---|---|---|---|---|
+| **their month, 10-29..11-27 (in-sample)** | 725 | 73.8% | +2.33c | 1.80 |
+| no cooldown | 1,658 | 71.8% | -0.34c | -0.39 |
+| band 5-95c (their best) | 2,325 | 82.9% | -1.72c | -2.87 |
+| same, their month | 1,259 | 84.3% | +0.27c | 0.32 |
+| band 32-95c | 2,325 | 82.9% | -2.05c | -3.43 |
+| band 35-95c | 2,325 | 82.9% | -2.12c | -3.54 |
+| band 5-78c | 1,210 | 69.2% | -0.43c | -0.40 |
+| same, their month | 678 | 71.8% | +2.94c | 2.16 |
+| band 5-80c | 1,284 | 70.7% | -0.63c | -0.61 |
+| same, their month | 726 | 73.7% | +3.00c | 2.31 |
+| distance $0 | 1,581 | 66.9% | -1.66c | -2.00 |
+| distance $44 | 801 | 74.4% | +0.39c | 0.27 |
+| move 0.01% | 1,402 | 70.8% | -1.37c | -1.39 |
+| move 0.04% | 1,075 | 71.8% | -0.08c | -0.07 |
+| first qualifying minute only | 1,172 | 71.2% | -0.96c | -0.91 |
+
+By entry minute (primary rule): 5 min out -0.17c (707), 4 min -4.47c
+(285), 3 min -0.26c (159), 2 min -1.33c (108), 1 min -5.01c (25).
+
+- **Their month is positive in our data too** (+2.33c, t 1.80), so the
+  replication is sound. It is the month that differs, not the reading.
+- **No variant is positive in Sep-Oct except distance $44**, at +0.39c
+  and t 0.27, which is noise. Their best band, 5-95c, is the worst
+  outside their month (t -2.87). Picking a band on one month fitted that
+  month.
+- Without the cooldown, Sep-Oct is -0.34c: the cooldown cost a cent a
+  contract there.
+
+Kalshi requests: 57,569, of which 1,300 were refused and retried. A
+request still refused after 8 tries would have stopped the run, so no
+window is missing. 221 minutes.
