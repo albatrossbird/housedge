@@ -34,6 +34,7 @@ Nothing at the moment.
 
 | strategy | market | result | doc |
 |---|---|---|---|
+| a published 15-minute rule with a cooldown after losses | Kalshi BTC 15-minute | -1.33c a contract, t -1.28 on 1,284 trades (Sep-Oct); the skipped trades did better | `cooldown-plan.md` |
 | FX carry (top 2 / bottom 2 majors) | spot FX vs USD | Sharpe 0.09, 2010..2026-11 | `fx-plan.md` |
 | FX trend (63 days, 7 majors) | spot FX vs USD | Sharpe -0.27, negative in both halves | `fx-plan.md` |
 | weather outcomes already confirmed | Kalshi daily highs, 24 US cities | 4 tradeable of 9,076 confirmed markets: priced at 97c+ within minutes | `wx-confirmed-plan.md` |
