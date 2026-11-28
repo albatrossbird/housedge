@@ -111,3 +111,36 @@ above.
 **Added reference rows:**
 - Whether the $25 kill switch would have fired in our period.
 - Their top variants' bands: 5-95c, 32-95c, 35-95c, 5-78c and 5-80c.
+
+## Result, 2026-11-28: FAIL, and the cooldown is dropped
+
+**The rule (primary period, 2026-09-01..10-28): FAIL.**
+
+| | trades | won | per contract | t |
+|---|---|---|---|---|
+| rule with cooldown | 1,284 | 70.7% | -1.33c | -1.28 |
+| first half (to 09-29) | 685 | 70.4% | -1.25c | -0.98 |
+| second half (09-30..10-28) | 599 | 71.1% | -1.42c | -0.84 |
+
+- It wins 71% of the time and pays about 71c a contract, so it loses the
+  fee and a little more. It loses in both halves.
+- **The $25 kill switch would have fired on 2026-09-06**, the sixth day.
+  The period ended at -$85.17 at 5 contracts.
+
+**The cooldown: DROP.** The 374 trades it skipped made **+3.03c** a
+contract (t 1.65): +1.56c in the first half, +4.81c in the second. They
+did better than the trades it kept, in both halves. Sitting out after a
+loss removed the better trades, not the worse ones.
+
+Plumbing cleared: 8,344 of 8,448 windows settled, Coinbase minute closes
+for 99.99% of decision minutes, |Coinbase - strike| at the open p50
+$10.34 and p90 $31.94.
+
+Checks were once a minute (the description says every 30 seconds).
+Checking twice as often changes when the rule buys, not what it pays
+for a side that wins 71% of the time, so it is not re-run. Nothing goes
+to the trader.
+
+Reference rows (their own month, the bands, distance, move, by minute)
+are still running. They are recorded below when they finish, and they
+cannot change the verdict.

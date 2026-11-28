@@ -182,6 +182,14 @@ halves. Adding size or trades stays at t 2. See `restart-plan.md`.
   The rule mainly sits out crashes. BTC, ETH and SOL were left out
   (already read). Paper record weekly.
 
+- A published KXBTC15M rule with a three-window cooldown after a loss
+  (`cooldown-plan.md`, 2026-11-28): FAIL. Coinbase $22 past the strike
+  with a 0.02% 5-minute move, 32-80c, last 5 minutes. On Sep-Oct, the
+  months its published variants never saw: -1.33c a contract at t
+  -1.28 on 1,284 trades, negative in both halves. Its $25 kill switch
+  fires on day six. The cooldown is dropped: the trades it skipped did
+  better (+3.03c) than the ones it kept.
+
 **Candidates, not started**
 - **College basketball, 1:00 left, lead >= 6, 50-95c**: forward
   record running weekly from 2026-11-18 (`sports-margin-plan.md`).
