@@ -69,3 +69,45 @@ only if it is not the same trades.
 - That Coinbase's minute close is what a live feed shows at that moment.
   The index that settles the market is BRTI, not Coinbase.
 - That the poster's period behaves like ours.
+
+## Amendment, 2026-11-28, before any result was read
+
+The user found the rule's own published description, with variants.
+The first scoring run was stopped and its output was not read. Where the
+description is more exact than the Reddit post, it replaces our reading
+above.
+
+**The rule, from its description:**
+- **Entry window:** checks every 30 seconds, and enters only with
+  **between 60 seconds and 5 minutes to expiry**.
+- **YES:** buy 5 contracts when flat, the **YES ask is 32-80c**, the
+  spot gap from strike (Coinbase minus strike) is at least +$22, and the
+  Coinbase 5-minute change is at least +0.02%.
+- **NO:** the mirror. NO ask 32-80c, gap at most -$22, change at most
+  -0.02%.
+- **Orders:** immediate-or-cancel, one per market.
+- **Cooldown:** skip while the last settled traded window lost money and
+  fewer than three windows have finished since that trade.
+- **Kill switch:** a $25 total loss halts the run.
+- **Their backtest:** 2026-10-29 to 2026-11-27. Their ten-plus variants
+  differ only in the price floor and ceiling, all picked on that month.
+  Best: 5-95c, +$537.29, 83% won.
+
+**Our test, amended:**
+- **Checks:** at the minute closes 5, 4, 3, 2 and 1 minute before
+  expiry. Coinbase's public candles are one-minute, so this is half the
+  description's 30-second checks.
+- **Entry:** the first taker print in the next 60 seconds that buys the
+  side at 32-80c stands in for the ask they would have hit.
+- **Size:** 5 contracts.
+- **Primary period: 2026-09-01 to 2026-10-28,** the months their
+  variants never saw. Halves split at 2026-09-30.
+- **Their own month** (2026-10-29..11-27) is printed as reference only.
+  It is in-sample for them.
+- **The bar is unchanged:** t >= 2 with 200+ trades, positive in both
+  halves. The cooldown is judged on the skip-rule bar within the primary
+  period.
+
+**Added reference rows:**
+- Whether the $25 kill switch would have fired in our period.
+- Their top variants' bands: 5-95c, 32-95c, 35-95c, 5-78c and 5-80c.
